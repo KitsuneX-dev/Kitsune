@@ -1,0 +1,41 @@
+# ── Python ──────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# ── Virtual environments ─────────────────────────────────────────
+venv/
+.venv/
+env/
+ENV/
+
+# ── Kitsune runtime data ─────────────────────────────────────────
+*.session
+*.session-journal
+*.db
+*.db-wal
+*.db-shm
+kitsune-*.json
+config.toml          # contains secrets — never commit!
+*.log
+
+# ── IDE ──────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# ── Type checking / linting ──────────────────────────────────────
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+htmlcov/
+.coverage

@@ -1,0 +1,20 @@
+# Kitsune Userbot — German langpack
+# © Yushi (@Mikasu32)
+
+started: "🦊 Kitsune gestartet"
+stopped: "🦊 Kitsune gestoppt"
+restarting: "🔄 Neustart..."
+unknown_error: "❌ Unbekannter Fehler"
+flood_wait: "⏳ Warte {seconds} Sek."
+not_authorized: "❌ Nicht autorisiert"
+no_permission: "🚫 Kein Zugriff"
+module_loaded: "✅ Modul {name} geladen"
+module_unloaded: "✅ Modul {name} entladen"
+module_not_found: "❌ Modul {name} nicht gefunden"
+module_error: "❌ Fehler in Modul {name}"
+db_saved: "💾 Datenbank gespeichert"
+db_error: "❌ Datenbankfehler"
+update_checking: "🔍 Suche nach Updates..."
+update_available: "⬆️ Update verfügbar"
+update_done: "✅ Update installiert"
+up_to_date: "✅ Bereits aktuell"
