@@ -178,6 +178,7 @@ class KitsuneLogsHandler(logging.Handler):
         self._task: asyncio.Task | None = None
         self._send_lock = asyncio.Lock()
 
+        self.lvl: int = logging.NOTSET
         self.tg_level: int = logging.INFO
         self.force_send_all: bool = False
         self.ignore_common: bool = False
