@@ -26,17 +26,17 @@
 
 ### Termux (Android)
 ```bash
-curl -s https://raw.githubusercontent.com/Mikasu32/Kitsune/main/termux.sh | bash
+curl -s https://raw.githubusercontent.com/KitsuneX-dev/Kitsune/main/termux.sh | bash
 ```
 
 ### Ubuntu / Debian
 ```bash
-curl -s https://raw.githubusercontent.com/Mikasu32/Kitsune/main/install.sh | bash
+curl -s https://raw.githubusercontent.com/KitsuneX-dev/Kitsune/main/install.sh | bash
 ```
 
 ### Docker
 ```bash
-git clone https://github.com/Mikasu32/Kitsune
+git clone https://github.com/KitsuneX-dev/Kitsune
 cd Kitsune
 # Отредактируй config.toml
 docker build -t kitsune .
@@ -45,7 +45,7 @@ docker run -d --name kitsune -v $(pwd)/data:/data kitsune
 
 ### Вручную
 ```bash
-git clone https://github.com/Mikasu32/Kitsune
+git clone https://github.com/KitsuneX-dev/Kitsune
 cd Kitsune
 python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
