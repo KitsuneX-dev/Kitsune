@@ -1,6 +1,7 @@
 """
 Kitsune Web Setup — first-run configuration interface.
-Uses client.start() like Hikka does, which handles all auth internally.
+Proxy injection pattern ported from Hikka: proxy/connection passed into
+SetupServer constructor, used in _get_client() — same as Hikka's Web class.
 """
 
 # © Yushi (@Mikasu32), 2024-2025
@@ -85,6 +86,27 @@ _HTML = """<!DOCTYPE html>
   .done-title { font-size: 1.2rem; font-weight: 700; color: #86efac; margin-bottom: 6px; }
   .done-sub { font-size: 0.85rem; color: #555; }
   .done-info { margin-top: 20px; padding: 12px 16px; background: #0d0d1a; border-radius: 10px; font-size: 0.83rem; color: #888; line-height: 1.8; text-align: left; }
+  .proxy-toggle {
+    margin-top: 18px; font-size: 0.82rem; color: #7c3aed;
+    cursor: pointer; user-select: none; display: inline-flex; align-items: center; gap: 5px;
+  }
+  .proxy-toggle:hover { color: #a78bfa; }
+  .proxy-block {
+    display: none; margin-top: 12px; padding: 14px;
+    background: #0d0d1a; border: 1px solid #7c3aed33; border-radius: 10px;
+  }
+  .proxy-block.open { display: block; }
+  .proxy-type-row { display: flex; gap: 8px; margin-bottom: 10px; }
+  .proxy-type-btn {
+    flex: 1; padding: 7px; margin-top: 0;
+    background: #1a1a30; border: 1px solid #7c3aed44;
+    border-radius: 8px; color: #a78bfa; font-size: 0.8rem;
+    font-weight: 600; cursor: pointer; transition: all .2s;
+  }
+  .proxy-type-btn.selected { background: #7c3aed; border-color: #7c3aed; color: #fff; }
+  .proxy-row { display: flex; gap: 8px; }
+  .proxy-row input:first-child { flex: 3; }
+  .proxy-row input:last-child { flex: 1; }
 </style>
 </head>
 <body>
@@ -109,6 +131,30 @@ _HTML = """<!DOCTYPE html>
     <label>Номер телефона</label>
     <input type="tel" id="phone" placeholder="+79001234567">
     <p class="hint">В международном формате, с символом +</p>
+
+    <span class="proxy-toggle" onclick="toggleProxy()">▶ Настройки прокси (если Telegram недоступен)</span>
+    <div class="proxy-block" id="proxy_block">
+      <div class="proxy-type-row">
+        <button class="proxy-type-btn selected" id="pt_MTPROTO" onclick="selectProxyType('MTPROTO')">MTProto</button>
+        <button class="proxy-type-btn" id="pt_SOCKS5" onclick="selectProxyType('SOCKS5')">SOCKS5</button>
+        <button class="proxy-type-btn" id="pt_HTTP" onclick="selectProxyType('HTTP')">HTTP</button>
+      </div>
+      <div class="proxy-row">
+        <input type="text" id="proxy_host" placeholder="Хост (напр. tg.vpnspacev.com)">
+        <input type="number" id="proxy_port" placeholder="443">
+      </div>
+      <div id="proxy_secret_wrap">
+        <label>Секрет (только для MTProto)</label>
+        <input type="text" id="proxy_secret" placeholder="bc184fc14b62b9b1dc5f34edf9476421">
+      </div>
+      <div id="proxy_auth_wrap" style="display:none">
+        <label>Логин (необязательно)</label>
+        <input type="text" id="proxy_user" placeholder="username">
+        <label>Пароль (необязательно)</label>
+        <input type="password" id="proxy_pass" placeholder="••••••••">
+      </div>
+    </div>
+
     <div class="error" id="err1"></div>
     <button id="btn1" onclick="sendCode()">Получить код →</button>
   </div>
@@ -144,6 +190,24 @@ _HTML = """<!DOCTYPE html>
 </div>
 
 <script>
+let proxyType = 'MTPROTO';
+
+function toggleProxy() {
+  const block = document.getElementById('proxy_block');
+  const toggle = document.querySelector('.proxy-toggle');
+  const open = block.classList.toggle('open');
+  toggle.textContent = (open ? '▼' : '▶') + ' Настройки прокси (если Telegram недоступен)';
+}
+
+function selectProxyType(type) {
+  proxyType = type;
+  ['MTPROTO','SOCKS5','HTTP'].forEach(t => {
+    document.getElementById('pt_' + t).classList.toggle('selected', t === type);
+  });
+  document.getElementById('proxy_secret_wrap').style.display = type === 'MTPROTO' ? 'block' : 'none';
+  document.getElementById('proxy_auth_wrap').style.display  = type !== 'MTPROTO' ? 'block' : 'none';
+}
+
 function setDots(active) {
   for (let i = 1; i <= 3; i++) {
     const d = document.getElementById('d' + i);
@@ -176,6 +240,20 @@ async function post(url, data) {
   return r.json();
 }
 
+function getProxy() {
+  const host = document.getElementById('proxy_host').value.trim();
+  const port = document.getElementById('proxy_port').value.trim();
+  if (!host || !port) return null;
+  const p = { type: proxyType, host, port: parseInt(port) };
+  if (proxyType === 'MTPROTO') {
+    p.secret = document.getElementById('proxy_secret').value.trim();
+  } else {
+    p.username = document.getElementById('proxy_user').value.trim() || null;
+    p.password = document.getElementById('proxy_pass').value || null;
+  }
+  return p;
+}
+
 async function sendCode() {
   const api_id = document.getElementById('api_id').value.trim();
   const api_hash = document.getElementById('api_hash').value.trim();
@@ -183,7 +261,8 @@ async function sendCode() {
   if (!api_id || !api_hash) { showErr(1, 'Заполни API ID и API Hash'); return; }
   if (!phone) { showErr(1, 'Введи номер телефона'); return; }
   setBtn('btn1', 'Отправляем код…', true);
-  const res = await post('/api/sendcode', { api_id: parseInt(api_id), api_hash, phone });
+  const proxy = getProxy();
+  const res = await post('/api/sendcode', { api_id: parseInt(api_id), api_hash, phone, proxy });
   setBtn('btn1', 'Получить код →', false);
   if (res.ok) { showErr(1, ''); show(2); }
   else showErr(1, res.error || 'Ошибка');
@@ -215,21 +294,66 @@ async function check2fa() {
 
 
 class SetupServer:
-    def __init__(self, save_config_fn: Callable, get_config_fn: Callable) -> None:
+    """
+    Hikka-style: proxy and connection are injected from outside (main.py),
+    exactly like Hikka's Web(proxy=..., connection=...) constructor.
+    _get_client() uses self.proxy / self.connection — no config re-reading.
+    """
+
+    def __init__(
+        self,
+        save_config_fn: Callable,
+        get_config_fn: Callable,
+        proxy: Any = None,
+        connection: Any = None,
+    ) -> None:
         self._save_config = save_config_fn
-        self._get_config = get_config_fn
-        self._client: Any = None
-        self._phone: str | None = None
+        self._get_config  = get_config_fn
+        # Injected from main.py — same pattern as Hikka
+        self.proxy      = proxy
+        self.connection = connection
+
+        self._api_id:   int       = 0
+        self._api_hash: str       = ""
+        self._client:   Any       = None
+        self._phone:    str | None = None
         self._phone_hash: str | None = None
-        self._done = asyncio.Event()
+        self._done   = asyncio.Event()
         self._runner: Any = None
 
+    # ── Hikka pattern: single place that builds the Telethon client ───────────
+    def _get_client(self) -> Any:
+        from ..tl_cache import KitsuneTelegramClient
+        from telethon.sessions import MemorySession
+
+        kwargs: dict = dict(
+            api_id=self._api_id,
+            api_hash=self._api_hash,
+            connection_retries=None,
+            device_model="Kitsune Userbot",
+            system_version="Windows 10",
+            app_version="1.0.0",
+            lang_code="en",
+            system_lang_code="en-US",
+        )
+        if self.proxy is not None:
+            kwargs["proxy"] = self.proxy
+        if self.connection is not None:
+            kwargs["connection"] = self.connection
+
+        logger.info(
+            "setup: _get_client proxy=%s connection=%s",
+            self.proxy, self.connection,
+        )
+        return KitsuneTelegramClient(MemorySession(), **kwargs)
+
+    # ── Web server ────────────────────────────────────────────────────────────
     async def start(self, host: str = "0.0.0.0", port: int = 8080) -> None:
         app = web.Application()
-        app.router.add_get("/", self._index)
+        app.router.add_get("/",              self._index)
         app.router.add_post("/api/sendcode", self._api_sendcode)
-        app.router.add_post("/api/signin", self._api_signin)
-        app.router.add_post("/api/2fa", self._api_2fa)
+        app.router.add_post("/api/signin",   self._api_signin)
+        app.router.add_post("/api/2fa",      self._api_2fa)
         self._runner = web.AppRunner(app)
         await self._runner.setup()
         site = web.TCPSite(self._runner, host, port)
@@ -254,64 +378,74 @@ class SetupServer:
     async def _index(self, _: web.Request) -> web.Response:
         return web.Response(text=_HTML, content_type="text/html")
 
+    # ── /api/sendcode ─────────────────────────────────────────────────────────
     async def _api_sendcode(self, request: web.Request) -> web.Response:
         try:
             data = await request.json()
-            api_id   = int(data["api_id"])
-            api_hash = str(data["api_hash"]).strip()
-            self._phone = str(data["phone"]).strip()
+            self._api_id   = int(data["api_id"])
+            self._api_hash = str(data["api_hash"]).strip()
+            self._phone    = str(data["phone"]).strip()
 
-            # Save config
+            # Save API credentials
             cfg = self._get_config()
-            cfg["api_id"]   = api_id
-            cfg["api_hash"] = api_hash
+            cfg["api_id"]   = self._api_id
+            cfg["api_hash"] = self._api_hash
+
+            # If the user filled proxy in the web form — override injected proxy
+            form_proxy = data.get("proxy")
+            if form_proxy and form_proxy.get("host"):
+                ptype = str(form_proxy.get("type", "MTPROTO")).upper()
+                host  = form_proxy["host"]
+                port  = int(form_proxy["port"])
+                if ptype == "MTPROTO":
+                    from telethon.network.connection import ConnectionTcpMTProxyRandomizedIntermediate
+                    self.proxy      = (host, port, form_proxy.get("secret", ""))
+                    self.connection = ConnectionTcpMTProxyRandomizedIntermediate
+                    logger.info("setup: form MTProto proxy → %s:%s", host, port)
+                elif ptype == "SOCKS5":
+                    import socks
+                    self.proxy      = (socks.SOCKS5, host, port, True,
+                                       form_proxy.get("username") or None,
+                                       form_proxy.get("password") or None)
+                    self.connection = None
+                    logger.info("setup: form SOCKS5 proxy → %s:%s", host, port)
+                elif ptype == "HTTP":
+                    import socks
+                    self.proxy      = (socks.HTTP, host, port, True,
+                                       form_proxy.get("username") or None,
+                                       form_proxy.get("password") or None)
+                    self.connection = None
+                    logger.info("setup: form HTTP proxy → %s:%s", host, port)
+                cfg["proxy"] = form_proxy
+
             self._save_config(cfg)
 
-            # Build client like Hikka does — MemorySession first
-            from ..tl_cache import KitsuneTelegramClient
-            from telethon.sessions import MemorySession
-            from pathlib import Path
-
-            DATA_DIR = Path.home() / ".kitsune"
-            DATA_DIR.mkdir(parents=True, exist_ok=True)
-
-            self._client = KitsuneTelegramClient(
-                MemorySession(),
-                api_id=api_id,
-                api_hash=api_hash,
-                connection_retries=5,
-                retry_delay=3,
-                device_model="Kitsune Userbot",
-                system_version="Windows 10",
-                app_version="1.0.0",
-                lang_code="en",
-                system_lang_code="en-US",
-            )
-
+            # Build client with injected (or overridden) proxy
+            self._client = self._get_client()
             await asyncio.wait_for(self._client.connect(), timeout=30)
             result = await self._client.send_code_request(self._phone)
             self._phone_hash = result.phone_code_hash
+            logger.info("setup: code sent to %s", self._phone)
 
             return web.json_response({"ok": True})
+
         except asyncio.TimeoutError:
             self._client = None
-            return self._err("Не удалось подключиться к Telegram. Проверь интернет-соединение.")
+            return self._err("Не удалось подключиться к Telegram. Настрой прокси и попробуй снова.")
         except Exception as exc:
             logger.exception("setup: /api/sendcode error")
             return self._err(str(exc))
 
+    # ── /api/signin ───────────────────────────────────────────────────────────
     async def _api_signin(self, request: web.Request) -> web.Response:
         try:
             data = await request.json()
             code = str(data["code"]).strip()
             from telethon.errors import SessionPasswordNeededError
-            from telethon.sessions import SQLiteSession
-            from pathlib import Path
             try:
                 me = await self._client.sign_in(
                     self._phone, code, phone_code_hash=self._phone_hash
                 )
-                # Save session to disk like Hikka
                 await self._save_session(me)
                 self._done.set()
                 return web.json_response({"ok": True, "message": f"👤 {me.first_name}  |  id: {me.id}"})
@@ -321,6 +455,7 @@ class SetupServer:
             logger.exception("setup: /api/signin error")
             return self._err(str(exc))
 
+    # ── /api/2fa ──────────────────────────────────────────────────────────────
     async def _api_2fa(self, request: web.Request) -> web.Response:
         try:
             data = await request.json()
@@ -332,8 +467,8 @@ class SetupServer:
             logger.exception("setup: /api/2fa error")
             return self._err(str(exc))
 
+    # ── Session save — same as Hikka's save_client_session ───────────────────
     async def _save_session(self, me: Any) -> None:
-        """Save session to SQLiteSession like Hikka does"""
         from telethon.sessions import SQLiteSession
         from pathlib import Path
         DATA_DIR = Path.home() / ".kitsune"
@@ -346,8 +481,9 @@ class SetupServer:
         session.auth_key = self._client.session.auth_key
         session.save()
         self._client.session = session
-        self._client.tg_id = me.id
-        self._client.tg_me = me
+        self._client.tg_id   = me.id
+        self._client.tg_me   = me
+        logger.info("setup: session saved for %s (id=%d)", me.first_name, me.id)
 
     @staticmethod
     def _err(msg: str) -> web.Response:
