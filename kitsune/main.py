@@ -182,7 +182,7 @@ async def _startup(args: argparse.Namespace) -> None:
     if need_setup:
         from .web.setup import SetupServer
         web_port = int(cfg.get("web_port", 8080))
-        setup = SetupServer(save_config_fn=_save_config, get_config_fn=_load_raw_config)
+        setup = SetupServer(save_config_fn=_save_config, get_config_fn=_load_raw_config, proxy=proxy, connection=connection)
         await setup.start(host="0.0.0.0", port=web_port)
         await setup.wait_done()
         client = setup.get_client()
@@ -263,7 +263,7 @@ async def _startup(args: argparse.Namespace) -> None:
             logger.info("main: session invalid, launching web setup")
             from .web.setup import SetupServer
             web_port = int(cfg.get("web_port", 8080))
-            setup = SetupServer(save_config_fn=_save_config, get_config_fn=_load_raw_config)
+            setup = SetupServer(save_config_fn=_save_config, get_config_fn=_load_raw_config, proxy=proxy, connection=connection)
             await setup.start(host="0.0.0.0", port=web_port)
             await setup.wait_done()
             client = setup.get_client()
