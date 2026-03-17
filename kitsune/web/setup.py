@@ -393,6 +393,13 @@ class SetupServer:
             DATA_DIR.mkdir(parents=True, exist_ok=True)
 
             proxy = _build_proxy(cfg.get("proxy") or {})
+            proxy_type = str((cfg.get("proxy") or {}).get("type", "")).upper()
+
+            extra = {}
+            if proxy_type == "MTPROTO":
+                from telethon.network import connection as tl_conn
+                extra["connection"] = tl_conn.ConnectionTcpMTProxyRandomizedIntermediate
+
             self._client = KitsuneTelegramClient(
                 str(DATA_DIR / "kitsune"),
                 api_id=api_id,
@@ -400,6 +407,7 @@ class SetupServer:
                 connection_retries=5,
                 retry_delay=3,
                 proxy=proxy,
+                **extra,
             )
 
             try:
@@ -472,12 +480,18 @@ class SetupServer:
 def _build_proxy(proxy_cfg: dict) -> tuple | None:
     if not proxy_cfg.get("host") or not proxy_cfg.get("port"):
         return None
+    ptype = str(proxy_cfg.get("type", "SOCKS5")).upper()
+    # MTProto proxy — special Telegram protocol, no PySocks needed
+    if ptype == "MTPROTO":
+        secret = proxy_cfg.get("secret", "00000000000000000000000000000000")
+        return (str(proxy_cfg["host"]), int(proxy_cfg["port"]), secret)
+    # SOCKS4/5/HTTP
     try:
         import socks as _socks
         _map = {"SOCKS5": _socks.SOCKS5, "SOCKS4": _socks.SOCKS4, "HTTP": _socks.HTTP}
-        ptype = _map.get(str(proxy_cfg.get("type", "SOCKS5")).upper(), _socks.SOCKS5)
+        pt = _map.get(ptype, _socks.SOCKS5)
         return (
-            ptype,
+            pt,
             str(proxy_cfg["host"]),
             int(proxy_cfg["port"]),
             True,
