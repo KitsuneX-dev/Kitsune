@@ -198,26 +198,35 @@ async def _startup(args: argparse.Namespace) -> None:
         # Normal start — build client from config
         proxy_cfg = cfg.get("proxy") or {}
         proxy = None
+        extra = {}
         if proxy_cfg.get("host") and proxy_cfg.get("port"):
-            try:
-                import socks as _socks
-                _type_map = {
-                    "SOCKS5": _socks.SOCKS5,
-                    "SOCKS4": _socks.SOCKS4,
-                    "HTTP":   _socks.HTTP,
-                }
-                _ptype = _type_map.get(str(proxy_cfg.get("type", "SOCKS5")).upper(), _socks.SOCKS5)
-                proxy = (
-                    _ptype,
-                    str(proxy_cfg["host"]),
-                    int(proxy_cfg["port"]),
-                    True,
-                    proxy_cfg.get("username") or None,
-                    proxy_cfg.get("password") or None,
-                )
-                logger.info("main: proxy → %s:%s", proxy_cfg["host"], proxy_cfg["port"])
-            except ImportError:
-                logger.warning("main: PySocks not installed, proxy disabled")
+            ptype = str(proxy_cfg.get("type", "SOCKS5")).upper()
+            if ptype == "MTPROTO":
+                secret = proxy_cfg.get("secret", "00000000000000000000000000000000")
+                proxy = (str(proxy_cfg["host"]), int(proxy_cfg["port"]), secret)
+                from telethon.network import connection as tl_conn
+                extra["connection"] = tl_conn.ConnectionTcpMTProxyRandomizedIntermediate
+                logger.info("main: MTProto proxy → %s:%s", proxy_cfg["host"], proxy_cfg["port"])
+            else:
+                try:
+                    import socks as _socks
+                    _type_map = {
+                        "SOCKS5": _socks.SOCKS5,
+                        "SOCKS4": _socks.SOCKS4,
+                        "HTTP":   _socks.HTTP,
+                    }
+                    _ptype = _type_map.get(ptype, _socks.SOCKS5)
+                    proxy = (
+                        _ptype,
+                        str(proxy_cfg["host"]),
+                        int(proxy_cfg["port"]),
+                        True,
+                        proxy_cfg.get("username") or None,
+                        proxy_cfg.get("password") or None,
+                    )
+                    logger.info("main: proxy → %s:%s", proxy_cfg["host"], proxy_cfg["port"])
+                except ImportError:
+                    logger.warning("main: PySocks not installed, proxy disabled")
 
         client = KitsuneTelegramClient(
             str(session_path),
@@ -232,6 +241,7 @@ async def _startup(args: argparse.Namespace) -> None:
             app_version="1.0.0",
             lang_code="ru",
             proxy=proxy,
+            **extra,
         )
 
         try:
