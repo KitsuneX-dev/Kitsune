@@ -172,76 +172,91 @@ async def _startup(args: argparse.Namespace) -> None:
     api_hash: str = str(cfg.get("api_hash") or os.environ.get("API_HASH", ""))
     prefix:   str = str(cfg.get("prefix", "."))
 
-    if not api_id or not api_hash:
-        print(
-            "❌ api_id / api_hash not set.\n"
-            "   Add them to config.toml:\n\n"
-            "   api_id   = 123456\n"
-            "   api_hash = \"abcdef...\"\n"
-        )
-        sys.exit(1)
-
     # ── Telethon client ───────────────────────────────────────────────────────
     session_path = DATA_DIR / "kitsune"
 
-    # Proxy support (SOCKS4 / SOCKS5 / HTTP) — configure in config.toml [proxy]
-    proxy_cfg = cfg.get("proxy") or {}
-    proxy = None
-    if proxy_cfg.get("host") and proxy_cfg.get("port"):
-        try:
-            import socks as _socks
-            _type_map = {
-                "SOCKS5": _socks.SOCKS5,
-                "SOCKS4": _socks.SOCKS4,
-                "HTTP":   _socks.HTTP,
-            }
-            _ptype = _type_map.get(str(proxy_cfg.get("type", "SOCKS5")).upper(), _socks.SOCKS5)
-            proxy = (
-                _ptype,
-                str(proxy_cfg["host"]),
-                int(proxy_cfg["port"]),
-                True,
-                proxy_cfg.get("username") or None,
-                proxy_cfg.get("password") or None,
-            )
-            logger.info("main: proxy configured → %s:%s", proxy_cfg["host"], proxy_cfg["port"])
-        except ImportError:
-            logger.warning("main: PySocks not installed — proxy disabled. Run: pip install pysocks")
+    # If api_id/api_hash missing OR session file doesn't exist → run web setup
+    session_file = Path(str(session_path) + ".session")
+    need_setup = (not api_id or not api_hash or not session_file.exists())
 
-    client = KitsuneTelegramClient(
-        str(session_path),
-        api_id=api_id,
-        api_hash=api_hash,
-        connection_retries=10,
-        retry_delay=3,
-        auto_reconnect=True,
-        flood_sleep_threshold=60,
-        device_model="Kitsune Userbot",
-        system_version="1.0",
-        app_version="1.0.0",
-        lang_code="ru",
-        proxy=proxy,
-    )
+    if need_setup:
+        from .web.setup import SetupServer
+        web_port = int(cfg.get("web_port", 8080))
+        setup = SetupServer(save_config_fn=_save_config, get_config_fn=_load_raw_config)
+        await setup.start(host="0.0.0.0", port=web_port)
+        await setup.wait_done()
+        client = setup.get_client()
+        # Reload config after setup (user may have changed api_id/hash/proxy)
+        cfg      = _load_raw_config()
+        api_id   = int(cfg.get("api_id", 0))
+        api_hash = str(cfg.get("api_hash", ""))
+        prefix   = str(cfg.get("prefix", "."))
+        # Reconfigure client with full options
+        client.flood_sleep_threshold = 60
+        client.system_version = "1.0"
+    else:
+        # Normal start — build client from config
+        proxy_cfg = cfg.get("proxy") or {}
+        proxy = None
+        if proxy_cfg.get("host") and proxy_cfg.get("port"):
+            try:
+                import socks as _socks
+                _type_map = {
+                    "SOCKS5": _socks.SOCKS5,
+                    "SOCKS4": _socks.SOCKS4,
+                    "HTTP":   _socks.HTTP,
+                }
+                _ptype = _type_map.get(str(proxy_cfg.get("type", "SOCKS5")).upper(), _socks.SOCKS5)
+                proxy = (
+                    _ptype,
+                    str(proxy_cfg["host"]),
+                    int(proxy_cfg["port"]),
+                    True,
+                    proxy_cfg.get("username") or None,
+                    proxy_cfg.get("password") or None,
+                )
+                logger.info("main: proxy → %s:%s", proxy_cfg["host"], proxy_cfg["port"])
+            except ImportError:
+                logger.warning("main: PySocks not installed, proxy disabled")
 
-    try:
-        await client.connect()
-    except (TimeoutError, OSError, ConnectionError) as exc:
-        print(
-            "\n❌ Не удалось подключиться к Telegram.\n"
-            "   Возможные причины:\n"
-            "   1. Telegram заблокирован провайдером — настрой прокси в config.toml:\n\n"
-            "      [proxy]\n"
-            "      type     = \"SOCKS5\"\n"
-            "      host     = \"127.0.0.1\"\n"
-            "      port     = 1080\n\n"
-            "   2. Нет интернета — проверь соединение.\n"
-            f"   Детали: {exc}\n"
+        client = KitsuneTelegramClient(
+            str(session_path),
+            api_id=api_id,
+            api_hash=api_hash,
+            connection_retries=10,
+            retry_delay=3,
+            auto_reconnect=True,
+            flood_sleep_threshold=60,
+            device_model="Kitsune Userbot",
+            system_version="1.0",
+            app_version="1.0.0",
+            lang_code="ru",
+            proxy=proxy,
         )
-        sys.exit(1)
 
-    if not await client.is_user_authorized():
-        logger.info("main: not authorized — starting interactive login")
-        await _interactive_login(client)
+        try:
+            await client.connect()
+        except (TimeoutError, OSError, ConnectionError) as exc:
+            print(
+                "\n❌ Не удалось подключиться к Telegram.\n"
+                "   Попробуй настроить прокси в config.toml:\n\n"
+                "      [proxy]\n"
+                "      type = \"SOCKS5\"\n"
+                "      host = \"127.0.0.1\"\n"
+                "      port = 1080\n\n"
+                f"   Детали: {exc}\n"
+            )
+            sys.exit(1)
+
+        if not await client.is_user_authorized():
+            # Session exists but unauthorized — re-run web setup
+            logger.info("main: session invalid, launching web setup")
+            from .web.setup import SetupServer
+            web_port = int(cfg.get("web_port", 8080))
+            setup = SetupServer(save_config_fn=_save_config, get_config_fn=_load_raw_config)
+            await setup.start(host="0.0.0.0", port=web_port)
+            await setup.wait_done()
+            client = setup.get_client()
 
     me = await client.get_me()
     client.tg_id = me.id
