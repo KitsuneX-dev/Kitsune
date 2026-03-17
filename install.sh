@@ -105,7 +105,7 @@ if [[ -d "$INSTALL_DIR/.git" ]]; then
     ok "Код обновлён"
 else
     info "Клонирую репозиторий..."
-    git clone https://github.com/Mikasu32/Kitsune "$INSTALL_DIR"
+    git clone https://github.com/KitsuneX-dev/Kitsune "$INSTALL_DIR"
     cd "$INSTALL_DIR"
     ok "Репозиторий склонирован: $INSTALL_DIR"
 fi

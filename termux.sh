@@ -47,7 +47,7 @@ if [[ -d "$INSTALL_DIR/.git" ]]; then
     cd "$INSTALL_DIR" && git pull --ff-only origin main
 else
     rm -rf "$INSTALL_DIR"
-    git clone https://github.com/Mikasu32/Kitsune "$INSTALL_DIR"
+    git clone https://github.com/KitsuneX-dev/Kitsune "$INSTALL_DIR"
 fi
 cd "$INSTALL_DIR"
 ok "Репозиторий готов: $INSTALL_DIR"

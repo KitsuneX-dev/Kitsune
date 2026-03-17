@@ -22,7 +22,7 @@ class UpdaterModule(KitsuneModule):
     description = "Обновление и перезапуск"
     author      = "Yushi"
 
-    REPO_URL = "https://github.com/Mikasu32/Kitsune"   # поменяй на свой репо
+    REPO_URL = "https://github.com/KitsuneX-dev/Kitsune"   # поменяй на свой репо
 
     strings_ru = {
         "checking":    "🔍 Проверяю обновления...",
