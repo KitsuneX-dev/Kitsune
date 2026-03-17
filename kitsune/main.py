@@ -183,6 +183,31 @@ async def _startup(args: argparse.Namespace) -> None:
 
     # ── Telethon client ───────────────────────────────────────────────────────
     session_path = DATA_DIR / "kitsune"
+
+    # Proxy support (SOCKS4 / SOCKS5 / HTTP) — configure in config.toml [proxy]
+    proxy_cfg = cfg.get("proxy") or {}
+    proxy = None
+    if proxy_cfg.get("host") and proxy_cfg.get("port"):
+        try:
+            import socks as _socks
+            _type_map = {
+                "SOCKS5": _socks.SOCKS5,
+                "SOCKS4": _socks.SOCKS4,
+                "HTTP":   _socks.HTTP,
+            }
+            _ptype = _type_map.get(str(proxy_cfg.get("type", "SOCKS5")).upper(), _socks.SOCKS5)
+            proxy = (
+                _ptype,
+                str(proxy_cfg["host"]),
+                int(proxy_cfg["port"]),
+                True,
+                proxy_cfg.get("username") or None,
+                proxy_cfg.get("password") or None,
+            )
+            logger.info("main: proxy configured → %s:%s", proxy_cfg["host"], proxy_cfg["port"])
+        except ImportError:
+            logger.warning("main: PySocks not installed — proxy disabled. Run: pip install pysocks")
+
     client = KitsuneTelegramClient(
         str(session_path),
         api_id=api_id,
@@ -195,9 +220,24 @@ async def _startup(args: argparse.Namespace) -> None:
         system_version="1.0",
         app_version="1.0.0",
         lang_code="ru",
+        proxy=proxy,
     )
 
-    await client.connect()
+    try:
+        await client.connect()
+    except (TimeoutError, OSError, ConnectionError) as exc:
+        print(
+            "\n❌ Не удалось подключиться к Telegram.\n"
+            "   Возможные причины:\n"
+            "   1. Telegram заблокирован провайдером — настрой прокси в config.toml:\n\n"
+            "      [proxy]\n"
+            "      type     = \"SOCKS5\"\n"
+            "      host     = \"127.0.0.1\"\n"
+            "      port     = 1080\n\n"
+            "   2. Нет интернета — проверь соединение.\n"
+            f"   Детали: {exc}\n"
+        )
+        sys.exit(1)
 
     if not await client.is_user_authorized():
         logger.info("main: not authorized — starting interactive login")
