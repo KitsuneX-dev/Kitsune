@@ -175,6 +175,24 @@ async def _startup(args: argparse.Namespace) -> None:
     # ── Telethon client ───────────────────────────────────────────────────────
     session_path = DATA_DIR / "kitsune"
 
+    # ── Proxy — parsed once, used everywhere (Hikka-style _get_proxy()) ─────
+    from telethon.network.connection import (
+        ConnectionTcpFull,
+        ConnectionTcpMTProxyRandomizedIntermediate,
+    )
+    proxy_cfg  = cfg.get("proxy") or {}
+    proxy      = None
+    connection = ConnectionTcpFull
+    if proxy_cfg.get("host") and proxy_cfg.get("port"):
+        ptype = str(proxy_cfg.get("type", "MTPROTO")).upper()
+        if ptype == "MTPROTO":
+            secret     = proxy_cfg.get("secret", "00000000000000000000000000000000")
+            proxy      = (str(proxy_cfg["host"]), int(proxy_cfg["port"]), secret)
+            connection = ConnectionTcpMTProxyRandomizedIntermediate
+            logger.info("main: MTProto proxy → %s:%s", proxy_cfg["host"], proxy_cfg["port"])
+        else:
+            logger.warning("main: non-MTProto proxy in config — ignored (use MTProto)")
+
     # If api_id/api_hash missing OR session file doesn't exist → run web setup
     session_file = Path(str(session_path) + ".session")
     need_setup = (not api_id or not api_hash or not session_file.exists())
@@ -186,47 +204,14 @@ async def _startup(args: argparse.Namespace) -> None:
         await setup.start(host="0.0.0.0", port=web_port)
         await setup.wait_done()
         client = setup.get_client()
-        # Reload config after setup (user may have changed api_id/hash/proxy)
         cfg      = _load_raw_config()
         api_id   = int(cfg.get("api_id", 0))
         api_hash = str(cfg.get("api_hash", ""))
         prefix   = str(cfg.get("prefix", "."))
-        # Reconfigure client with full options
         client.flood_sleep_threshold = 60
         client.system_version = "1.0"
     else:
-        # Normal start — build client from config
-        proxy_cfg = cfg.get("proxy") or {}
-        proxy = None
-        extra = {}
-        if proxy_cfg.get("host") and proxy_cfg.get("port"):
-            ptype = str(proxy_cfg.get("type", "SOCKS5")).upper()
-            if ptype == "MTPROTO":
-                secret = proxy_cfg.get("secret", "00000000000000000000000000000000")
-                proxy = (str(proxy_cfg["host"]), int(proxy_cfg["port"]), secret)
-                from telethon.network import connection as tl_conn
-                extra["connection"] = tl_conn.ConnectionTcpMTProxyRandomizedIntermediate
-                logger.info("main: MTProto proxy → %s:%s", proxy_cfg["host"], proxy_cfg["port"])
-            else:
-                try:
-                    import socks as _socks
-                    _type_map = {
-                        "SOCKS5": _socks.SOCKS5,
-                        "SOCKS4": _socks.SOCKS4,
-                        "HTTP":   _socks.HTTP,
-                    }
-                    _ptype = _type_map.get(ptype, _socks.SOCKS5)
-                    proxy = (
-                        _ptype,
-                        str(proxy_cfg["host"]),
-                        int(proxy_cfg["port"]),
-                        True,
-                        proxy_cfg.get("username") or None,
-                        proxy_cfg.get("password") or None,
-                    )
-                    logger.info("main: proxy → %s:%s", proxy_cfg["host"], proxy_cfg["port"])
-                except ImportError:
-                    logger.warning("main: PySocks not installed, proxy disabled")
+        extra = {"proxy": proxy, "connection": connection} if proxy else {}
 
         client = KitsuneTelegramClient(
             str(session_path),
@@ -240,7 +225,6 @@ async def _startup(args: argparse.Namespace) -> None:
             system_version="1.0",
             app_version="1.0.0",
             lang_code="ru",
-            proxy=proxy,
             **extra,
         )
 
