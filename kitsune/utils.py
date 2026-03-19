@@ -3,7 +3,7 @@ Kitsune utility functions.
 Cleaned-up version of Hikka's utils.py — removed dead code, full type hints.
 """
 
-# © Yushi (@Mikasu32), 2024-2025
+# © Yushi (@Mikasu32), 2024-2026
 # Kitsune Userbot — License: AGPLv3
 
 from __future__ import annotations

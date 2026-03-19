@@ -5,7 +5,7 @@ Token-bucket algorithm to prevent accidental Telegram API flood bans.
 New in Kitsune — Hikka has no built-in rate limiting.
 """
 
-# © Yushi (@Mikasu32), 2024-2025
+# © Yushi (@Mikasu32), 2024-2026
 # Kitsune Userbot — License: AGPLv3
 
 from __future__ import annotations

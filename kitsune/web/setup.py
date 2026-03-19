@@ -3,7 +3,7 @@ Kitsune Web Setup — first-run configuration interface.
 Uses client.start() like Hikka does, which handles all auth internally.
 """
 
-# © Yushi (@Mikasu32), 2024-2025
+# © Yushi (@Mikasu32), 2024-2026
 # Kitsune Userbot — License: AGPLv3
 
 from __future__ import annotations

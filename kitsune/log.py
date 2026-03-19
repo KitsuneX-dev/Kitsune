@@ -8,7 +8,7 @@ Key fixes vs Hikka:
 - KitsuneException replaces HikkaException (same logic, cleaner code)
 """
 
-# © Yushi (@Mikasu32), 2024-2025
+# © Yushi (@Mikasu32), 2024-2026
 # Kitsune Userbot — License: AGPLv3
 
 from __future__ import annotations

@@ -11,7 +11,7 @@ Improvements vs Hikka:
 - No werkzeug debug server exposed by default (opt-in via --debug)
 """
 
-# © Yushi (@Mikasu32), 2024-2025
+# © Yushi (@Mikasu32), 2024-2026
 # Kitsune Userbot — License: AGPLv3
 
 from __future__ import annotations

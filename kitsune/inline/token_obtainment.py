@@ -5,7 +5,7 @@ Automates the /newbot flow via BotFather using the Telethon client,
 so the user doesn't have to manually create a bot.
 """
 
-# © Yushi (@Mikasu32), 2024-2025
+# © Yushi (@Mikasu32), 2024-2026
 # Kitsune Userbot — License: AGPLv3
 
 from __future__ import annotations

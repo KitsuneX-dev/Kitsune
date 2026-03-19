@@ -10,7 +10,7 @@ Key improvements vs Hikka:
 - Revision history with configurable depth
 """
 
-# © Yushi (@Mikasu32), 2024-2025
+# © Yushi (@Mikasu32), 2024-2026
 # Kitsune Userbot — License: AGPLv3
 
 from __future__ import annotations
@@ -175,10 +175,21 @@ class DatabaseManager:
 
     async def init(self) -> None:
         """Initialize backends and load data."""
-        from . import main
+        import os as _os
+        from pathlib import Path as _Path
 
         # Redis takes priority if configured
-        redis_uri = os.environ.get("REDIS_URL") or main.get_config_key("redis_uri")
+        redis_uri = _os.environ.get("REDIS_URL")
+        if not redis_uri:
+            try:
+                import toml as _toml
+                _cfg_path = _Path(__file__).parent.parent.parent / "config.toml"
+                if _cfg_path.exists():
+                    _cfg = _toml.loads(_cfg_path.read_text(encoding="utf-8"))
+                    redis_uri = _cfg.get("redis_uri")
+            except Exception:
+                pass
+
         if redis_uri:
             try:
                 self._backend = RedisBackend(redis_uri, self._client.tg_id)
@@ -189,14 +200,15 @@ class DatabaseManager:
                 self._backend = None
 
         if self._backend is None:
-            db_path = main.BASE_PATH / f"kitsune-{self._client.tg_id}.db"
+            _base = _Path(__file__).parent.parent.parent
+            db_path = _base / f"kitsune-{self._client.tg_id}.db"
             self._backend = SQLiteBackend(db_path)
             self._data = await self._backend.load()
             logger.info("Database: SQLite backend active (%s)", db_path)
 
         # Assets channel
         try:
-            from . import utils
+            from .. import utils
             self._assets_channel, _ = await utils.asset_channel(
                 self._client,
                 "kitsune-assets",
