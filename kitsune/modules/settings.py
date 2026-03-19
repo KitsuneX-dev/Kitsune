@@ -39,7 +39,8 @@ class SettingsModule(KitsuneModule):
             return
 
         new_prefix = raw[1].strip()[:3]
-        old_prefix = self.db.get(_DB_OWNER, "prefix", ".")
+        # Берём текущий префикс из диспетчера (не из БД), чтобы сравнение было точным
+        old_prefix = dispatcher._prefix if dispatcher else self.db.get(_DB_OWNER, "prefix", ".")
 
         if new_prefix == old_prefix:
             await event.reply(

@@ -169,20 +169,11 @@ class UpdaterModule(KitsuneModule):
             from ..version import __version_str__
             changes = "\n".join(f"• {escape_html(c.summary)}" for c in behind[:5])
 
-            # Show confirmation with inline buttons
-            from telethon.tl.types import ReplyInlineMarkup, KeyboardButtonCallback, KeyboardButtonRow
             confirm_text = self.strings("confirm").format(
                 current=__version_str__,
                 count=len(behind),
                 changes=changes,
             )
-            buttons = [
-                [
-                    KeyboardButtonCallback(text="✅ Обновить", data=b"update_yes"),
-                    KeyboardButtonCallback(text="❌ Отмена",   data=b"update_no"),
-                ]
-            ]
-            await m.edit(confirm_text, parse_mode="html", buttons=buttons)
 
             # Store pending update info in db
             await self.db.set(_DB_OWNER, "pending_update", {
@@ -190,6 +181,41 @@ class UpdaterModule(KitsuneModule):
                 "chat_id":   event.chat_id,
                 "msg_id":    m.id,
             })
+
+            # Userbot accounts CANNOT send inline buttons — send via bot instead
+            loader = getattr(self.client, "_kitsune_loader", None)
+            notifier = loader.modules.get("notifier") if loader else None
+            bot_sent = False
+            if notifier and getattr(notifier, "_bot", None):
+                try:
+                    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+                    kb = InlineKeyboardMarkup(inline_keyboard=[[
+                        InlineKeyboardButton(text="✅ Обновить", callback_data="update_yes"),
+                        InlineKeyboardButton(text="❌ Отмена",   callback_data="update_no"),
+                    ]])
+                    owner_id = notifier.db.get("kitsune.notifier", "owner_id", None)
+                    if owner_id:
+                        await notifier._bot.send_message(
+                            chat_id=int(owner_id),
+                            text=confirm_text,
+                            reply_markup=kb,
+                            parse_mode="HTML",
+                        )
+                        bot_sent = True
+                except Exception:
+                    pass
+
+            if bot_sent:
+                await m.edit(
+                    confirm_text + "\n\n<i>👆 Ответь кнопками в боте</i>",
+                    parse_mode="html",
+                )
+            else:
+                # Fallback: no bot — ask user to reply with yes/no
+                await m.edit(
+                    confirm_text + "\n\n<i>Ответь <code>да</code> или <code>нет</code> на это сообщение</i>",
+                    parse_mode="html",
+                )
 
         except Exception as exc:
             await m.edit(self.strings("git_err").format(err=escape_html(str(exc))), parse_mode="html")

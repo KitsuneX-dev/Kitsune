@@ -9,6 +9,21 @@ Kitsune built-in: Help
 from ..core.loader import KitsuneModule, command
 from ..core.security import OWNER
 
+# Human-friendly display names for built-in modules
+_DISPLAY_NAMES: dict[str, str] = {
+    "backup":   "Backup",
+    "eval":     "Evaluator",
+    "health":   "Health",
+    "help":     "Help",
+    "loader":   "Loader",
+    "notifier": "Notifier",
+    "paste":    "Pastebin",
+    "ping":     "Ping",
+    "security": "Security",
+    "settings": "Settings",
+    "updater":  "Updater",
+}
+
 
 class HelpModule(KitsuneModule):
     name        = "help"
@@ -16,8 +31,8 @@ class HelpModule(KitsuneModule):
     author      = "Yushi"
 
     strings_ru = {
-        "header":     "🦊 <b>Kitsune Userbot</b> — список команд\n\n",
-        "module_fmt": "📦 <b>{name}</b>  <i>{desc}</i>\n    Команды: {cmds}\n\n",
+        "header":     "🦊 <b>Kitsune Userbot</b> — {count} модулей загружено:\n\n",
+        "module_fmt": "▫️ <b>{name}:</b> ( {cmds} )\n",
         "no_modules": "Модули не загружены.",
     }
 
@@ -28,7 +43,6 @@ class HelpModule(KitsuneModule):
         loader = getattr(self.client, "_kitsune_loader", None)
 
         if args:
-            # Help for a specific module
             mod_name = args.lower()
             if loader:
                 mod = loader.modules.get(mod_name)
@@ -38,19 +52,22 @@ class HelpModule(KitsuneModule):
             await event.reply(f"❌ Модуль <code>{mod_name}</code> не найден.", parse_mode="html")
             return
 
-        # Full list
         if not loader or not loader.modules:
             await event.reply(self.strings("no_modules"), parse_mode="html")
             return
 
-        text = self.strings("header")
+        # Get current prefix for showing commands
+        dispatcher = getattr(self.client, "_kitsune_dispatcher", None)
+        prefix = dispatcher._prefix if dispatcher else "."
+
+        count = len(loader.modules)
+        text = self.strings("header").format(count=count)
+
         for name, mod in sorted(loader.modules.items()):
             cmds = self._get_commands(mod)
-            text += self.strings("module_fmt").format(
-                name=mod.name or name,
-                desc=mod.description or "—",
-                cmds=", ".join(f"<code>.{c}</code>" for c in cmds) if cmds else "—",
-            )
+            display = _DISPLAY_NAMES.get(name) or (mod.name or name).capitalize()
+            cmds_str = " | ".join(f"<code>{prefix}{c}</code>" for c in cmds) if cmds else "—"
+            text += self.strings("module_fmt").format(name=display, cmds=cmds_str)
 
         await event.reply(text, parse_mode="html")
 
