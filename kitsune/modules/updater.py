@@ -65,6 +65,21 @@ class UpdaterModule(KitsuneModule):
                 await m.edit(self.strings("up_to_date"), parse_mode="html")
                 return
 
+            # Notify via bot if notifier module is loaded
+            loader = getattr(self.client, "_kitsune_loader", None)
+            if loader:
+                notifier = loader.modules.get("notifier")
+                if notifier:
+                    from ..version import __version_str__
+                    changes = "\n".join(
+                        f"• {c.summary}" for c in list(behind)[:5]
+                    )
+                    await notifier.notify_update(
+                        current=__version_str__,
+                        new=f"{__version_str__}+{len(behind)}",
+                        changes=changes,
+                    )
+
             await m.edit(self.strings("updating"), parse_mode="html")
             origin.pull()
 

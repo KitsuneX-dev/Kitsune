@@ -57,8 +57,7 @@ class CommandDispatcher:
         # list of (filter_func, handler_coro)
         self._watchers: list[tuple[typing.Callable | None, typing.Callable]] = []
 
-        self._client.add_event_handler(self._on_message, events.NewMessage)
-        self._client.add_event_handler(self._on_message, events.MessageEdited)
+        self._client.add_event_handler(self._on_message, events.NewMessage(outgoing=True))
 
     # ── Public API ────────────────────────────────────────────────────────────
 
