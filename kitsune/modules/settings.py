@@ -30,12 +30,15 @@ class SettingsModule(KitsuneModule):
     @command("prefix", required=OWNER)
     async def prefix_cmd(self, event) -> None:
         """.prefix <символ> — сменить префикс команд"""
-        parts = event.message.text.split(maxsplit=1)
-        if len(parts) < 2:
+        dispatcher = getattr(self.client, "_kitsune_dispatcher", None)
+        current_prefix = dispatcher._prefix if dispatcher else "."
+        # Strip prefix + command name to get the argument
+        raw = event.message.text[len(current_prefix):].split(maxsplit=1)
+        if len(raw) < 2 or not raw[1].strip():
             await event.reply(self.strings("prefix_usage"), parse_mode="html")
             return
 
-        new_prefix = parts[1].strip()[:3]
+        new_prefix = raw[1].strip()[:3]
         old_prefix = self.db.get(_DB_OWNER, "prefix", ".")
 
         if new_prefix == old_prefix:
@@ -56,12 +59,14 @@ class SettingsModule(KitsuneModule):
     @command("lang", required=OWNER)
     async def lang_cmd(self, event) -> None:
         """.lang <код> — сменить язык интерфейса"""
-        parts = event.message.text.split(maxsplit=1)
-        if len(parts) < 2:
+        dispatcher = getattr(self.client, "_kitsune_dispatcher", None)
+        current_prefix = dispatcher._prefix if dispatcher else "."
+        raw = event.message.text[len(current_prefix):].split(maxsplit=1)
+        if len(raw) < 2 or not raw[1].strip():
             await event.reply(self.strings("lang_usage"), parse_mode="html")
             return
 
-        lang = parts[1].strip().lower()[:5]
+        lang = raw[1].strip().lower()[:5]
         await self.db.set(_DB_OWNER, "lang", lang)
         await event.reply(self.strings("lang_set").format(lang=lang), parse_mode="html")
 

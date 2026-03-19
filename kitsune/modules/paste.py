@@ -29,8 +29,7 @@ class PasteModule(KitsuneModule):
     @command("paste", required=OWNER)
     async def paste_cmd(self, event) -> None:
         """.paste [текст] — опубликовать текст на Telegraph"""
-        args = event.message.text.split(maxsplit=1)
-        text = args[1].strip() if len(args) > 1 else None
+        text = self.get_args(event) or None
 
         if not text:
             reply = await event.message.get_reply_message()
