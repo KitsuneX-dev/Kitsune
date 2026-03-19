@@ -321,6 +321,39 @@ class NotifierModule(KitsuneModule):
 
     # ── Public API for updater ────────────────────────────────────────────────
 
+    async def send_restart_report(
+        self,
+        restart_time: str,
+        total_time: str,
+        mod_count: int,
+    ) -> None:
+        """Send restart completion report via bot."""
+        token    = self.db.get(_DB_OWNER, "bot_token", None)
+        owner_id = self.db.get(_DB_OWNER, "owner_id",  None)
+        if not token or not owner_id:
+            return
+        try:
+            from aiogram import Bot
+            from aiogram.client.default import DefaultBotProperties
+            from aiogram.enums import ParseMode
+
+            bot = Bot(
+                token=str(token),
+                default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+            )
+            text = (
+                "✅ <b>Kitsune перезапущен</b>\n\n"
+                f"⏱ Время перезапуска: <code>{restart_time}</code>\n"
+                f"📦 Модули загружены: <code>{mod_count}</code>\n"
+                f"⚡ Полная загрузка заняла: <code>{total_time}</code>"
+            )
+            await bot.send_message(chat_id=int(owner_id), text=text)
+            await bot.session.close()
+        except Exception:
+            logger.exception("Notifier: failed to send restart report")
+
+
+
     async def notify_update(self, current: str, new: str, changes: str = "") -> None:
         token    = self.db.get(_DB_OWNER, "bot_token", None)
         owner_id = self.db.get(_DB_OWNER, "owner_id",  None)
