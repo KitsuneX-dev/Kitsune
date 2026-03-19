@@ -275,6 +275,7 @@ async def _startup(args: argparse.Namespace) -> None:
     dispatcher.set_owner(me.id)
 
     # ── Loader ────────────────────────────────────────────────────────────────
+    client._kitsune_dispatcher = dispatcher
     loader = Loader(client, db, dispatcher)
     client._kitsune_loader = loader
     await loader.load_all_builtin()
