@@ -271,6 +271,11 @@ async def _startup(args: argparse.Namespace) -> None:
     await security.init()
 
     # ── Dispatcher ────────────────────────────────────────────────────────────
+    # После инициализации БД берём префикс из неё (приоритет над config.toml),
+    # чтобы .prefix * корректно сохранялся после перезапуска
+    db_prefix = db.get("kitsune.core", "prefix", None)
+    if db_prefix and isinstance(db_prefix, str):
+        prefix = db_prefix
     dispatcher = CommandDispatcher(client, db, security, prefix=prefix)
     dispatcher.set_owner(me.id)
 
