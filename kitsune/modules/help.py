@@ -24,12 +24,12 @@ class HelpModule(KitsuneModule):
     @command("help", required=OWNER)
     async def help_cmd(self, event) -> None:
         """.help [module] — показать помощь"""
-        args = event.message.text.split(maxsplit=1)
+        args = self.get_args(event)
         loader = getattr(self.client, "_kitsune_loader", None)
 
-        if len(args) > 1:
+        if args:
             # Help for a specific module
-            mod_name = args[1].lower()
+            mod_name = args.lower()
             if loader:
                 mod = loader.modules.get(mod_name)
                 if mod:

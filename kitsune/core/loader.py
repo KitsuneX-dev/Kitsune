@@ -82,6 +82,17 @@ class KitsuneModule:
     async def on_unload(self) -> None:
         """Called before the module is unloaded. Override for cleanup."""
 
+    def get_args(self, event: "typing.Any") -> str:
+        """Return command arguments from event, correctly stripping prefix+command."""
+        dispatcher = getattr(self.client, "_kitsune_dispatcher", None)
+        prefix = dispatcher._prefix if dispatcher else "."
+        text = event.message.text or ""
+        # Strip prefix, then strip command name
+        if text.startswith(prefix):
+            text = text[len(prefix):]
+        parts = text.split(maxsplit=1)
+        return parts[1].strip() if len(parts) > 1 else ""
+
     def strings(self, key: str, lang: str = "ru") -> str:
         """Get a localised string from the module's `strings_*` dict."""
         attr = f"strings_{lang}" if lang != "en" else "strings"

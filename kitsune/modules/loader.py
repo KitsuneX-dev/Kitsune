@@ -52,12 +52,12 @@ class LoaderModule(KitsuneModule):
     @command("loadmod", required=OWNER)
     async def loadmod_cmd(self, event) -> None:
         """.loadmod <url> — загрузить модуль по URL"""
-        parts = event.message.text.split(maxsplit=1)
-        if len(parts) < 2:
+        url = self.get_args(event)
+        if not url:
             await event.reply(self.strings("no_url"), parse_mode="html")
             return
 
-        url = parts[1].strip()
+        url = url
         m = await event.reply(
             self.strings("loading").format(name=url.split("/")[-1]),
             parse_mode="html",
