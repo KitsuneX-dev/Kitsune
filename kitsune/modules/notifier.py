@@ -20,7 +20,7 @@ from ..core.security import OWNER
 logger = logging.getLogger(__name__)
 
 _DB_OWNER = "kitsune.notifier"
-_CHECK_INTERVAL = 60 * 60  # проверять каждый час
+_CHECK_INTERVAL = 30 * 60  # проверять каждые 30 минут
 
 
 class NotifierModule(KitsuneModule):
@@ -59,7 +59,6 @@ class NotifierModule(KitsuneModule):
         self._dp           = None
         self._polling_task = None
         self._check_task   = None
-        self._last_commit  = None
 
     async def on_load(self) -> None:
         # 1. Check if config.toml has a manually set token (for frozen bot recovery)
@@ -303,13 +302,12 @@ class NotifierModule(KitsuneModule):
 
             # Get latest commit hash to avoid duplicate notifications
             latest = behind[0].hexsha
-            if latest == self._last_commit:
+            if latest == self.db.get(_DB_OWNER, "last_notified_commit", None):
                 return
-            self._last_commit = latest
+            await self.db.set(_DB_OWNER, "last_notified_commit", latest)
 
             from ..version import __version_str__
-            changes = "
-".join(f"• {c.summary}" for c in behind[:5])
+            changes = "\n".join(f"• {c.summary}" for c in behind[:5])
             await self.notify_update(
                 current=__version_str__,
                 new=f"{__version_str__}+{len(behind)}",

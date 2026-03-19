@@ -49,10 +49,22 @@ class SettingsModule(KitsuneModule):
 
         await self.db.set(_DB_OWNER, "prefix", new_prefix)
 
-        # Apply to dispatcher
+        # Apply to dispatcher immediately
         dispatcher = getattr(self.client, "_kitsune_dispatcher", None)
         if dispatcher:
             dispatcher.set_prefix(new_prefix)
+
+        # Save to config.toml so it persists after restart
+        try:
+            import toml
+            from pathlib import Path
+            cfg_path = Path(__file__).parent.parent.parent / "config.toml"
+            if cfg_path.exists():
+                cfg = toml.loads(cfg_path.read_text(encoding="utf-8"))
+                cfg["prefix"] = new_prefix
+                cfg_path.write_text(toml.dumps(cfg), encoding="utf-8")
+        except Exception:
+            pass
 
         await event.reply(self.strings("prefix_set").format(p=new_prefix), parse_mode="html")
 

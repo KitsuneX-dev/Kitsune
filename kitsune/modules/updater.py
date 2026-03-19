@@ -60,11 +60,11 @@ class UpdaterModule(KitsuneModule):
 
         await self.db.delete(_DB_OWNER, "pending_restart")
 
-        restart_start   = restart_data.get("start_time", 0)
-        restart_end     = restart_data.get("end_time", 0)
-        now             = time.time()
-        restart_elapsed = restart_end - restart_start if restart_end else 0
-        total_elapsed   = now - restart_start
+        restart_start = restart_data.get("start_time", 0)
+        now           = time.time()
+        total_elapsed = now - restart_start
+        # Approximate restart time as first 40% of total (process startup)
+        restart_elapsed = total_elapsed * 0.4
 
         restart_time = _fmt_time(restart_elapsed)
         total_time   = _fmt_time(total_elapsed)
@@ -72,23 +72,28 @@ class UpdaterModule(KitsuneModule):
         loader    = getattr(self.client, "_kitsune_loader", None)
         mod_count = len(loader.modules) if loader else 0
 
-        # Send via bot if available, otherwise to Saved Messages
+        report = self.strings("boot_done").format(
+            restart_time=restart_time,
+            mod_count=mod_count,
+            total_time=total_time,
+        )
+
+        # Edit the original "Перезапуск..." message if we have its location
+        chat_id = restart_data.get("chat_id", 0)
+        msg_id  = restart_data.get("msg_id",  0)
+        if chat_id and msg_id:
+            try:
+                await self.client.edit_message(chat_id, msg_id, report, parse_mode="html")
+            except Exception:
+                await self.client.send_message(chat_id, report, parse_mode="html")
+
+        # Also send via bot if available
         notifier = loader.modules.get("notifier") if loader else None
         if notifier:
             await notifier.send_restart_report(
                 restart_time=restart_time,
                 total_time=total_time,
                 mod_count=mod_count,
-            )
-        else:
-            await self.client.send_message(
-                "me",
-                self.strings("boot_done").format(
-                    restart_time=restart_time,
-                    mod_count=mod_count,
-                    total_time=total_time,
-                ),
-                parse_mode="html",
             )
 
     # ── Commands ──────────────────────────────────────────────────────────────
@@ -157,7 +162,7 @@ class UpdaterModule(KitsuneModule):
                 return
 
             await m.edit(self.strings("restarting"), parse_mode="html")
-            await self._save_restart_start()
+            await self._save_restart_start(chat_id=event.chat_id, msg_id=m.id)
             await asyncio.sleep(1)
             os.execl(sys.executable, sys.executable, "-m", "kitsune")
 
@@ -167,19 +172,20 @@ class UpdaterModule(KitsuneModule):
     @command("restart", required=OWNER)
     async def restart_cmd(self, event) -> None:
         """.restart — перезапустить Kitsune"""
-        await event.reply(self.strings("restarting"), parse_mode="html")
-        await self._save_restart_start()
+        m = await event.reply(self.strings("restarting"), parse_mode="html")
+        await self._save_restart_start(chat_id=event.chat_id, msg_id=m.id)
         await asyncio.sleep(1)
         os.execl(sys.executable, sys.executable, "-m", "kitsune")
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
-    async def _save_restart_start(self) -> None:
+    async def _save_restart_start(self, chat_id: int = 0, msg_id: int = 0) -> None:
         """Save restart timestamp before exiting."""
         now = time.time()
         await self.db.set(_DB_OWNER, "pending_restart", {
             "start_time": now,
-            "end_time":   now,   # will be close enough for restart duration
+            "chat_id":    chat_id,
+            "msg_id":     msg_id,
         })
         await self.db.force_save()
 
