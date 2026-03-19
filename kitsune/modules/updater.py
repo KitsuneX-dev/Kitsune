@@ -30,6 +30,14 @@ class UpdaterModule(KitsuneModule):
     strings_ru = {
         "checking":    "🔍 Проверяю обновления...",
         "up_to_date":  "✅ У тебя последняя версия.",
+        "confirm":     (
+            "🆕 <b>Обнаружена новая версия!</b>\n\n"
+            "Текущая: <code>{current}</code>\n"
+            "Коммитов впереди: <code>{count}</code>\n\n"
+            "<b>Изменения:</b>\n{changes}\n\n"
+            "Хотите обновиться?"
+        ),
+        "cancelled":   "❌ Обновление отменено.",
         "updating":    "⬇️ Скачиваю обновление...",
         "req_update":  "📦 Обновляю зависимости...",
         "restarting":  "🔄 Перезапуск...",
@@ -72,6 +80,10 @@ class UpdaterModule(KitsuneModule):
         loader    = getattr(self.client, "_kitsune_loader", None)
         mod_count = len(loader.modules) if loader else 0
 
+        # Register callback handler for update confirmation buttons
+        from telethon import events as _events
+        self.client.add_event_handler(self._on_callback, _events.CallbackQuery)
+
         report = self.strings("boot_done").format(
             restart_time=restart_time,
             mod_count=mod_count,
@@ -96,11 +108,36 @@ class UpdaterModule(KitsuneModule):
                 mod_count=mod_count,
             )
 
+    async def _on_callback(self, event) -> None:
+        """Handle inline button callbacks for update confirmation."""
+        data = event.data
+        if data == b"update_yes":
+            await event.answer()
+            pending = self.db.get(_DB_OWNER, "pending_update", None)
+            if not pending:
+                return
+            await self.db.delete(_DB_OWNER, "pending_update")
+            asyncio.ensure_future(self._do_update(
+                repo_path=pending["repo_path"],
+                chat_id=pending["chat_id"],
+                msg_id=pending["msg_id"],
+            ))
+        elif data == b"update_no":
+            await event.answer("Отменено")
+            await self.db.delete(_DB_OWNER, "pending_update")
+            try:
+                await self.client.edit_message(
+                    event.chat_id, event.message_id,
+                    self.strings("cancelled"), parse_mode="html",
+                )
+            except Exception:
+                pass
+
     # ── Commands ──────────────────────────────────────────────────────────────
 
     @command("update", required=OWNER)
     async def update_cmd(self, event) -> None:
-        """.update — обновить Kitsune из Git"""
+        """.update — проверить и установить обновление"""
         m = await event.reply(self.strings("checking"), parse_mode="html")
         try:
             import git
@@ -129,45 +166,74 @@ class UpdaterModule(KitsuneModule):
                 await m.edit(self.strings("up_to_date"), parse_mode="html")
                 return
 
-            # Notify via bot
-            loader = getattr(self.client, "_kitsune_loader", None)
-            if loader:
-                notifier = loader.modules.get("notifier")
-                if notifier:
-                    from ..version import __version_str__
-                    changes = "\n".join(f"• {c.summary}" for c in list(behind)[:5])
-                    await notifier.notify_update(
-                        current=__version_str__,
-                        new=f"{__version_str__}+{len(behind)}",
-                        changes=changes,
-                    )
+            from ..version import __version_str__
+            changes = "\n".join(f"• {escape_html(c.summary)}" for c in behind[:5])
 
-            await m.edit(self.strings("updating"), parse_mode="html")
-            origin.pull()
-
-            await m.edit(self.strings("req_update"), parse_mode="html")
-            proc = await asyncio.create_subprocess_exec(
-                sys.executable, "-m", "pip", "install", "-r", "requirements.txt",
-                "--quiet", "--no-warn-script-location",
-                cwd=repo_path,
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.PIPE,
+            # Show confirmation with inline buttons
+            from telethon.tl.types import ReplyInlineMarkup, KeyboardButtonCallback, KeyboardButtonRow
+            confirm_text = self.strings("confirm").format(
+                current=__version_str__,
+                count=len(behind),
+                changes=changes,
             )
-            _, stderr = await proc.communicate()
-            if proc.returncode != 0:
-                await m.edit(
-                    f"⚠️ pip install вернул ошибку:\n<code>{escape_html(stderr.decode()[:500])}</code>",
-                    parse_mode="html",
-                )
-                return
+            buttons = [
+                [
+                    KeyboardButtonCallback(text="✅ Обновить", data=b"update_yes"),
+                    KeyboardButtonCallback(text="❌ Отмена",   data=b"update_no"),
+                ]
+            ]
+            await m.edit(confirm_text, parse_mode="html", buttons=buttons)
 
-            await m.edit(self.strings("restarting"), parse_mode="html")
-            await self._save_restart_start(chat_id=event.chat_id, msg_id=m.id)
-            await asyncio.sleep(1)
-            os.execl(sys.executable, sys.executable, "-m", "kitsune")
+            # Store pending update info in db
+            await self.db.set(_DB_OWNER, "pending_update", {
+                "repo_path": repo_path,
+                "chat_id":   event.chat_id,
+                "msg_id":    m.id,
+            })
 
         except Exception as exc:
             await m.edit(self.strings("git_err").format(err=escape_html(str(exc))), parse_mode="html")
+
+    async def _do_update(self, repo_path: str, chat_id: int, msg_id: int) -> None:
+        """Actually perform the update after confirmation."""
+        from telethon.tl.functions.messages import EditMessageRequest
+
+        async def edit(text: str) -> None:
+            try:
+                await self.client.edit_message(chat_id, msg_id, text, parse_mode="html")
+            except Exception:
+                pass
+
+        await edit(self.strings("updating"))
+        try:
+            import git
+            repo = git.Repo(repo_path)
+            try:
+                branch = repo.active_branch.name
+            except TypeError:
+                branch = "main"
+            repo.remote("origin").pull()
+        except Exception as exc:
+            await edit(self.strings("git_err").format(err=escape_html(str(exc))))
+            return
+
+        await edit(self.strings("req_update"))
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable, "-m", "pip", "install", "-r", "requirements.txt",
+            "--quiet", "--no-warn-script-location",
+            cwd=repo_path,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            await edit(f"⚠️ pip install вернул ошибку:\n<code>{escape_html(stderr.decode()[:500])}</code>")
+            return
+
+        await edit(self.strings("restarting"))
+        await self._save_restart_start(chat_id=chat_id, msg_id=msg_id)
+        await asyncio.sleep(1)
+        os.execl(sys.executable, sys.executable, "-m", "kitsune")
 
     @command("restart", required=OWNER)
     async def restart_cmd(self, event) -> None:
