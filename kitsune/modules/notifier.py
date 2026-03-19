@@ -20,6 +20,7 @@ from ..core.security import OWNER
 logger = logging.getLogger(__name__)
 
 _DB_OWNER = "kitsune.notifier"
+_CHECK_INTERVAL = 60 * 60  # проверять каждый час
 
 
 class NotifierModule(KitsuneModule):
@@ -57,6 +58,8 @@ class NotifierModule(KitsuneModule):
         self._bot          = None
         self._dp           = None
         self._polling_task = None
+        self._check_task   = None
+        self._last_commit  = None
 
     async def on_load(self) -> None:
         # 1. Check if config.toml has a manually set token (for frozen bot recovery)
@@ -70,11 +73,14 @@ class NotifierModule(KitsuneModule):
         if token:
             # Already have a token — start polling
             asyncio.ensure_future(self._start_polling(str(token)))
+            self._check_task = asyncio.ensure_future(self._update_check_loop())
         else:
             # First run — auto-create bot via BotFather
             asyncio.ensure_future(self._auto_setup())
 
     async def on_unload(self) -> None:
+        if self._check_task and not self._check_task.done():
+            self._check_task.cancel()
         await self._stop_polling()
 
     # ── Commands ──────────────────────────────────────────────────────────────
@@ -145,6 +151,7 @@ class NotifierModule(KitsuneModule):
             )
 
             asyncio.ensure_future(self._start_polling(token))
+            self._check_task = asyncio.ensure_future(self._update_check_loop())
 
         except asyncio.TimeoutError:
             logger.warning("Notifier: BotFather timed out, will retry on next restart")
@@ -261,6 +268,56 @@ class NotifierModule(KitsuneModule):
         self._bot          = None
         self._dp           = None
         self._polling_task = None
+
+    # ── Auto update check ────────────────────────────────────────────────────
+
+    async def _update_check_loop(self) -> None:
+        """Check GitHub for new commits every hour."""
+        await asyncio.sleep(30)  # wait 30s after startup before first check
+        while True:
+            try:
+                await self._check_for_updates()
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                logger.exception("Notifier: update check failed")
+            await asyncio.sleep(_CHECK_INTERVAL)
+
+    async def _check_for_updates(self) -> None:
+        import httpx
+        try:
+            import git
+            repo_path = os.path.abspath(
+                os.path.join(os.path.dirname(__file__), "..", "..")
+            )
+            repo = git.Repo(repo_path)
+            origin = repo.remote("origin")
+            origin.fetch()
+            try:
+                branch = repo.active_branch.name
+            except TypeError:
+                branch = "main"
+            behind = list(repo.iter_commits(f"HEAD..origin/{branch}"))
+            if not behind:
+                return
+
+            # Get latest commit hash to avoid duplicate notifications
+            latest = behind[0].hexsha
+            if latest == self._last_commit:
+                return
+            self._last_commit = latest
+
+            from ..version import __version_str__
+            changes = "
+".join(f"• {c.summary}" for c in behind[:5])
+            await self.notify_update(
+                current=__version_str__,
+                new=f"{__version_str__}+{len(behind)}",
+                changes=changes,
+            )
+            logger.info("Notifier: update notification sent (%d commits behind)", len(behind))
+        except Exception:
+            logger.exception("Notifier: _check_for_updates error")
 
     # ── Public API for updater ────────────────────────────────────────────────
 
