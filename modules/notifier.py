@@ -237,6 +237,36 @@ class NotifierModule(KitsuneModule):
                         ref.strings("update_err").format(err=str(exc))
                     )
 
+            @router.callback_query(lambda c: c.data == "update_yes")
+            async def on_update_yes(call: CallbackQuery) -> None:
+                """Handle update confirmation from .update command"""
+                owner_id = ref.db.get(_DB_OWNER, "owner_id", None)
+                if call.from_user.id != owner_id:
+                    await call.answer("🔒 Нет доступа.", show_alert=True)
+                    return
+                await call.answer()
+                pending = ref.db.get("kitsune.updater", "pending_update", None)
+                if not pending:
+                    await call.message.edit_text("❌ Данные обновления устарели. Запусти .update снова.")
+                    return
+                await ref.db.delete("kitsune.updater", "pending_update")
+                await call.message.edit_text("⬇️ Скачиваю обновление...")
+                try:
+                    await ref._do_update()
+                except Exception as exc:
+                    await call.message.edit_text(f"❌ Ошибка:\n<code>{exc}</code>")
+
+            @router.callback_query(lambda c: c.data == "update_no")
+            async def on_update_no(call: CallbackQuery) -> None:
+                """Handle update cancellation from .update command"""
+                owner_id = ref.db.get(_DB_OWNER, "owner_id", None)
+                if call.from_user.id != owner_id:
+                    await call.answer("🔒 Нет доступа.", show_alert=True)
+                    return
+                await call.answer("Отменено")
+                await ref.db.delete("kitsune.updater", "pending_update")
+                await call.message.edit_text("❌ Обновление отменено.")
+
             self._polling_task = asyncio.ensure_future(
                 self._dp.start_polling(self._bot, handle_signals=False)
             )
@@ -271,7 +301,7 @@ class NotifierModule(KitsuneModule):
     # ── Auto update check ────────────────────────────────────────────────────
 
     async def _update_check_loop(self) -> None:
-        """Check GitHub for new commits every hour."""
+        """Check GitHub for new commits every 30 seconds."""
         await asyncio.sleep(30)  # wait 30s after startup before first check
         while True:
             try:
@@ -283,39 +313,91 @@ class NotifierModule(KitsuneModule):
             await asyncio.sleep(_CHECK_INTERVAL)
 
     async def _check_for_updates(self) -> None:
-        import httpx
+        """Check GitHub API for new commits (no git, no blocking I/O)."""
+        import aiohttp
+
+        REPO   = "KitsuneX-dev/Kitsune"
+        BRANCH = "main"
+
+        # Get local HEAD commit sha from git
         try:
             import git
             repo_path = os.path.abspath(
                 os.path.join(os.path.dirname(__file__), "..", "..")
             )
             repo = git.Repo(repo_path)
-            origin = repo.remote("origin")
-            origin.fetch()
             try:
-                branch = repo.active_branch.name
-            except TypeError:
-                branch = "main"
-            behind = list(repo.iter_commits(f"HEAD..origin/{branch}"))
-            if not behind:
-                return
-
-            # Get latest commit hash to avoid duplicate notifications
-            latest = behind[0].hexsha
-            if latest == self.db.get(_DB_OWNER, "last_notified_commit", None):
-                return
-            await self.db.set(_DB_OWNER, "last_notified_commit", latest)
-
-            from ..version import __version_str__
-            changes = "\n".join(f"• {c.summary}" for c in behind[:5])
-            await self.notify_update(
-                current=__version_str__,
-                new=f"{__version_str__}+{len(behind)}",
-                changes=changes,
-            )
-            logger.info("Notifier: update notification sent (%d commits behind)", len(behind))
+                local_sha = repo.head.commit.hexsha
+                try:
+                    BRANCH = repo.active_branch.name
+                except TypeError:
+                    pass
+            except Exception:
+                local_sha = None
         except Exception:
-            logger.exception("Notifier: _check_for_updates error")
+            local_sha = None
+
+        # Fetch latest commits from GitHub API (async HTTP — non-blocking)
+        try:
+            url = f"https://api.github.com/repos/{REPO}/commits?sha={BRANCH}&per_page=10"
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                    if resp.status != 200:
+                        logger.warning("Notifier: GitHub API returned %d", resp.status)
+                        return
+                    commits = await resp.json()
+        except Exception as exc:
+            logger.warning("Notifier: GitHub API request failed: %s", exc)
+            return
+
+        if not commits:
+            return
+
+        latest_sha = commits[0].get("sha", "")
+        if not latest_sha:
+            return
+
+        # Already notified about this commit
+        if latest_sha == self.db.get(_DB_OWNER, "last_notified_commit", None):
+            return
+
+        # If we know our local sha — check if we're actually behind
+        if local_sha and latest_sha == local_sha:
+            return
+
+        # Mark as notified
+        await self.db.set(_DB_OWNER, "last_notified_commit", latest_sha)
+
+        from ..version import __version_str__
+
+        # Build changes list from GitHub commit messages
+        if local_sha:
+            # Find how many commits ahead GitHub is
+            shas = [c.get("sha", "") for c in commits]
+            if local_sha in shas:
+                idx = shas.index(local_sha)
+                new_commits = commits[:idx]
+            else:
+                new_commits = commits[:5]
+        else:
+            new_commits = commits[:5]
+
+        if not new_commits:
+            return
+
+        changes = "\n".join(
+            f"• {c['commit']['message'].splitlines()[0]}"
+            for c in new_commits
+            if c.get("commit", {}).get("message")
+        )
+        new_ver = f"{__version_str__}+{len(new_commits)}"
+
+        await self.notify_update(
+            current=__version_str__,
+            new=new_ver,
+            changes=changes or "—",
+        )
+        logger.info("Notifier: update notification sent (%d new commits)", len(new_commits))
 
     # ── Public API for updater ────────────────────────────────────────────────
 
