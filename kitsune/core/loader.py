@@ -86,7 +86,7 @@ class KitsuneModule:
         """Return command arguments from event, correctly stripping prefix+command."""
         dispatcher = getattr(self.client, "_kitsune_dispatcher", None)
         prefix = dispatcher._prefix if dispatcher else "."
-        text = event.message.text or ""
+        text = event.message.raw_text or event.message.text or ""
         # Strip prefix, then strip command name
         if text.startswith(prefix):
             text = text[len(prefix):]

@@ -88,6 +88,7 @@ class CommandDispatcher:
 
     def set_prefix(self, prefix: str) -> None:
         self._prefix = prefix
+        logger.info("Dispatcher: prefix changed to %r", prefix)
 
     def set_owner(self, owner_id: int) -> None:
         self._limiter.set_owner(owner_id)
@@ -100,7 +101,7 @@ class CommandDispatcher:
         if not message or not message.text:
             return
 
-        text: str = message.text.strip()
+        text: str = (message.raw_text or message.text or "").strip()
 
         # ── Command dispatch ─────────────────────────────────────────────────
         if text.startswith(self._prefix):
