@@ -4,7 +4,7 @@ Kitsune built-in: Backup
 Сохраняет базу данных в файл и отправляет в Saved Messages.
 """
 
-# © Yushi (@Mikasu32), 2024-2025
+# © Yushi (@Mikasu32), 2024-2026
 # Kitsune Userbot — License: AGPLv3
 
 from __future__ import annotations

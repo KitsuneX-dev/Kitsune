@@ -3,7 +3,7 @@ Kitsune built-in: Settings
 Команды: .prefix .lang .setowner
 """
 
-# © Yushi (@Mikasu32), 2024-2025
+# © Yushi (@Mikasu32), 2024-2026
 # Kitsune Userbot — License: AGPLv3
 
 from ..core.loader import KitsuneModule, command

@@ -69,19 +69,6 @@ lang     = "ru"
 
 ---
 
-## 📦 Встроенные модули
-
-| Модуль | Команды | Описание |
-|---|---|---|
-| `help` | `.help [модуль]` | Список команд |
-| `eval` | `.e` `.ex` `.sh` | Python eval/exec и shell |
-| `loader` | `.loadmod` `.unloadmod` `.mods` | Управление модулями |
-| `settings` | `.prefix` `.lang` `.info` | Настройки |
-| `security` | `.addsudo` `.delsudo` `.sudolist` | Права доступа |
-| `updater` | `.update` `.restart` | Обновление и перезапуск |
-
----
-
 ## 🔌 Загрузка сторонних модулей
 
 ```
@@ -89,73 +76,10 @@ lang     = "ru"
 ```
 
 Все загружаемые модули проходят AST-сканирование на безопасность.
-
----
-
-## 🏗 Структура проекта
-
-```
-Kitsune/
-├── kitsune/
-│   ├── core/
-│   │   ├── dispatcher.py    # маршрутизация команд + rate limiting
-│   │   ├── loader.py        # загрузчик модулей с AST-сканом
-│   │   ├── security.py      # проверка прав доступа
-│   │   └── rate_limiter.py  # token-bucket лимитер
-│   ├── database/
-│   │   └── manager.py       # async SQLite WAL + Redis backend
-│   ├── inline/
-│   │   ├── core.py          # aiogram 3.x inline менеджер
-│   │   └── types.py         # типы для inline кнопок
-│   ├── web/
-│   │   └── core.py          # aiohttp веб-интерфейс
-│   ├── compat/
-│   │   ├── hikka.py         # Hikka-совместимость
-│   │   └── pyroproxy.py     # pyrogram → hydrogram прокси
-│   ├── modules/             # встроенные модули
-│   ├── langpacks/           # переводы (ru, en, de)
-│   ├── main.py              # точка входа
-│   ├── log.py               # async logging
-│   ├── utils.py             # утилиты
-│   └── tl_cache.py          # кастомный Telethon клиент
-├── install.sh               # установщик Ubuntu/Termux
-├── termux.sh                # установщик Termux
-├── Dockerfile
-├── config.toml              # конфигурация
-└── requirements.txt
-```
-
----
-
-## 📝 Создание модуля
-
-```python
-from kitsune.core.loader import KitsuneModule, command
-from kitsune.core.security import OWNER
-
-class MyModule(KitsuneModule):
-    name        = "mymodule"
-    description = "Мой первый модуль"
-    author      = "Yushi"
-
-    strings_ru = {
-        "hello": "👋 Привет, {name}!",
-    }
-
-    @command("hello", required=OWNER)
-    async def hello_cmd(self, event):
-        """.hello — поприветствовать себя"""
-        me = await self.client.get_me()
-        await event.reply(
-            self.strings("hello").format(name=me.first_name),
-            parse_mode="html",
-        )
-```
-
-Сохрани в `~/.kitsune/modules/mymodule.py` — загрузится автоматически.
+Загруженные модули сохраняются и автоматически восстанавливаются после перезапуска.
 
 ---
 
 ## 📄 Лицензия
 
-AGPLv3 © Yushi (@Mikasu32), 2024-2025
+AGPLv3 © Yushi (@Mikasu32), 2024-2026

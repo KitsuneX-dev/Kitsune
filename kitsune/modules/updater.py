@@ -3,7 +3,7 @@ Kitsune built-in: Updater
 Команды: .update .restart
 """
 
-# © Yushi (@Mikasu32), 2024-2025
+# © Yushi (@Mikasu32), 2024-2026
 # Kitsune Userbot — License: AGPLv3
 
 from __future__ import annotations
@@ -56,7 +56,11 @@ class UpdaterModule(KitsuneModule):
         try:
             origin = repo.remote("origin")
             origin.fetch()
-            behind = list(repo.iter_commits("HEAD..origin/main"))
+            try:
+                branch = repo.active_branch.name
+            except TypeError:
+                branch = "main"
+            behind = list(repo.iter_commits(f"HEAD..origin/{branch}"))
             if not behind:
                 await m.edit(self.strings("up_to_date"), parse_mode="html")
                 return

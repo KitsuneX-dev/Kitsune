@@ -7,7 +7,7 @@ Kitsune built-in: Health Monitor
 - Команда .health для мгновенного статуса
 """
 
-# © Yushi (@Mikasu32), 2024-2025
+# © Yushi (@Mikasu32), 2024-2026
 # Kitsune Userbot — License: AGPLv3
 
 from __future__ import annotations
@@ -89,21 +89,41 @@ class HealthModule(KitsuneModule):
     # ── Internal ──────────────────────────────────────────────────────────────
 
     def _build_status(self) -> str:
-        mem  = psutil.virtual_memory()
-        cpu  = psutil.cpu_percent(interval=0.3)
-        disk = psutil.disk_usage("/")
+        try:
+            mem = psutil.virtual_memory()
+            ram_used  = mem.used  // 1024 // 1024
+            ram_total = mem.total // 1024 // 1024
+            ram_pct   = mem.percent
+        except Exception:
+            ram_used = ram_total = 0
+            ram_pct = 0.0
+
+        try:
+            cpu = psutil.cpu_percent(interval=0.3)
+        except Exception:
+            cpu = 0.0
+
+        try:
+            disk = psutil.disk_usage("/")
+            disk_used  = disk.used  // 1024 // 1024 // 1024
+            disk_total = disk.total // 1024 // 1024 // 1024
+            disk_pct   = disk.percent
+        except Exception:
+            disk_used = disk_total = 0
+            disk_pct = 0.0
+
         uptime_sec = int(time.time() - self._start_time)
         h, rem = divmod(uptime_sec, 3600)
         m, s   = divmod(rem, 60)
 
         return self.strings("status").format(
-            ram_used=mem.used  // 1024 // 1024,
-            ram_total=mem.total // 1024 // 1024,
-            ram_pct=mem.percent,
+            ram_used=ram_used,
+            ram_total=ram_total,
+            ram_pct=ram_pct,
             cpu=cpu,
-            disk_used=disk.used  // 1024 // 1024 // 1024,
-            disk_total=disk.total // 1024 // 1024 // 1024,
-            disk_pct=disk.percent,
+            disk_used=disk_used,
+            disk_total=disk_total,
+            disk_pct=disk_pct,
             uptime=f"{h:02d}:{m:02d}:{s:02d}",
         )
 
@@ -132,8 +152,11 @@ class HealthModule(KitsuneModule):
         ram_limit = self.db.get(_DB_OWNER, "ram_limit", _DEFAULT_RAM_LIMIT)
         cpu_limit = self.db.get(_DB_OWNER, "cpu_limit", _DEFAULT_CPU_LIMIT)
 
-        mem = psutil.virtual_memory()
-        cpu = psutil.cpu_percent(interval=1)
+        try:
+            mem = psutil.virtual_memory()
+            cpu = psutil.cpu_percent(interval=1)
+        except Exception:
+            return
 
         logchat = self.db.get("kitsune.core", "logchat", None)
         if not logchat:

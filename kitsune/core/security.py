@@ -8,7 +8,7 @@ Improvements vs Hikka:
 - No circular imports (db injected, not imported)
 """
 
-# © Yushi (@Mikasu32), 2024-2025
+# © Yushi (@Mikasu32), 2024-2026
 # Kitsune Userbot — License: AGPLv3
 
 from __future__ import annotations

@@ -3,7 +3,7 @@ Kitsune built-in: Help
 Команда .help — список всех модулей и команд.
 """
 
-# © Yushi (@Mikasu32), 2024-2025
+# © Yushi (@Mikasu32), 2024-2026
 # Kitsune Userbot — License: AGPLv3
 
 from ..core.loader import KitsuneModule, command
@@ -14,12 +14,6 @@ class HelpModule(KitsuneModule):
     name        = "help"
     description = "Список команд и модулей"
     author      = "Yushi"
-
-    strings = {
-        "header":     "🦊 <b>Kitsune Userbot</b> — список команд\n\n",
-        "module_fmt": "📦 <b>{name}</b>  <i>{desc}</i>\n    Команды: {cmds}\n\n",
-        "no_modules": "Модули не загружены.",
-    }
 
     strings_ru = {
         "header":     "🦊 <b>Kitsune Userbot</b> — список команд\n\n",

@@ -5,7 +5,7 @@ Defines typed wrappers for aiogram inline interactions.
 Cleaner than Hikka's approach — uses dataclasses instead of bare dicts.
 """
 
-# © Yushi (@Mikasu32), 2024-2025
+# © Yushi (@Mikasu32), 2024-2026
 # Kitsune Userbot — License: AGPLv3
 
 from __future__ import annotations

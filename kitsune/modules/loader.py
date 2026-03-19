@@ -3,11 +3,14 @@ Kitsune built-in: Module Loader
 Команды: .loadmod .unloadmod .updatemod .mods
 """
 
-# © Yushi (@Mikasu32), 2024-2025
+# © Yushi (@Mikasu32), 2024-2026
 # Kitsune Userbot — License: AGPLv3
 
 from ..core.loader import KitsuneModule, command, ModuleLoadError, ASTSecurityError
 from ..core.security import OWNER
+
+_DB_OWNER = "kitsune.loader"
+_DB_KEY_MODS = "user_modules"
 
 
 class LoaderModule(KitsuneModule):
@@ -27,6 +30,21 @@ class LoaderModule(KitsuneModule):
         "mod_line":      "  • <b>{name}</b> v{ver} — {desc}\n",
         "no_mods":       "Нет загруженных модулей.",
     }
+
+    async def on_load(self) -> None:
+        """Restore previously loaded user modules."""
+        saved = self.db.get(_DB_OWNER, _DB_KEY_MODS, [])
+        if not saved:
+            return
+        loader = self._get_loader()
+        if loader is None:
+            return
+        for url in saved:
+            try:
+                await loader.load_from_url(url)
+            except Exception as exc:
+                import logging
+                logging.getLogger(__name__).warning("Loader: failed to restore %s — %s", url, exc)
 
     def _get_loader(self):
         return getattr(self.client, "_kitsune_loader", None)
@@ -50,6 +68,11 @@ class LoaderModule(KitsuneModule):
 
         try:
             mod = await loader.load_from_url(url)
+            # Persist URL so it survives restart
+            saved = list(self.db.get(_DB_OWNER, _DB_KEY_MODS, []))
+            if url not in saved:
+                saved.append(url)
+                await self.db.set(_DB_OWNER, _DB_KEY_MODS, saved)
             await m.edit(
                 self.strings("loaded").format(name=mod.name, ver=mod.version),
                 parse_mode="html",
@@ -72,6 +95,10 @@ class LoaderModule(KitsuneModule):
         name = parts[1].strip().lower()
         loader = self._get_loader()
         if loader and await loader.unload(name):
+            # Remove from persisted list
+            saved = list(self.db.get(_DB_OWNER, _DB_KEY_MODS, []))
+            saved = [u for u in saved if name not in u.lower()]
+            await self.db.set(_DB_OWNER, _DB_KEY_MODS, saved)
             await event.reply(self.strings("unloaded").format(name=name), parse_mode="html")
         else:
             await event.reply(self.strings("not_found").format(name=name), parse_mode="html")
