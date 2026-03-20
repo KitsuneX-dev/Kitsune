@@ -196,12 +196,11 @@ class BackupModule(KitsuneModule):
     async def _ensure_backup_dest(self) -> int:
         """
         Возвращает chat_id группы KitsuneBackup.
-        Если группа ещё не создана — создаёт её, добавляет бота и сохраняет id в БД.
+        Если группа ещё не создана — создаёт её и сохраняет id в БД.
         Если сохранённый id больше не валиден — пересоздаёт.
         """
         chat_id = self.db.get(_DB_OWNER, "group_id", None)
         if chat_id:
-            # Проверяем что группа ещё существует
             try:
                 await self.client.get_entity(int(chat_id))
                 return int(chat_id)
@@ -209,64 +208,36 @@ class BackupModule(KitsuneModule):
                 logger.warning("Backup: saved group_id %s is invalid, recreating", chat_id)
                 await self.db.delete(_DB_OWNER, "group_id")
 
-        from telethon.tl.functions.messages import CreateChatRequest
-        from telethon.tl.functions.messages import MigrateChatRequest
-        from telethon.tl.functions.messages import EditChatAboutRequest
+        # Создаём мегагруппу (супергруппу) через CreateChannelRequest —
+        # он возвращает нормальный объект с .chats и не требует users
+        from telethon.tl.functions.channels import CreateChannelRequest
+        from telethon.tl.functions.channels import InviteToChannelRequest
 
-        # Узнаём username бота чтобы добавить его в группу
-        notifier = None
-        loader = getattr(self.client, "_kitsune_loader", None)
-        if loader:
-            notifier = loader.modules.get("notifier")
-
-        bot_username = None
-        if notifier:
-            bot_username = self.db.get("kitsune.notifier", "bot_username", None)
-
-        # Создаём обычный чат
         try:
-            users_to_add = [bot_username] if bot_username else []
-            result = await self.client(
-                CreateChatRequest(
-                    users=users_to_add,
-                    title="KitsuneBackup",
-                )
-            )
+            result = await self.client(CreateChannelRequest(
+                title="KitsuneBackup",
+                about="🦊 Kitsune Userbot — автоматические резервные копии базы данных",
+                megagroup=True,  # создаём как супергруппу сразу
+            ))
             gid = result.chats[0].id
         except Exception as exc:
-            logger.error("Backup: failed to create chat: %s", exc)
-            # Если не получилось с ботом — пробуем без него
-            try:
-                result = await self.client(
-                    CreateChatRequest(users=[], title="KitsuneBackup")
-                )
-                gid = result.chats[0].id
-            except Exception as exc2:
-                raise RuntimeError(f"Не удалось создать группу KitsuneBackup: {exc2}") from exc2
+            raise RuntimeError(f"Не удалось создать группу KitsuneBackup: {exc}") from exc
 
-        # Мигрируем в супергруппу для надёжности
+        # Добавляем бота в группу если знаем его username
         try:
-            await self.client(MigrateChatRequest(chat_id=gid))
-            async for dialog in self.client.iter_dialogs():
-                if dialog.title == "KitsuneBackup" and dialog.is_channel:
-                    gid = dialog.id
-                    break
-        except Exception:
-            pass
-
-        # Описание группы
-        try:
-            await self.client(EditChatAboutRequest(
-                peer=gid,
-                about="🦊 Kitsune Userbot — автоматические резервные копии базы данных",
-            ))
-        except Exception:
-            pass
+            bot_username = self.db.get("kitsune.notifier", "bot_username", None)
+            if bot_username:
+                bot_entity = await self.client.get_entity(f"@{bot_username}")
+                await self.client(InviteToChannelRequest(
+                    channel=gid,
+                    users=[bot_entity],
+                ))
+        except Exception as exc:
+            logger.debug("Backup: could not add bot to group — %s", exc)
 
         await self.db.set(_DB_OWNER, "group_id", gid)
         logger.info("Backup: created KitsuneBackup group id=%d", gid)
 
-        # Уведомляем пользователя в Saved Messages
         with __import__("contextlib").suppress(Exception):
             await self.client.send_message(
                 "me",

@@ -41,9 +41,9 @@ class PingModule(KitsuneModule):
             "━━━━━━━━━━━━━━\n"
             " \n"
             "🛰 Задержка: <code>{ms:.0f} мс</code>\n"
-            "⏱ В сети: <code>{uptime}</code>\n"
+            "⏱ Аптайм: <code>{uptime}</code>\n"
             "💠 Версия: <code>{version}</code>\n"
-            "🌑 Статус: <code>Stable</code>\n"
+            "🌑 Статус: <code>Beta (Stable)</code>\n"
             " \n"
             "━━━━━━━━━━━━━━"
         ),
@@ -67,12 +67,9 @@ class PingModule(KitsuneModule):
     _start_time: float = time.time()
 
     async def on_load(self) -> None:
-        # Record start time in DB so it persists across restarts
-        stored = self.db.get("kitsune.ping", "start_time", None)
-        if not stored:
-            await self.db.set("kitsune.ping", "start_time", self._start_time)
-        else:
-            PingModule._start_time = float(stored)
+        # Всегда сбрасываем время при запуске — аптайм считается с текущего старта
+        PingModule._start_time = time.time()
+        await self.db.set("kitsune.ping", "start_time", PingModule._start_time)
 
     @command("ping", required=OWNER)
     async def ping_cmd(self, event) -> None:
