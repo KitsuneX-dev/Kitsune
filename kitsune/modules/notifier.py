@@ -71,8 +71,13 @@ class NotifierModule(KitsuneModule):
         token = self.db.get(_DB_OWNER, "bot_token", None)
 
         if token:
-            # Бот уже есть — просто подключаемся
-            asyncio.ensure_future(self._start_polling(str(token), first_run=False))
+            # Бот уже есть — подключаемся.
+            # Проверяем отдельно — спрашивали ли уже про интервал бэкапа.
+            # Это нужно для тех кто обновился со старой версии без авто-бэкапа.
+            backup_asked = self.db.get(_DB_OWNER, "backup_interval_asked", False)
+            asyncio.ensure_future(self._start_polling(
+                str(token), first_run=not backup_asked
+            ))
             self._check_task = asyncio.ensure_future(self._update_check_loop())
         else:
             # Первый запуск — ищем существующего бота или создаём нового
@@ -93,6 +98,62 @@ class NotifierModule(KitsuneModule):
         await self.db.delete(_DB_OWNER, "bot_username")
         await self._stop_polling()
         await event.reply(self.strings("reset_done"), parse_mode="html")
+
+    @command("mybots", required=OWNER)
+    async def mybots_cmd(self, event) -> None:
+        """.mybots — показать список ботов Kitsune на этом аккаунте"""
+        m = await event.reply("🔍 Ищу ботов...", parse_mode="html")
+        try:
+            bots = await self._list_kitsune_bots()
+            if not bots:
+                await m.edit("❌ Ботов Kitsune не найдено.", parse_mode="html")
+                return
+            current_token = self.db.get(_DB_OWNER, "bot_token", None)
+            lines = ["🤖 <b>Боты Kitsune на этом аккаунте:</b>\n"]
+            for i, (uname, token) in enumerate(bots, 1):
+                active = " ✅ <i>(активный)</i>" if token and token == current_token else ""
+                lines.append(f"  {i}. @{uname}{active}")
+            lines.append("\nЧтобы выбрать бота: <code>.setbot @username</code>")
+            await m.edit("\n".join(lines), parse_mode="html")
+        except Exception as exc:
+            await m.edit(f"❌ Ошибка: <code>{exc}</code>", parse_mode="html")
+
+    @command("setbot", required=OWNER)
+    async def setbot_cmd(self, event) -> None:
+        """.setbot @username — выбрать какого бота использовать"""
+        arg = self.get_args(event).strip().lstrip("@")
+        if not arg:
+            await event.reply(
+                "❌ Укажи username: <code>.setbot @kitsune_123456_bot</code>",
+                parse_mode="html",
+            )
+            return
+
+        m = await event.reply("🔍 Получаю токен...", parse_mode="html")
+        try:
+            token = await self._get_token_for_bot(arg)
+            if not token:
+                await m.edit(
+                    f"❌ Не удалось получить токен для @{arg}.\nУбедись что этот бот принадлежит тебе.",
+                    parse_mode="html",
+                )
+                return
+
+            # Останавливаем текущий polling
+            await self._stop_polling()
+
+            # Сохраняем новый токен
+            await self.db.set(_DB_OWNER, "bot_token", token)
+            await self.db.set(_DB_OWNER, "bot_username", arg)
+            self._save_token_to_config(token)
+
+            asyncio.ensure_future(self._start_polling(token, first_run=False))
+            await m.edit(
+                f"✅ Теперь использую бота <b>@{arg}</b>.",
+                parse_mode="html",
+            )
+        except Exception as exc:
+            await m.edit(f"❌ Ошибка: <code>{exc}</code>", parse_mode="html")
 
     # ── Auto setup ────────────────────────────────────────────────────────────
 
@@ -150,6 +211,53 @@ class NotifierModule(KitsuneModule):
             logger.warning("Notifier: BotFather timed out, retry on next restart")
         except Exception:
             logger.exception("Notifier: auto setup failed")
+
+    async def _list_kitsune_bots(self) -> list[tuple[str, str | None]]:
+        """
+        Получить список всех ботов через /mybots у BotFather.
+        Возвращает [(username, token_or_None), ...]
+        Для каждого бота пытается получить токен через /token.
+        """
+        results = []
+        try:
+            async with self.client.conversation("@BotFather", timeout=30) as conv:
+                await conv.send_message("/mybots")
+                resp = await conv.get_response()
+                text = resp.text or ""
+
+                # Все usernames из списка
+                import re as _re
+                usernames = _re.findall(r"@([a-zA-Z0-9_]+bot)", text, _re.IGNORECASE)
+
+                for uname in usernames:
+                    try:
+                        await conv.send_message(f"@{uname}")
+                        await conv.get_response()
+                        await conv.send_message("/token")
+                        token_resp = await conv.get_response()
+                        token_text = token_resp.text or ""
+                        m = _re.search(r"(\d{8,}:[A-Za-z0-9_-]{35,})", token_text)
+                        results.append((uname, m.group(1) if m else None))
+                    except Exception:
+                        results.append((uname, None))
+        except Exception as exc:
+            logger.debug("Notifier: _list_kitsune_bots failed — %s", exc)
+        return results
+
+    async def _get_token_for_bot(self, username: str) -> str | None:
+        """Получить токен конкретного бота через BotFather."""
+        import re as _re
+        try:
+            async with self.client.conversation("@BotFather", timeout=20) as conv:
+                await conv.send_message(f"@{username}")
+                await conv.get_response()
+                await conv.send_message("/token")
+                resp = await conv.get_response()
+                m = _re.search(r"(\d{8,}:[A-Za-z0-9_-]{35,})", resp.text or "")
+                return m.group(1) if m else None
+        except Exception as exc:
+            logger.debug("Notifier: _get_token_for_bot failed — %s", exc)
+            return None
 
     async def _find_existing_bot(self, tg_id: int) -> tuple[str | None, str | None]:
         """
@@ -338,6 +446,7 @@ class NotifierModule(KitsuneModule):
                     backup = loader.modules.get("backup") if loader else None
                     if backup:
                         await backup.show_interval_setup(self._bot, int(owner_id))
+                        await self.db.set(_DB_OWNER, "backup_interval_asked", True)
 
         except Exception:
             logger.exception("Notifier: polling failed — bot may be frozen")
