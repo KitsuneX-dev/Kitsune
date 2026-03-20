@@ -70,6 +70,18 @@ class KitsuneModule:
     author: str = ""
     version: str = "1.0"
 
+    # Иконка модуля — отображается в .help (любой эмодзи)
+    icon: str = "📦"
+
+    # Категория для группировки в .help
+    # Доступные: "system", "tools", "fun", "admin", "other"
+    category: str = "other"
+
+    # Зависимости — имена модулей которые должны быть загружены раньше.
+    # Loader проверит их перед загрузкой этого модуля.
+    # Пример: requires = ["security", "notifier"]
+    requires: typing.ClassVar[list[str]] = []
+
     def __init__(self, client: typing.Any, db: typing.Any) -> None:
         self.client  = client
         self.db      = db
@@ -285,8 +297,17 @@ class Loader:
         if cls is None:
             raise ModuleLoadError(f"No KitsuneModule subclass found in {name!r}")
 
-        # 4. Instantiate and initialise
+        # 4. Проверяем зависимости (requires) до инстанциирования
         module_name = (cls.name or name).lower()
+        missing = [
+            req for req in (cls.requires or [])
+            if req.lower() not in self._modules
+        ]
+        if missing:
+            raise ModuleLoadError(
+                f"Module {module_name!r} requires {missing} — load them first"
+            )
+
         if module_name in self._modules:
             await self.unload(module_name)
 

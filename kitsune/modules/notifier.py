@@ -1,6 +1,6 @@
 """
 Kitsune built-in: Notifier
-Автоматически создаёт бота через @BotFather и присылает уведомления об обновлениях.
+Авто-создание бота, уведомления, авто-бэкап по расписанию.
 Команды: .resetbot
 """
 
@@ -19,23 +19,22 @@ from ..core.security import OWNER
 
 logger = logging.getLogger(__name__)
 
-_DB_OWNER = "kitsune.notifier"
-_CHECK_INTERVAL = 30  # проверять каждые 30 секунд
+_DB_OWNER       = "kitsune.notifier"
+_CHECK_INTERVAL = 30  # секунд между проверками обновлений
 
 
 class NotifierModule(KitsuneModule):
     name        = "notifier"
-    description = "Авто-создание бота и уведомления об обновлениях"
+    description = "Авто-создание бота и уведомления"
     author      = "Yushi"
-    version     = "1.1"
+    version     = "1.2"
 
     strings_ru = {
         "creating":      "🤖 Создаю бота через @BotFather...",
-        "already":       "✅ Бот уже настроен: <b>{name}</b>\nЧтобы сбросить и пересоздать: <code>.resetbot</code>",
         "done":          "✅ Бот <b>{name}</b> создан и подключён!\nТокен сохранён автоматически.",
-        "botfather_err": "❌ Не удалось создать бота:\n<code>{err}</code>",
+        "reused":        "♻️ Бот <b>{name}</b> уже существует — переподключаю.\nПересоздавать не нужно.",
         "reset_done":    "♻️ Бот сброшен. Перезапусти Kitsune — бот создастся заново.",
-        "frozen_hint":   (
+        "frozen_hint": (
             "⚠️ <b>Бот заморожен Telegram.</b>\n\n"
             "Создай нового бота у @BotFather и замени токен в config.toml:\n\n"
             "<code>bot_token = \"новый_токен\"</code>\n\n"
@@ -55,13 +54,15 @@ class NotifierModule(KitsuneModule):
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        self._bot          = None
-        self._dp           = None
-        self._polling_task = None
-        self._check_task   = None
+        self._bot:          object | None = None
+        self._dp:           object | None = None
+        self._polling_task: asyncio.Task | None = None
+        self._check_task:   asyncio.Task | None = None
+
+    # ── Lifecycle ─────────────────────────────────────────────────────────────
 
     async def on_load(self) -> None:
-        # 1. Check if config.toml has a manually set token (for frozen bot recovery)
+        # 1. Токен из config.toml имеет приоритет (восстановление замороженного бота)
         config_token = self._load_token_from_config()
         if config_token:
             await self.db.set(_DB_OWNER, "bot_token", config_token)
@@ -70,11 +71,11 @@ class NotifierModule(KitsuneModule):
         token = self.db.get(_DB_OWNER, "bot_token", None)
 
         if token:
-            # Already have a token — start polling
-            asyncio.ensure_future(self._start_polling(str(token)))
+            # Бот уже есть — просто подключаемся
+            asyncio.ensure_future(self._start_polling(str(token), first_run=False))
             self._check_task = asyncio.ensure_future(self._update_check_loop())
         else:
-            # First run — auto-create bot via BotFather
+            # Первый запуск — ищем существующего бота или создаём нового
             asyncio.ensure_future(self._auto_setup())
 
     async def on_unload(self) -> None:
@@ -86,23 +87,109 @@ class NotifierModule(KitsuneModule):
 
     @command("resetbot", required=OWNER)
     async def resetbot_cmd(self, event) -> None:
-        """.resetbot — сбросить бота (будет пересоздан при следующем запуске)"""
+        """.resetbot — сбросить бота (будет найден/создан заново при перезапуске)"""
         await self.db.delete(_DB_OWNER, "bot_token")
         await self.db.delete(_DB_OWNER, "bot_name")
+        await self.db.delete(_DB_OWNER, "bot_username")
         await self._stop_polling()
         await event.reply(self.strings("reset_done"), parse_mode="html")
 
     # ── Auto setup ────────────────────────────────────────────────────────────
 
     async def _auto_setup(self) -> None:
-        """Talk to @BotFather, create a bot, extract token."""
+        """
+        Логика первого запуска:
+        1. Проверяем — есть ли уже бот созданный под этот tg_id в БД другого устройства
+           (токен мог прийти через sync БД или config.toml).
+        2. Если нет — создаём нового через BotFather.
+        3. Помечаем этот tg_id как «уже настроенный».
+        """
         try:
-            me           = await self.client.get_me()
-            bot_name     = f"Kitsune {me.first_name}"
-            base_username = f"kitsune_{me.id}_bot"
+            me = await self.client.get_me()
+            logger.info("Notifier: first run for tg_id=%d", me.id)
 
-            logger.info("Notifier: starting BotFather auto-setup...")
+            # Сохраняем tg_id — по нему потом определяем «свой» аккаунт
+            await self.db.set(_DB_OWNER, "owner_tg_id", me.id)
 
+            bot_name = f"Kitsune {me.first_name}"
+            token    = None
+            reused   = False
+
+            # Пробуем найти существующего бота через BotFather (список My Bots)
+            token, bot_username = await self._find_existing_bot(me.id)
+            if token:
+                reused = True
+                logger.info("Notifier: found existing bot @%s", bot_username)
+            else:
+                # Создаём нового
+                token, bot_username = await self._create_bot(me, bot_name)
+
+            if not token:
+                logger.error("Notifier: failed to get token")
+                return
+
+            await self.db.set(_DB_OWNER, "bot_token",    token)
+            await self.db.set(_DB_OWNER, "bot_name",     bot_name)
+            await self.db.set(_DB_OWNER, "bot_username", bot_username or "")
+            await self.db.set(_DB_OWNER, "owner_id",     me.id)
+            self._save_token_to_config(token)
+
+            # Уведомляем пользователя в Saved Messages
+            key = "reused" if reused else "done"
+            await self.client.send_message(
+                "me",
+                self.strings(key).format(name=bot_name),
+                parse_mode="html",
+            )
+
+            # Запускаем polling — first_run=True чтобы показать выбор интервала бэкапа
+            asyncio.ensure_future(self._start_polling(token, first_run=not reused))
+            self._check_task = asyncio.ensure_future(self._update_check_loop())
+
+        except asyncio.TimeoutError:
+            logger.warning("Notifier: BotFather timed out, retry on next restart")
+        except Exception:
+            logger.exception("Notifier: auto setup failed")
+
+    async def _find_existing_bot(self, tg_id: int) -> tuple[str | None, str | None]:
+        """
+        Спрашиваем BotFather /mybots — ищем бота с именем kitsune_{tg_id}.
+        Если находим — берём его токен через /token.
+        """
+        try:
+            async with self.client.conversation("@BotFather", timeout=20) as conv:
+                await conv.send_message("/mybots")
+                resp = await conv.get_response()
+                text = resp.text or ""
+
+                # Ищем username вида kitsune_<tg_id>..._bot
+                pattern = rf"kitsune_{tg_id}[a-z0-9_]*_bot"
+                match   = re.search(pattern, text, re.IGNORECASE)
+                if not match:
+                    return None, None
+
+                username = match.group(0)
+
+                # Нажимаем кнопку с ботом или отправляем его username
+                await conv.send_message(f"@{username}")
+                await conv.get_response()
+
+                await conv.send_message("/token")
+                token_resp = await conv.get_response()
+                token_text = token_resp.text or ""
+
+                token_match = re.search(r"(\d{8,}:[A-Za-z0-9_-]{35,})", token_text)
+                if token_match:
+                    return token_match.group(1), username
+
+        except Exception as exc:
+            logger.debug("Notifier: _find_existing_bot failed — %s", exc)
+
+        return None, None
+
+    async def _create_bot(self, me, bot_name: str) -> tuple[str | None, str | None]:
+        """Создать нового бота через BotFather."""
+        try:
             async with self.client.conversation("@BotFather", timeout=30) as conv:
                 await conv.send_message("/start")
                 await conv.get_response()
@@ -110,52 +197,31 @@ class NotifierModule(KitsuneModule):
                 await conv.send_message("/newbot")
                 await conv.get_response()
 
-                # Send display name
                 await conv.send_message(bot_name)
                 await conv.get_response()
 
-                # Try usernames until one works
-                token = None
+                token    = None
+                username = None
                 for suffix in ["", f"_{me.id % 10000}", "_ub", "_kitsune_ub"]:
-                    username = f"kitsune_{me.id}{suffix}_bot"
-                    await conv.send_message(username)
+                    uname = f"kitsune_{me.id}{suffix}_bot"
+                    await conv.send_message(uname)
                     resp = await conv.get_response()
                     text = resp.text or ""
 
-                    match = re.search(r"(\d{8,}:[A-Za-z0-9_-]{35,})", text)
-                    if match:
-                        token = match.group(1)
+                    m = re.search(r"(\d{8,}:[A-Za-z0-9_-]{35,})", text)
+                    if m:
+                        token    = m.group(1)
+                        username = uname
                         break
 
-                    # Username taken or invalid — try next
-                    if "Sorry" in text or "invalid" in text.lower() or "try" in text.lower():
+                    if any(w in text.lower() for w in ("sorry", "invalid", "try", "занят")):
                         continue
                     break
 
-            if not token:
-                raise RuntimeError("Не удалось получить токен от @BotFather")
-
-            await self.db.set(_DB_OWNER, "bot_token", token)
-            await self.db.set(_DB_OWNER, "bot_name",  bot_name)
-            await self.db.set(_DB_OWNER, "owner_id",  me.id)
-            self._save_token_to_config(token)
-
-            logger.info("Notifier: bot created — %s", bot_name)
-
-            # Tell user in Saved Messages
-            await self.client.send_message(
-                "me",
-                self.strings("done").format(name=bot_name),
-                parse_mode="html",
-            )
-
-            asyncio.ensure_future(self._start_polling(token))
-            self._check_task = asyncio.ensure_future(self._update_check_loop())
-
-        except asyncio.TimeoutError:
-            logger.warning("Notifier: BotFather timed out, will retry on next restart")
-        except Exception:
-            logger.exception("Notifier: auto setup failed")
+            return token, username
+        except Exception as exc:
+            logger.error("Notifier: _create_bot failed — %s", exc)
+            return None, None
 
     # ── Config helpers ────────────────────────────────────────────────────────
 
@@ -181,19 +247,18 @@ class NotifierModule(KitsuneModule):
                 cfg = toml.loads(cfg_path.read_text(encoding="utf-8"))
                 cfg["bot_token"] = token
                 cfg_path.write_text(toml.dumps(cfg), encoding="utf-8")
-                logger.info("Notifier: token saved to config.toml")
         except Exception:
             logger.warning("Notifier: could not write token to config.toml")
 
     # ── Polling ───────────────────────────────────────────────────────────────
 
-    async def _start_polling(self, token: str) -> None:
+    async def _start_polling(self, token: str, *, first_run: bool = False) -> None:
         try:
             from aiogram import Bot, Dispatcher, Router
             from aiogram.client.default import DefaultBotProperties
             from aiogram.enums import ParseMode
             from aiogram.filters import Command
-            from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+            from aiogram.types import Message, CallbackQuery
         except ImportError:
             logger.warning("Notifier: aiogram not installed, polling disabled")
             return
@@ -205,8 +270,8 @@ class NotifierModule(KitsuneModule):
                 token=token,
                 default=DefaultBotProperties(parse_mode=ParseMode.HTML),
             )
-            self._dp = Dispatcher()
-            router   = Router()
+            self._dp  = Dispatcher()
+            router    = Router()
             self._dp.include_router(router)
             ref = self
 
@@ -217,37 +282,26 @@ class NotifierModule(KitsuneModule):
                     await msg.answer("🔒 Нет доступа.")
                     return
                 await msg.answer(
-                    "🦊 <b>Kitsune Notifier</b>\n\n"
-                    "Я буду присылать тебе уведомления об обновлениях."
+                    "🦊 <b>Kitsune Notifier</b>\n\nЯ буду присылать уведомления и хранить бэкапы."
                 )
 
-            @router.callback_query(lambda c: c.data == "do_update")
-            async def on_update(call: CallbackQuery) -> None:
+            # ── Callback: обновление (из .update) ────────────────────────────
+            @router.callback_query(lambda c: c.data in ("update_yes", "update_no", "do_update"))
+            async def on_update_cb(call: CallbackQuery) -> None:
                 owner_id = ref.db.get(_DB_OWNER, "owner_id", None)
                 if call.from_user.id != owner_id:
                     await call.answer("🔒 Нет доступа.", show_alert=True)
                     return
                 await call.answer()
-                await call.message.edit_text(ref.strings("updating"))
-                try:
-                    await ref._do_update()
-                    await call.message.edit_text(ref.strings("update_done"))
-                except Exception as exc:
-                    await call.message.edit_text(
-                        ref.strings("update_err").format(err=str(exc))
-                    )
 
-            @router.callback_query(lambda c: c.data == "update_yes")
-            async def on_update_yes(call: CallbackQuery) -> None:
-                """Handle update confirmation from .update command"""
-                owner_id = ref.db.get(_DB_OWNER, "owner_id", None)
-                if call.from_user.id != owner_id:
-                    await call.answer("🔒 Нет доступа.", show_alert=True)
+                if call.data == "update_no":
+                    await ref.db.delete("kitsune.updater", "pending_update")
+                    await call.message.edit_text("❌ Обновление отменено.")
                     return
-                await call.answer()
+
                 pending = ref.db.get("kitsune.updater", "pending_update", None)
                 if not pending:
-                    await call.message.edit_text("❌ Данные обновления устарели. Запусти .update снова.")
+                    await call.message.edit_text("❌ Данные устарели. Запусти .update снова.")
                     return
                 await ref.db.delete("kitsune.updater", "pending_update")
                 await call.message.edit_text("⬇️ Скачиваю обновление...")
@@ -256,30 +310,38 @@ class NotifierModule(KitsuneModule):
                 except Exception as exc:
                     await call.message.edit_text(f"❌ Ошибка:\n<code>{exc}</code>")
 
-            @router.callback_query(lambda c: c.data == "update_no")
-            async def on_update_no(call: CallbackQuery) -> None:
-                """Handle update cancellation from .update command"""
+            # ── Callback: интервал авто-бэкапа ───────────────────────────────
+            @router.callback_query(lambda c: c.data and c.data.startswith("backup_interval:"))
+            async def on_backup_interval(call: CallbackQuery) -> None:
                 owner_id = ref.db.get(_DB_OWNER, "owner_id", None)
                 if call.from_user.id != owner_id:
                     await call.answer("🔒 Нет доступа.", show_alert=True)
                     return
-                await call.answer("Отменено")
-                await ref.db.delete("kitsune.updater", "pending_update")
-                await call.message.edit_text("❌ Обновление отменено.")
+                loader  = getattr(ref.client, "_kitsune_loader", None)
+                backup  = loader.modules.get("backup") if loader else None
+                if backup:
+                    await backup.handle_interval_callback(call)
+                else:
+                    await call.answer("Модуль backup не загружен.", show_alert=True)
 
             self._polling_task = asyncio.ensure_future(
                 self._dp.start_polling(self._bot, handle_signals=False)
             )
-            logger.info("Notifier: polling started")
+            logger.info("Notifier: polling started (first_run=%s)", first_run)
+
+            # Если первый запуск — показываем выбор интервала бэкапа
+            if first_run:
+                owner_id = self.db.get(_DB_OWNER, "owner_id", None)
+                if owner_id:
+                    await asyncio.sleep(2)  # дать время polling'у стартовать
+                    loader = getattr(self.client, "_kitsune_loader", None)
+                    backup = loader.modules.get("backup") if loader else None
+                    if backup:
+                        await backup.show_interval_setup(self._bot, int(owner_id))
 
         except Exception:
             logger.exception("Notifier: polling failed — bot may be frozen")
-            # Notify user in Saved Messages
-            await self.client.send_message(
-                "me",
-                self.strings("frozen_hint"),
-                parse_mode="html",
-            )
+            await self.client.send_message("me", self.strings("frozen_hint"), parse_mode="html")
 
     async def _stop_polling(self) -> None:
         if self._polling_task and not self._polling_task.done():
@@ -298,11 +360,10 @@ class NotifierModule(KitsuneModule):
         self._dp           = None
         self._polling_task = None
 
-    # ── Auto update check ────────────────────────────────────────────────────
+    # ── Update check loop ─────────────────────────────────────────────────────
 
     async def _update_check_loop(self) -> None:
-        """Check GitHub for new commits every 30 seconds."""
-        await asyncio.sleep(30)  # wait 30s after startup before first check
+        await asyncio.sleep(30)
         while True:
             try:
                 await self._check_for_updates()
@@ -313,75 +374,50 @@ class NotifierModule(KitsuneModule):
             await asyncio.sleep(_CHECK_INTERVAL)
 
     async def _check_for_updates(self) -> None:
-        """Check GitHub API for new commits (no git, no blocking I/O)."""
         import aiohttp
-
         REPO   = "KitsuneX-dev/Kitsune"
         BRANCH = "main"
-
-        # Get local HEAD commit sha from git
         try:
             import git
-            repo_path = os.path.abspath(
-                os.path.join(os.path.dirname(__file__), "..", "..")
-            )
-            repo = git.Repo(repo_path)
+            repo_path  = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+            repo       = git.Repo(repo_path)
+            local_sha  = repo.head.commit.hexsha
             try:
-                local_sha = repo.head.commit.hexsha
-                try:
-                    BRANCH = repo.active_branch.name
-                except TypeError:
-                    pass
-            except Exception:
-                local_sha = None
+                BRANCH = repo.active_branch.name
+            except TypeError:
+                pass
         except Exception:
             local_sha = None
 
-        # Fetch latest commits from GitHub API (async HTTP — non-blocking)
         try:
             url = f"https://api.github.com/repos/{REPO}/commits?sha={BRANCH}&per_page=10"
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
                     if resp.status != 200:
-                        logger.warning("Notifier: GitHub API returned %d", resp.status)
                         return
                     commits = await resp.json()
         except Exception as exc:
-            logger.warning("Notifier: GitHub API request failed: %s", exc)
+            logger.warning("Notifier: GitHub API failed: %s", exc)
             return
 
         if not commits:
             return
-
         latest_sha = commits[0].get("sha", "")
         if not latest_sha:
             return
-
-        # Already notified about this commit
         if latest_sha == self.db.get(_DB_OWNER, "last_notified_commit", None):
             return
-
-        # If we know our local sha — check if we're actually behind
         if local_sha and latest_sha == local_sha:
             return
 
-        # Mark as notified
         await self.db.set(_DB_OWNER, "last_notified_commit", latest_sha)
-
         from ..version import __version_str__
 
-        # Build changes list from GitHub commit messages
-        if local_sha:
-            # Find how many commits ahead GitHub is
-            shas = [c.get("sha", "") for c in commits]
-            if local_sha in shas:
-                idx = shas.index(local_sha)
-                new_commits = commits[:idx]
-            else:
-                new_commits = commits[:5]
+        shas = [c.get("sha", "") for c in commits]
+        if local_sha and local_sha in shas:
+            new_commits = commits[:shas.index(local_sha)]
         else:
             new_commits = commits[:5]
-
         if not new_commits:
             return
 
@@ -390,24 +426,15 @@ class NotifierModule(KitsuneModule):
             for c in new_commits
             if c.get("commit", {}).get("message")
         )
-        new_ver = f"{__version_str__}+{len(new_commits)}"
-
         await self.notify_update(
             current=__version_str__,
-            new=new_ver,
+            new=f"{__version_str__}+{len(new_commits)}",
             changes=changes or "—",
         )
-        logger.info("Notifier: update notification sent (%d new commits)", len(new_commits))
 
-    # ── Public API for updater ────────────────────────────────────────────────
+    # ── Public API ────────────────────────────────────────────────────────────
 
-    async def send_restart_report(
-        self,
-        restart_time: str,
-        total_time: str,
-        mod_count: int,
-    ) -> None:
-        """Send restart completion report via bot."""
+    async def send_restart_report(self, restart_time: str, total_time: str, mod_count: int) -> None:
         token    = self.db.get(_DB_OWNER, "bot_token", None)
         owner_id = self.db.get(_DB_OWNER, "owner_id",  None)
         if not token or not owner_id:
@@ -416,23 +443,19 @@ class NotifierModule(KitsuneModule):
             from aiogram import Bot
             from aiogram.client.default import DefaultBotProperties
             from aiogram.enums import ParseMode
-
-            bot = Bot(
-                token=str(token),
-                default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+            bot = Bot(token=str(token), default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+            await bot.send_message(
+                chat_id=int(owner_id),
+                text=(
+                    "✅ <b>Kitsune перезапущен</b>\n\n"
+                    f"⏱ Перезапуск: <code>{restart_time}</code>\n"
+                    f"📦 Модули: <code>{mod_count}</code>\n"
+                    f"⚡ Полная загрузка: <code>{total_time}</code>"
+                ),
             )
-            text = (
-                "✅ <b>Kitsune перезапущен</b>\n\n"
-                f"⏱ Время перезапуска: <code>{restart_time}</code>\n"
-                f"📦 Модули загружены: <code>{mod_count}</code>\n"
-                f"⚡ Полная загрузка заняла: <code>{total_time}</code>"
-            )
-            await bot.send_message(chat_id=int(owner_id), text=text)
             await bot.session.close()
         except Exception:
             logger.exception("Notifier: failed to send restart report")
-
-
 
     async def notify_update(self, current: str, new: str, changes: str = "") -> None:
         token    = self.db.get(_DB_OWNER, "bot_token", None)
@@ -444,19 +467,14 @@ class NotifierModule(KitsuneModule):
             from aiogram.client.default import DefaultBotProperties
             from aiogram.enums import ParseMode
             from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-
-            bot = Bot(
-                token=str(token),
-                default=DefaultBotProperties(parse_mode=ParseMode.HTML),
-            )
-            kb = InlineKeyboardMarkup(inline_keyboard=[[
+            bot = Bot(token=str(token), default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+            kb  = InlineKeyboardMarkup(inline_keyboard=[[
                 InlineKeyboardButton(text="⬆️ Обновить", callback_data="do_update"),
             ]])
             await bot.send_message(
                 chat_id=int(owner_id),
                 text=self.strings("update_notify").format(
-                    current=current, new=new,
-                    changes=changes or "—",
+                    current=current, new=new, changes=changes or "—"
                 ),
                 reply_markup=kb,
             )
@@ -468,15 +486,19 @@ class NotifierModule(KitsuneModule):
 
     async def _do_update(self) -> None:
         import sys
-        repo_path = os.path.abspath(
-            os.path.join(os.path.dirname(__file__), "..", "..")
-        )
+        repo_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
         try:
             import git
-            repo = git.Repo(repo_path)
-            repo.remote("origin").pull()
+            repo   = git.Repo(repo_path)
+            origin = repo.remote("origin")
+            origin.fetch()
+            try:
+                branch = repo.active_branch.name
+            except TypeError:
+                branch = "main"
+            repo.git.reset("--hard", f"origin/{branch}")
         except Exception as exc:
-            raise RuntimeError(f"Git pull failed: {exc}") from exc
+            raise RuntimeError(f"Git update failed: {exc}") from exc
 
         proc = await asyncio.create_subprocess_exec(
             sys.executable, "-m", "pip", "install", "-r", "requirements.txt",

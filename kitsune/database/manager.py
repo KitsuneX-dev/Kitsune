@@ -251,7 +251,7 @@ class DatabaseManager:
             self._data.setdefault(owner, {})[key] = value
             self._maybe_snapshot()
 
-        asyncio.ensure_future(self._schedule_save())
+        self._kick_save()
         return True
 
     def set_sync(self, owner: str, key: str, value: JSONValue) -> bool:
@@ -263,7 +263,7 @@ class DatabaseManager:
             raise ValueError(f"Value for {owner}.{key} is not JSON-serializable")
         self._data.setdefault(owner, {})[key] = value
         self._maybe_snapshot()
-        asyncio.ensure_future(self._schedule_save())
+        self._kick_save()
         return True
 
     async def delete(self, owner: str, key: str) -> bool:
@@ -273,7 +273,7 @@ class DatabaseManager:
                 del self._data[owner][key]
                 if not self._data[owner]:
                     del self._data[owner]
-        asyncio.ensure_future(self._schedule_save())
+        self._kick_save()
         return True
 
     async def force_save(self) -> bool:
@@ -320,8 +320,15 @@ class DatabaseManager:
             while len(self._revisions) > self._MAX_REVISIONS:
                 self._revisions.pop(0)
 
+    def _kick_save(self) -> None:
+        """Дебаунс: отменяем предыдущую задачу и запускаем новую с задержкой 1 сек.
+        Сколько бы раз set() ни вызвали подряд — SQLite запишется ровно один раз."""
+        if self._pending_save and not self._pending_save.done():
+            self._pending_save.cancel()
+        self._pending_save = asyncio.ensure_future(self._schedule_save())
+
     async def _schedule_save(self) -> None:
-        """Debounced save — waits 1s then persists."""
+        """Подождать 1 сек (debounce window), затем сохранить один раз."""
         await asyncio.sleep(1)
         if self._backend:
             async with self._lock:
