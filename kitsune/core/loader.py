@@ -106,9 +106,24 @@ class KitsuneModule:
         return parts[1].strip() if len(parts) > 1 else ""
 
     def strings(self, key: str, lang: str = "ru") -> str:
-        """Get a localised string from the module's `strings_*` dict."""
-        attr = f"strings_{lang}" if lang != "en" else "strings"
-        pool = getattr(self, attr, None) or getattr(self, "strings", {})
+        """Get a localised string from the module's strings_* dict."""
+        # 1. Пробуем strings_ru / strings_de / etc.
+        attr = f"strings_{lang}" if lang != "en" else "strings_en"
+        pool = getattr(self, attr, None)
+
+        # 2. Fallback на strings_en
+        if not isinstance(pool, dict):
+            pool = getattr(self, "strings_en", None)
+
+        # 3. Fallback на атрибут класса strings (только dict, не метод!)
+        if not isinstance(pool, dict):
+            cls_attr = vars(type(self)).get("strings")
+            if isinstance(cls_attr, dict):
+                pool = cls_attr
+
+        if not isinstance(pool, dict):
+            return f"<missing:{key}>"
+
         return pool.get(key, f"<missing:{key}>")
 
 
