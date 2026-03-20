@@ -43,14 +43,32 @@ logger = logging.getLogger(__name__)
 
 # ── Config helpers ────────────────────────────────────────────────────────────
 
+_config_cache: dict[str, Any] | None = None
+_config_mtime: float = 0.0
+
+
 def _load_raw_config() -> dict[str, Any]:
-    """Load config.toml; fall back to config.json (migration) or empty dict."""
+    """Load config.toml with mtime-based cache. Falls back to config.json (migration)."""
+    global _config_cache, _config_mtime
+
     if CONFIG_PATH.exists():
         try:
+            mt = CONFIG_PATH.stat().st_mtime
+        except OSError:
+            mt = 0.0
+        if _config_cache is not None and mt == _config_mtime:
+            return _config_cache
+        try:
             import toml
-            return toml.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+            data = toml.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+            _config_cache = data
+            _config_mtime = mt
+            return data
         except Exception:
             logger.exception("main: failed to parse config.toml")
+            if _config_cache is not None:
+                return _config_cache
+
     # Legacy JSON migration
     legacy = BASE_PATH / "config.json"
     if legacy.exists():
@@ -59,13 +77,22 @@ def _load_raw_config() -> dict[str, Any]:
             logger.info("main: migrating config.json → config.toml")
             _save_config(data)
             return data
+
     return {}
+
+
+def _invalidate_config_cache() -> None:
+    """Call after writing config so next read sees fresh data."""
+    global _config_cache, _config_mtime
+    _config_cache = None
+    _config_mtime = 0.0
 
 
 def _save_config(data: dict[str, Any]) -> None:
     try:
         import toml
         CONFIG_PATH.write_text(toml.dumps(data), encoding="utf-8")
+        _invalidate_config_cache()
     except Exception:
         logger.exception("main: failed to save config.toml")
 
@@ -274,6 +301,7 @@ async def _startup(args: argparse.Namespace) -> None:
     # ── Database ──────────────────────────────────────────────────────────────
     db = DatabaseManager(client)
     await db.init()
+    client._kitsune_db = db
 
     # ── Security ──────────────────────────────────────────────────────────────
     security = SecurityManager(client, db)
