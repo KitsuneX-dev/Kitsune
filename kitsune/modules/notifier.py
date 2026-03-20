@@ -417,9 +417,12 @@ class NotifierModule(KitsuneModule):
         await self._stop_polling()
 
         try:
+            from aiogram.client.session.aiohttp import AiohttpSession
+            session = AiohttpSession(timeout=30)
             self._bot = Bot(
                 token=token,
                 default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+                session=session,
             )
             self._dp  = Dispatcher()
             router    = Router()
@@ -430,11 +433,17 @@ class NotifierModule(KitsuneModule):
             async def on_start(msg: Message) -> None:
                 owner_id = ref.db.get(_DB_OWNER, "owner_id", None)
                 if msg.from_user.id != owner_id:
-                    await msg.answer("🔒 Нет доступа.")
+                    try:
+                        await msg.answer("🔒 Нет доступа.")
+                    except Exception:
+                        pass
                     return
-                await msg.answer(
-                    "🦊 <b>Kitsune Notifier</b>\n\nЯ буду присылать уведомления и хранить бэкапы."
-                )
+                try:
+                    await msg.answer(
+                        "🦊 <b>Kitsune Notifier</b>\n\nЯ буду присылать уведомления и хранить бэкапы."
+                    )
+                except Exception as e:
+                    logger.warning("Notifier: on_start answer failed — %s", e)
 
             # ── Callback: обновление (из .update) ────────────────────────────
             @router.callback_query(lambda c: c.data in ("update_yes", "update_no", "do_update"))
