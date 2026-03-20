@@ -419,14 +419,7 @@ class NotifierModule(KitsuneModule):
         try:
             from aiogram.client.session.aiohttp import AiohttpSession
 
-            # Читаем прокси из config.toml и пробрасываем в aiogram
-            proxy_url = self._get_proxy_url()
-            if proxy_url:
-                logger.info("Notifier: aiogram bot using proxy %s", proxy_url.split("@")[-1])
-                session = AiohttpSession(proxy=proxy_url, timeout=60)
-            else:
-                session = AiohttpSession(timeout=60)
-
+            session = AiohttpSession(timeout=30)
             self._bot = Bot(
                 token=token,
                 default=DefaultBotProperties(parse_mode=ParseMode.HTML),
@@ -556,7 +549,7 @@ class NotifierModule(KitsuneModule):
     # ── Update check loop ─────────────────────────────────────────────────────
 
     async def _update_check_loop(self) -> None:
-        # Первая проверка через 5 минут после старта — не сразу
+        # Первая проверка через 5 минут после старта
         await asyncio.sleep(300)
         while True:
             try:
@@ -565,23 +558,25 @@ class NotifierModule(KitsuneModule):
                 break
             except Exception:
                 logger.exception("Notifier: update check failed")
-            await asyncio.sleep(_CHECK_INTERVAL * 20)  # проверяем раз в ~10 минут
+            await asyncio.sleep(600)  # раз в 10 минут
 
     async def _check_for_updates(self) -> None:
         """
-        Проверка обновлений через git напрямую — без GitHub API.
+        Проверка обновлений через GitPython напрямую — как делает Hikka.
 
-        Используем git ls-remote + git log через asyncio.subprocess.
-        Это работает через любой прокси (git читает GIT_PROXY_COMMAND / http.proxy),
-        не зависит от доступности api.github.com, и не требует aiohttp.
+        Алгоритм Hikka (update_notifier.py):
+          1. repo.remotes → remote.fetch()   — подтягиваем refs без checkout
+          2. repo.git.log("HEAD..origin/branch", "--oneline") — список новых коммитов
+          3. next(repo.iter_commits("origin/branch", max_count=1)).hexsha — latest SHA
+
+        Никакого GitHub API, никакого aiohttp, никакого прокси.
+        GitPython использует системный git, который уже настроен на работу
+        через тот же канал что и Telethon (MTProto не нужен для git over HTTPS).
         """
-        import sys
-
         try:
             import git as gitpython
             repo_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
             repo      = gitpython.Repo(repo_path)
-            local_sha = repo.head.commit.hexsha
             try:
                 branch = repo.active_branch.name
             except TypeError:
@@ -590,81 +585,49 @@ class NotifierModule(KitsuneModule):
             logger.debug("Notifier: git repo unavailable — %s", exc)
             return
 
-        # Получаем env с прокси если он настроен в config.toml
-        git_env = self._build_git_env()
-
-        # git ls-remote — узнаём SHA последнего коммита на remote без fetch
+        # Подтягиваем refs со всех remote (как у Hikka: for remote in repo.remotes)
         try:
-            proc = await asyncio.create_subprocess_exec(
-                "git", "ls-remote", "origin", f"refs/heads/{branch}",
-                cwd=repo_path,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                env=git_env,
-            )
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=20)
-        except asyncio.TimeoutError:
-            logger.debug("Notifier: git ls-remote timed out")
-            return
+            for remote in repo.remotes:
+                remote.fetch()
         except Exception as exc:
-            logger.debug("Notifier: git ls-remote failed — %s", exc)
+            logger.debug("Notifier: git fetch failed — %s", exc)
             return
 
-        if proc.returncode != 0:
-            logger.debug("Notifier: git ls-remote error: %s", stderr.decode().strip())
+        # Проверяем есть ли новые коммиты (как у Hikka: repo.git.log([...]))
+        try:
+            diff = repo.git.log([f"HEAD..origin/{branch}", "--oneline"])
+        except Exception as exc:
+            logger.debug("Notifier: git log failed — %s", exc)
             return
 
-        output = stdout.decode().strip()
-        if not output:
-            return
+        if not diff:
+            return  # всё актуально
 
-        remote_sha = output.split()[0]
+        # Получаем SHA последнего коммита на remote (как у Hikka: iter_commits)
+        try:
+            remote_sha = next(
+                repo.iter_commits(f"origin/{branch}", max_count=1)
+            ).hexsha
+        except Exception:
+            return
 
         # Уже уведомляли об этом коммите?
         if remote_sha == self.db.get(_DB_OWNER, "last_notified_commit", None):
             return
-        # Уже на этой версии?
-        if remote_sha == local_sha:
-            return
-
-        # Есть новые коммиты — узнаём сколько и какие через git fetch + log
-        try:
-            fetch_proc = await asyncio.create_subprocess_exec(
-                "git", "fetch", "origin", branch,
-                cwd=repo_path,
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.PIPE,
-                env=git_env,
-            )
-            await asyncio.wait_for(fetch_proc.communicate(), timeout=30)
-        except Exception as exc:
-            logger.debug("Notifier: git fetch failed — %s", exc)
-            # fetch упал, но remote_sha != local_sha — сообщаем без деталей
-            await self._notify_update_simple(local_sha, remote_sha)
-            return
-
-        # git log HEAD..origin/branch --oneline --max-count=10
-        try:
-            log_proc = await asyncio.create_subprocess_exec(
-                "git", "log", f"HEAD..origin/{branch}",
-                "--oneline", "--max-count=10",
-                cwd=repo_path,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.DEVNULL,
-                env=git_env,
-            )
-            log_out, _ = await asyncio.wait_for(log_proc.communicate(), timeout=10)
-            log_lines = log_out.decode().strip().splitlines()
-        except Exception:
-            log_lines = []
-
-        count   = len(log_lines)
-        changes = "\n".join(
-            f"• {line.split(' ', 1)[1]}" if ' ' in line else f"• {line}"
-            for line in log_lines
-        ) or "—"
 
         await self.db.set(_DB_OWNER, "last_notified_commit", remote_sha)
+
+        # Формируем список изменений (как у Hikka: diff.splitlines()[:10])
+        log_lines  = diff.splitlines()[:10]
+        count      = len(diff.splitlines())
+        changes    = "\n".join(
+            f"• <b>{line.split()[0]}</b>: {' '.join(line.split()[1:])}"
+            for line in log_lines
+            if line.strip()
+        ) or "—"
+
+        if count > 10:
+            changes += f"\n<i>...и ещё {count - 10} коммитов</i>"
 
         from ..version import __version_str__
         await self.notify_update(
@@ -673,110 +636,17 @@ class NotifierModule(KitsuneModule):
             changes=changes,
         )
 
-    async def _notify_update_simple(self, local_sha: str, remote_sha: str) -> None:
-        """Уведомление без деталей коммитов (когда fetch недоступен)."""
-        from ..version import __version_str__
-        await self.db.set(_DB_OWNER, "last_notified_commit", remote_sha)
-        await self.notify_update(
-            current=__version_str__,
-            new=f"{__version_str__}+N",
-            changes="— детали недоступны, запусти .update",
-        )
-
-    def _build_git_env(self) -> dict:
-        """
-        Строим env для git-процессов.
-        Если в config.toml прописан [proxy], пробрасываем его в git
-        через переменные GIT_CONFIG_COUNT / http.proxy / https.proxy.
-        """
-        import copy
-        env = copy.copy(os.environ)
-
-        try:
-            import toml
-            from pathlib import Path
-            cfg_path = Path(__file__).parent.parent.parent / "config.toml"
-            if not cfg_path.exists():
-                return env
-            cfg       = toml.loads(cfg_path.read_text(encoding="utf-8"))
-            proxy_cfg = cfg.get("proxy") or {}
-            host      = proxy_cfg.get("host", "")
-            port      = proxy_cfg.get("port", 0)
-            ptype     = str(proxy_cfg.get("type", "")).upper()
-            user      = proxy_cfg.get("username", "")
-            pwd       = proxy_cfg.get("password", "")
-
-            if not host or not port:
-                return env
-
-            # Строим URL прокси
-            if ptype in ("SOCKS5", "SOCKS4"):
-                scheme = "socks5" if ptype == "SOCKS5" else "socks4"
-            else:
-                scheme = "http"
-
-            auth = f"{user}:{pwd}@" if user else ""
-            proxy_url = f"{scheme}://{auth}{host}:{port}"
-
-            # git читает эти переменные окружения
-            env["GIT_CONFIG_COUNT"]    = "2"
-            env["GIT_CONFIG_KEY_0"]    = "http.proxy"
-            env["GIT_CONFIG_VALUE_0"]  = proxy_url
-            env["GIT_CONFIG_KEY_1"]    = "https.proxy"
-            env["GIT_CONFIG_VALUE_1"]  = proxy_url
-
-            logger.debug("Notifier: git will use proxy %s://%s:%s", scheme, host, port)
-        except Exception as exc:
-            logger.debug("Notifier: _build_git_env failed — %s", exc)
-
-        return env
-
-    def _get_proxy_url(self) -> str | None:
-        """
-        Читает [proxy] из config.toml и возвращает строку URL для aiohttp/aiogram.
-        Возвращает None если прокси не настроен.
-        Поддерживает: SOCKS5, SOCKS4, HTTP.
-        """
-        try:
-            import toml
-            from pathlib import Path
-            cfg_path  = Path(__file__).parent.parent.parent / "config.toml"
-            if not cfg_path.exists():
-                return None
-            cfg       = toml.loads(cfg_path.read_text(encoding="utf-8"))
-            proxy_cfg = cfg.get("proxy") or {}
-            host      = proxy_cfg.get("host", "")
-            port      = proxy_cfg.get("port", 0)
-            ptype     = str(proxy_cfg.get("type", "")).upper()
-            user      = proxy_cfg.get("username", "")
-            pwd       = proxy_cfg.get("password", "")
-
-            if not host or not port:
-                return None
-
-            if ptype in ("SOCKS5", "SOCKS4"):
-                scheme = "socks5" if ptype == "SOCKS5" else "socks4"
-            else:
-                scheme = "http"
-
-            auth = f"{user}:{pwd}@" if user else ""
-            return f"{scheme}://{auth}{host}:{port}"
-        except Exception:
-            return None
-
     def _make_bot(self, token: str) -> "Bot":
-        """Создать Bot с прокси если настроен."""
+        """Создать Bot с базовой сессией — без прокси, как у Hikka."""
         from aiogram import Bot
         from aiogram.client.default import DefaultBotProperties
         from aiogram.enums import ParseMode
         from aiogram.client.session.aiohttp import AiohttpSession
 
-        proxy_url = self._get_proxy_url()
-        session   = AiohttpSession(proxy=proxy_url, timeout=60) if proxy_url else AiohttpSession(timeout=60)
         return Bot(
             token=str(token),
             default=DefaultBotProperties(parse_mode=ParseMode.HTML),
-            session=session,
+            session=AiohttpSession(timeout=30),
         )
 
     # ── Public API ────────────────────────────────────────────────────────────

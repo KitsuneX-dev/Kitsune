@@ -222,6 +222,8 @@ class UpdaterModule(KitsuneModule):
 
     async def _do_update(self, repo_path: str, chat_id: int, msg_id: int) -> None:
         """Actually perform the update after confirmation."""
+        import shutil
+        import tempfile
 
         async def edit(text: str) -> None:
             try:
@@ -229,7 +231,7 @@ class UpdaterModule(KitsuneModule):
             except Exception:
                 pass
 
-        # Шаг 1 — git fetch + reset
+        # Шаг 1 — git fetch + reset, config.toml защищаем
         bar1 = "████░░░░░░░░  33%"
         await edit(f"⬇️ <b>Скачиваю обновление...</b>\n{bar1}")
         try:
@@ -240,9 +242,31 @@ class UpdaterModule(KitsuneModule):
             except TypeError:
                 branch = "main"
 
+            # Сохраняем config.toml во временный файл перед reset
+            config_path = os.path.join(repo_path, "config.toml")
+            config_backup = None
+            if os.path.exists(config_path):
+                tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".toml")
+                shutil.copy2(config_path, tmp.name)
+                config_backup = tmp.name
+                tmp.close()
+
             origin = repo.remote("origin")
             origin.fetch()
+
+            # Убираем config.toml из индекса если он там есть (чтоб reset не трогал)
+            try:
+                repo.git.rm("--cached", "config.toml", "--ignore-unmatch")
+            except Exception:
+                pass
+
             repo.git.reset("--hard", f"origin/{branch}")
+
+            # Восстанавливаем config.toml
+            if config_backup and os.path.exists(config_backup):
+                shutil.copy2(config_backup, config_path)
+                os.unlink(config_backup)
+
         except Exception as exc:
             await edit(self.strings("git_err").format(err=escape_html(str(exc))))
             return
