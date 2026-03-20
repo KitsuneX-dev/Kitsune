@@ -242,9 +242,24 @@ async def _startup(args: argparse.Namespace) -> None:
             )
             sys.exit(1)
 
-        if not await client.is_user_authorized():
-            # Session exists but unauthorized — re-run web setup
-            logger.info("main: session invalid, launching web setup")
+        # Проверяем авторизацию — даём 3 попытки с паузой
+        # чтобы не запускать web setup из-за временной потери сети
+        authorized = False
+        for _attempt in range(3):
+            try:
+                authorized = await client.is_user_authorized()
+                if authorized:
+                    break
+            except Exception:
+                pass
+            if _attempt < 2:
+                logger.warning("main: auth check failed, retry %d/3...", _attempt + 2)
+                import asyncio as _asyncio
+                await _asyncio.sleep(3)
+
+        if not authorized:
+            # Только если после 3 попыток всё ещё не авторизован — запускаем web setup
+            logger.info("main: session invalid after retries, launching web setup")
             from .web.setup import SetupServer
             web_port = int(cfg.get("web_port", 8080))
             setup = SetupServer(save_config_fn=_save_config, get_config_fn=_load_raw_config)

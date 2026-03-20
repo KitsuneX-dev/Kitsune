@@ -258,14 +258,20 @@ class NotifierModule(KitsuneModule):
                 for uname in usernames:
                     uname = uname.lstrip("@")
                     try:
-                        # Нажимаем кнопку бота — отправляем его @username
+                        # BotFather после @username сразу присылает меню с токеном
                         await conv.send_message(f"@{uname}")
-                        await conv.get_response()  # меню бота
-                        await conv.send_message("/token")
-                        token_resp = await conv.get_response()
-                        token_text = token_resp.text or ""
+                        menu_resp = await conv.get_response()
+                        token_text = menu_resp.text or ""
                         m = _re.search(r"(\d{8,}:[A-Za-z0-9_-]{35,})", token_text)
-                        results.append((uname, m.group(1) if m else None))
+                        if m:
+                            results.append((uname, m.group(1)))
+                        else:
+                            # Токена в меню нет — запрашиваем явно
+                            await conv.send_message("/token")
+                            token_resp = await conv.get_response()
+                            token_text2 = token_resp.text or ""
+                            m2 = _re.search(r"(\d{8,}:[A-Za-z0-9_-]{35,})", token_text2)
+                            results.append((uname, m2.group(1) if m2 else None))
                     except Exception as e:
                         logger.debug("Notifier: token fetch failed for %s — %s", uname, e)
                         results.append((uname, None))
@@ -280,13 +286,18 @@ class NotifierModule(KitsuneModule):
         try:
             async with self.client.conversation("@BotFather", timeout=20) as conv:
                 await conv.send_message(f"@{username}")
-                await conv.get_response()  # меню бота
-                await conv.send_message("/token")
-                resp = await conv.get_response()
-                # Ответ может быть кнопкой «Revoke current token» + текстом с токеном
-                token_text = resp.text or ""
+                menu_resp = await conv.get_response()
+                # BotFather иногда сразу присылает токен в меню бота
+                token_text = menu_resp.text or ""
                 m = _re.search(r"(\d{8,}:[A-Za-z0-9_-]{35,})", token_text)
-                return m.group(1) if m else None
+                if m:
+                    return m.group(1)
+                # Токена в меню нет — запрашиваем явно через /token
+                await conv.send_message("/token")
+                token_resp = await conv.get_response()
+                token_text2 = token_resp.text or ""
+                m2 = _re.search(r"(\d{8,}:[A-Za-z0-9_-]{35,})", token_text2)
+                return m2.group(1) if m2 else None
         except Exception as exc:
             logger.debug("Notifier: _get_token_for_bot failed — %s", exc)
             return None
