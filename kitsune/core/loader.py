@@ -320,9 +320,7 @@ class Loader:
     # ── Internal ─────────────────────────────────────────────────────────────
 
     async def _load_source(self, source: str, origin: str, name: str) -> KitsuneModule:
-        # 1. Security scan — только для пользовательских и URL-модулей.
-        # Builtin-модули (kitsune/modules/) доверенные — не сканируем.
-        # Они могут легитимно использовать exec(), os.execl() и т.д.
+        # 1. Security scan — только для пользовательских и URL-модулей
         is_builtin = origin.startswith(str(_BUILTIN_MODULES_DIR))
         if not is_builtin:
             _ast_scan(source, name)
