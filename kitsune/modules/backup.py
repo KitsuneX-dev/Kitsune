@@ -210,7 +210,7 @@ class BackupModule(KitsuneModule):
                 await self.db.delete(_DB_OWNER, "group_id")
 
         from telethon.tl.functions.messages import CreateChatRequest
-        from telethon.tl.functions.channels import MigrateToSupergroupRequest
+        from telethon.tl.functions.messages import MigrateChatRequest
         from telethon.tl.functions.messages import EditChatAboutRequest
 
         # Узнаём username бота чтобы добавить его в группу
@@ -246,10 +246,13 @@ class BackupModule(KitsuneModule):
 
         # Мигрируем в супергруппу для надёжности
         try:
-            migrated = await self.client(MigrateToSupergroupRequest(chat_id=gid))
-            gid = migrated.updates[-1].channel_id
+            await self.client(MigrateChatRequest(chat_id=gid))
+            async for dialog in self.client.iter_dialogs():
+                if dialog.title == "KitsuneBackup" and dialog.is_channel:
+                    gid = dialog.id
+                    break
         except Exception:
-            pass  # Не критично, обычный чат тоже подходит
+            pass
 
         # Описание группы
         try:
