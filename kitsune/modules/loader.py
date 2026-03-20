@@ -16,6 +16,7 @@ from pathlib import Path
 
 from ..core.loader import KitsuneModule, command, ModuleLoadError, ASTSecurityError  # noqa: F401
 from ..core.security import OWNER
+from ..utils import auto_delete, ProgressMessage
 
 logger = logging.getLogger(__name__)
 
@@ -114,22 +115,31 @@ class LoaderModule(KitsuneModule):
             return
 
         try:
-            mod = await loader.load_from_url(url)
-            # Сохраняем URL для восстановления после перезапуска
-            saved = list(self.db.get(_DB_OWNER, _DB_KEY_MODS, []))
-            if url not in saved:
-                saved.append(url)
-                await self.db.set(_DB_OWNER, _DB_KEY_MODS, saved)
-            await m.edit(
-                self.strings("loaded").format(name=mod.name, ver=mod.version),
-                parse_mode="html",
-            )
+            async with ProgressMessage(
+                event,
+                f"⬇️ Загружаю <code>{url.split('/')[-1]}</code>...",
+                total=3,
+            ) as prog:
+                await prog.update(1)
+                mod = await loader.load_from_url(url)
+                await prog.update(2)
+                # Сохраняем URL для восстановления после перезапуска
+                saved = list(self.db.get(_DB_OWNER, _DB_KEY_MODS, []))
+                if url not in saved:
+                    saved.append(url)
+                    await self.db.set(_DB_OWNER, _DB_KEY_MODS, saved)
+                await prog.done(
+                    self.strings("loaded").format(name=mod.name, ver=mod.version)
+                )
         except ASTSecurityError as exc:
             await m.edit(self.strings("security_err").format(err=str(exc)), parse_mode="html")
+            await auto_delete(m, delay=10)
         except ModuleLoadError as exc:
             await m.edit(self._fmt_load_err(exc), parse_mode="html")
+            await auto_delete(m, delay=10)
         except Exception as exc:
             await m.edit(self.strings("load_err").format(err=str(exc)), parse_mode="html")
+            await auto_delete(m, delay=10)
 
     @command("loadmod", required=OWNER)
     async def loadmod_cmd(self, event) -> None:

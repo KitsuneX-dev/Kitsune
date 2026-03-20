@@ -83,6 +83,44 @@ class SettingsModule(KitsuneModule):
         await self.db.set(_DB_OWNER, "lang", lang)
         await event.reply(self.strings("lang_set").format(lang=lang), parse_mode="html")
 
+    @command("autodel", required=OWNER)
+    async def autodel_cmd(self, event) -> None:
+        """.autodel <секунд|off> — автоудаление сервисных сообщений"""
+        arg = self.get_args(event).strip().lower()
+        if not arg:
+            current = self.db.get(_DB_OWNER, "auto_delete_delay", 0)
+            status = f"<code>{current} сек</code>" if current else "выключено"
+            await event.reply(
+                f"🗑 Авто-удаление сервисных сообщений: {status}\n\n"
+                "Использование: <code>.autodel 5</code> или <code>.autodel off</code>",
+                parse_mode="html",
+            )
+            return
+
+        if arg in ("off", "0", "нет", "выкл"):
+            await self.db.set(_DB_OWNER, "auto_delete_delay", 0)
+            await event.reply("🗑 Авто-удаление выключено.", parse_mode="html")
+            return
+
+        try:
+            delay = float(arg)
+            if delay < 1 or delay > 300:
+                raise ValueError
+        except ValueError:
+            await event.reply(
+                "❌ Укажи число секунд от 1 до 300, или <code>off</code>.",
+                parse_mode="html",
+            )
+            return
+
+        await self.db.set(_DB_OWNER, "auto_delete_delay", delay)
+        # Сохраняем ссылку на БД в клиенте для утилиты auto_delete
+        self.client._kitsune_db = self.db
+        await event.reply(
+            f"🗑 Авто-удаление сервисных сообщений через <b>{delay:.0f} сек</b>.",
+            parse_mode="html",
+        )
+
     @command("info", required=OWNER)
     async def info_cmd(self, event) -> None:
         """.info — информация о боте и системе"""

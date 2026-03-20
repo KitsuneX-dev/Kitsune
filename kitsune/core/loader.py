@@ -30,8 +30,11 @@ logger = logging.getLogger(__name__)
 
 # Imports that are blocked in user-loaded modules
 _BLOCKED_IMPORTS: frozenset[str] = frozenset({
-    "subprocess", "os.system", "pty", "ctypes",
-    "socket", "multiprocessing",
+    "subprocess", "pty", "ctypes", "multiprocessing",
+    "socket", "importlib", "pickle", "marshal",
+    "code", "codeop", "compileall", "py_compile",
+    "shelve", "dbm", "zipimport", "zipapp",
+    "runpy", "distutils",
 })
 
 # Built-in module names (loaded from kitsune/modules/)
@@ -158,20 +161,54 @@ class _SafetyVisitor(ast.NodeVisitor):
 
     def visit_Import(self, node: ast.Import) -> None:
         for alias in node.names:
-            if alias.name in _BLOCKED_IMPORTS or alias.name.split(".")[0] in _BLOCKED_IMPORTS:
+            top = alias.name.split(".")[0]
+            if alias.name in _BLOCKED_IMPORTS or top in _BLOCKED_IMPORTS:
                 self.violations.append(f"Blocked import: {alias.name}")
         self.generic_visit(node)
 
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
         mod = node.module or ""
-        if mod in _BLOCKED_IMPORTS or mod.split(".")[0] in _BLOCKED_IMPORTS:
+        top = mod.split(".")[0]
+        if mod in _BLOCKED_IMPORTS or top in _BLOCKED_IMPORTS:
             self.violations.append(f"Blocked from-import: {mod}")
+        # Block: from os import system/popen/exec
+        if top == "os":
+            _DANGEROUS_OS = {
+                "system", "popen", "exec", "execve", "execl", "execvp",
+                "spawnl", "spawnle", "spawnlp", "fork", "forkpty",
+            }
+            for alias in (node.names or []):
+                if alias.name in _DANGEROUS_OS:
+                    self.violations.append(f"Blocked os.{alias.name} import")
         self.generic_visit(node)
 
     def visit_Call(self, node: ast.Call) -> None:
-        # Detect eval("...") / exec("...") at module level
-        if isinstance(node.func, ast.Name) and node.func.id in ("eval", "exec"):
-            self.violations.append(f"Direct {node.func.id}() call detected")
+        # Detect eval() / exec() / compile() calls anywhere in the tree
+        if isinstance(node.func, ast.Name):
+            if node.func.id in ("eval", "exec", "compile"):
+                self.violations.append(f"Dangerous built-in call: {node.func.id}()")
+            # Detect __import__("os") / __import__("subprocess") etc.
+            if node.func.id == "__import__":
+                if node.args and isinstance(node.args[0], ast.Constant):
+                    mod = str(node.args[0].value).split(".")[0]
+                    if mod in _BLOCKED_IMPORTS:
+                        self.violations.append(f"Blocked __import__({mod!r})")
+        # Detect os.system() / os.popen() attribute calls
+        if isinstance(node.func, ast.Attribute):
+            _DANGEROUS_ATTRS = {
+                "system", "popen", "execve", "execl", "execvp",
+                "fork", "forkpty", "spawnl",
+            }
+            if node.func.attr in _DANGEROUS_ATTRS:
+                if isinstance(node.func.value, ast.Name) and node.func.value.id == "os":
+                    self.violations.append(f"Dangerous call: os.{node.func.attr}()")
+        self.generic_visit(node)
+
+    def visit_Attribute(self, node: ast.Attribute) -> None:
+        # Block sandbox-escape introspection patterns
+        _ESCAPE_ATTRS = {"__subclasses__", "__builtins__", "__globals__", "__code__"}
+        if node.attr in _ESCAPE_ATTRS:
+            self.violations.append(f"Blocked dangerous attribute access: .{node.attr}")
         self.generic_visit(node)
 
 
@@ -283,9 +320,18 @@ class Loader:
     # ── Internal ─────────────────────────────────────────────────────────────
 
     async def _load_source(self, source: str, origin: str, name: str) -> KitsuneModule:
-        # 1. Security scan (skip for builtins to save startup time)
-        if not origin.startswith(str(_BUILTIN_MODULES_DIR)):
+        # 1. Security scan — всегда сканируем, но для builtins только логируем
+        is_builtin = origin.startswith(str(_BUILTIN_MODULES_DIR))
+        try:
             _ast_scan(source, name)
+        except ASTSecurityError as exc:
+            if is_builtin:
+                # Builtin с нарушением — это критически важно, блокируем загрузку
+                logger.critical("Loader: SECURITY VIOLATION in builtin %s — %s", name, exc)
+                raise
+            raise
+        except ModuleLoadError:
+            raise
 
         # 2. Compile & exec in isolated namespace
         module_ns: dict[str, typing.Any] = {

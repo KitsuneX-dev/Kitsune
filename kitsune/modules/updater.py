@@ -15,7 +15,7 @@ import time
 
 from ..core.loader import KitsuneModule, command
 from ..core.security import OWNER
-from ..utils import escape_html
+from ..utils import escape_html, auto_delete, ProgressMessage
 
 _DB_OWNER = "kitsune.updater"
 
@@ -222,7 +222,6 @@ class UpdaterModule(KitsuneModule):
 
     async def _do_update(self, repo_path: str, chat_id: int, msg_id: int) -> None:
         """Actually perform the update after confirmation."""
-        from telethon.tl.functions.messages import EditMessageRequest
 
         async def edit(text: str) -> None:
             try:
@@ -230,7 +229,9 @@ class UpdaterModule(KitsuneModule):
             except Exception:
                 pass
 
-        await edit(self.strings("updating"))
+        # Шаг 1 — git fetch + reset
+        bar1 = "████░░░░░░░░  33%"
+        await edit(f"⬇️ <b>Скачиваю обновление...</b>\n{bar1}")
         try:
             import git
             repo = git.Repo(repo_path)
@@ -241,13 +242,14 @@ class UpdaterModule(KitsuneModule):
 
             origin = repo.remote("origin")
             origin.fetch()
-            # Hard reset to remote — discards any local modifications so update always works
             repo.git.reset("--hard", f"origin/{branch}")
         except Exception as exc:
             await edit(self.strings("git_err").format(err=escape_html(str(exc))))
             return
 
-        await edit(self.strings("req_update"))
+        # Шаг 2 — pip install
+        bar2 = "████████░░░░  67%"
+        await edit(f"📦 <b>Обновляю зависимости...</b>\n{bar2}")
         proc = await asyncio.create_subprocess_exec(
             sys.executable, "-m", "pip", "install", "-r", "requirements.txt",
             "--quiet", "--no-warn-script-location",
@@ -260,7 +262,9 @@ class UpdaterModule(KitsuneModule):
             await edit(f"⚠️ pip install вернул ошибку:\n<code>{escape_html(stderr.decode()[:500])}</code>")
             return
 
-        await edit(self.strings("restarting"))
+        # Шаг 3 — перезапуск
+        bar3 = "████████████  100%"
+        await edit(f"🔄 <b>Перезапускаю...</b>\n{bar3}")
         await self._save_restart_start(chat_id=chat_id, msg_id=msg_id)
         await asyncio.sleep(1)
         os.execl(sys.executable, sys.executable, "-m", "kitsune")

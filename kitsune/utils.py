@@ -145,6 +145,117 @@ def is_serializable(value: typing.Any) -> bool:
         return False
 
 
+# ── Auto-delete ───────────────────────────────────────────────────────────────
+
+async def auto_delete(message: typing.Any, delay: float | None = None) -> None:
+    """
+    Удалить сервисное сообщение через delay секунд.
+    Если delay=None — читает настройку из БД (kitsune.core / auto_delete_delay).
+    Если настройка = 0 — ничего не делает.
+    """
+    if delay is None:
+        # Пробуем получить клиент и БД из объекта сообщения
+        try:
+            client = message.client
+            db = getattr(client, "_kitsune_db", None)
+            if db is not None:
+                delay = float(db.get("kitsune.core", "auto_delete_delay", 0))
+            else:
+                delay = 0.0
+        except Exception:
+            delay = 0.0
+
+    if not delay:
+        return
+
+    await asyncio.sleep(delay)
+    with __import__("contextlib").suppress(Exception):
+        await message.delete()
+
+
+# ── Progress bar ──────────────────────────────────────────────────────────────
+
+def progress_bar(current: int | float, total: int | float, width: int = 12) -> str:
+    """
+    Возвращает красивую строку прогресс-бара.
+
+    Пример: ████████░░░░  67%
+
+    Использует filled/empty блоки без кринжовых ASCII-символов.
+    """
+    if total <= 0:
+        pct = 0.0
+    else:
+        pct = max(0.0, min(1.0, current / total))
+
+    filled = round(pct * width)
+    empty  = width - filled
+
+    bar = "█" * filled + "░" * empty
+    percent = int(pct * 100)
+    return f"{bar}  {percent}%"
+
+
+class ProgressMessage:
+    """
+    Хелпер для обновления прогресс-бара прямо в Telegram-сообщении.
+
+    Использование:
+        async with ProgressMessage(event, "⬇️ Скачиваю", total=100) as prog:
+            for i in range(100):
+                await do_work()
+                await prog.update(i + 1)
+    """
+
+    def __init__(
+        self,
+        event: typing.Any,
+        title: str,
+        total: int | float = 100,
+        width: int = 12,
+        update_every: float = 1.5,
+    ) -> None:
+        self._event       = event
+        self._title       = title
+        self._total       = total
+        self._width       = width
+        self._update_every = update_every
+        self._msg:        typing.Any = None
+        self._last_update: float = 0.0
+        self._current:    float = 0.0
+
+    async def __aenter__(self) -> "ProgressMessage":
+        bar = progress_bar(0, self._total, self._width)
+        self._msg = await self._event.reply(
+            f"{self._title}\n{bar}",
+            parse_mode="html",
+        )
+        self._last_update = asyncio.get_event_loop().time()
+        return self
+
+    async def __aexit__(self, *_: object) -> None:
+        pass
+
+    async def update(self, current: int | float, *, force: bool = False) -> None:
+        """Обновить значение прогресса. Сообщение редактируется не чаще update_every секунд."""
+        self._current = current
+        now = asyncio.get_event_loop().time()
+        if not force and (now - self._last_update) < self._update_every:
+            return
+        self._last_update = now
+        bar = progress_bar(self._current, self._total, self._width)
+        with __import__("contextlib").suppress(Exception):
+            await self._msg.edit(
+                f"{self._title}\n{bar}",
+                parse_mode="html",
+            )
+
+    async def done(self, text: str) -> None:
+        """Заменить бар финальным сообщением."""
+        with __import__("contextlib").suppress(Exception):
+            await self._msg.edit(text, parse_mode="html")
+
+
 # ── System detection ──────────────────────────────────────────────────────────
 
 def detect_environment() -> dict[str, bool]:

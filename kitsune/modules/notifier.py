@@ -439,9 +439,33 @@ class NotifierModule(KitsuneModule):
                         pass
                     return
                 try:
-                    await msg.answer(
-                        "🦊 <b>Kitsune Notifier</b>\n\nЯ буду присылать уведомления и хранить бэкапы."
-                    )
+                    backup_asked = ref.db.get(_DB_OWNER, "backup_interval_asked", False)
+                    loader = getattr(ref.client, "_kitsune_loader", None)
+                    backup = loader.modules.get("backup") if loader else None
+
+                    if not backup_asked and backup:
+                        # Первый запуск — сразу показываем выбор интервала
+                        await backup.show_interval_setup(ref._bot, msg.from_user.id)
+                        await ref.db.set(_DB_OWNER, "backup_interval_asked", True)
+                    else:
+                        # Повторный /start — показываем статус
+                        interval_h = ref.db.get("kitsune.backup", "interval_h", None)
+                        backup_status = (
+                            f"каждые <b>{interval_h} ч</b>" if interval_h
+                            else "не настроен"
+                        )
+                        bot_ver = ref.version
+                        await msg.answer(
+                            "🦊 <b>Kitsune Notifier</b>\n\n"
+                            "Я присылаю уведомления об обновлениях и храню бэкапы.\n\n"
+                            f"🗂 Авто-бэкап: {backup_status}\n\n"
+                            "Команды:\n"
+                            "• <code>.backup</code> — создать бэкап вручную\n"
+                            "• <code>.restore</code> — восстановить из бэкапа\n"
+                            "• <code>.autodel</code> — авто-удаление сервисных сообщений\n"
+                            "• <code>.resetbot</code> — пересоздать бота\n"
+                            "• <code>.update</code> — проверить обновления"
+                        )
                 except Exception as e:
                     logger.warning("Notifier: on_start answer failed — %s", e)
 
