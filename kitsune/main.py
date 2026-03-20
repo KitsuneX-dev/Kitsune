@@ -242,30 +242,24 @@ async def _startup(args: argparse.Namespace) -> None:
             )
             sys.exit(1)
 
-        # Проверяем авторизацию — даём 3 попытки с паузой
-        # чтобы не запускать web setup из-за временной потери сети
-        authorized = False
-        for _attempt in range(3):
-            try:
-                authorized = await client.is_user_authorized()
-                if authorized:
-                    break
-            except Exception:
-                pass
-            if _attempt < 2:
-                logger.warning("main: auth check failed, retry %d/3...", _attempt + 2)
-                import asyncio as _asyncio
-                await _asyncio.sleep(3)
-
-        if not authorized:
-            # Только если после 3 попыток всё ещё не авторизован — запускаем web setup
-            logger.info("main: session invalid after retries, launching web setup")
+        # Если файл сессии существует и имеет ненулевой размер —
+        # доверяем ему и НЕ проверяем is_user_authorized() при старте.
+        # Этот чек ненадёжен сразу после перезапуска (сеть ещё не поднялась)
+        # и ложно запускает web setup даже когда сессия валидна.
+        # Telethon сам обработает невалидную сессию — выбросит исключение
+        # при первом реальном запросе, и тогда уже можно запустить setup.
+        session_size = session_file.stat().st_size if session_file.exists() else 0
+        if session_size < 100:
+            # Файл есть но пустой или повреждён — это реальная проблема
+            logger.info("main: session file too small (%d bytes), launching web setup", session_size)
             from .web.setup import SetupServer
             web_port = int(cfg.get("web_port", 8080))
             setup = SetupServer(save_config_fn=_save_config, get_config_fn=_load_raw_config)
             await setup.start(host="0.0.0.0", port=web_port)
             await setup.wait_done()
             client = setup.get_client()
+        else:
+            logger.info("main: session file OK (%d bytes), skipping auth check", session_size)
 
     me = await client.get_me()
     client.tg_id = me.id
