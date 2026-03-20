@@ -238,7 +238,11 @@ class UpdaterModule(KitsuneModule):
                 branch = repo.active_branch.name
             except TypeError:
                 branch = "main"
-            repo.remote("origin").pull()
+
+            origin = repo.remote("origin")
+            origin.fetch()
+            # Hard reset to remote — discards any local modifications so update always works
+            repo.git.reset("--hard", f"origin/{branch}")
         except Exception as exc:
             await edit(self.strings("git_err").format(err=escape_html(str(exc))))
             return
