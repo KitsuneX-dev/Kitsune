@@ -23,6 +23,29 @@ _DB_OWNER       = "kitsune.notifier"
 _CHECK_INTERVAL = 30  # секунд между проверками обновлений
 
 
+def _extract_buttons(message) -> list[str]:
+    """
+    Вытащить текст всех inline-кнопок из сообщения BotFather.
+    BotFather на /mybots присылает кнопки вида "@kitsune_123_bot".
+    Telethon хранит их в message.reply_markup.rows[].buttons[].text
+    """
+    result = []
+    try:
+        markup = getattr(message, "reply_markup", None)
+        if markup is None:
+            return result
+        rows = getattr(markup, "rows", []) or []
+        for row in rows:
+            buttons = getattr(row, "buttons", []) or []
+            for btn in buttons:
+                text = getattr(btn, "text", "") or ""
+                if text:
+                    result.append(text)
+    except Exception:
+        pass
+    return result
+
+
 class NotifierModule(KitsuneModule):
     name        = "notifier"
     description = "Авто-создание бота и уведомления"
@@ -215,30 +238,36 @@ class NotifierModule(KitsuneModule):
     async def _list_kitsune_bots(self) -> list[tuple[str, str | None]]:
         """
         Получить список всех ботов через /mybots у BotFather.
+        BotFather отвечает inline-кнопками — читаем их, а не text.
         Возвращает [(username, token_or_None), ...]
-        Для каждого бота пытается получить токен через /token.
         """
+        import re as _re
         results = []
         try:
-            async with self.client.conversation("@BotFather", timeout=30) as conv:
+            async with self.client.conversation("@BotFather", timeout=40) as conv:
                 await conv.send_message("/mybots")
                 resp = await conv.get_response()
-                text = resp.text or ""
 
-                # Все usernames из списка
-                import re as _re
-                usernames = _re.findall(r"@([a-zA-Z0-9_]+bot)", text, _re.IGNORECASE)
+                # BotFather присылает кнопки вида "@kitsune_123_bot"
+                # Читаем из reply_markup
+                usernames = _extract_buttons(resp)
+                if not usernames:
+                    # fallback: попробуем из текста (старые версии BotFather)
+                    usernames = _re.findall(r"@([a-zA-Z0-9_]+bot)", resp.text or "", _re.IGNORECASE)
 
                 for uname in usernames:
+                    uname = uname.lstrip("@")
                     try:
+                        # Нажимаем кнопку бота — отправляем его @username
                         await conv.send_message(f"@{uname}")
-                        await conv.get_response()
+                        await conv.get_response()  # меню бота
                         await conv.send_message("/token")
                         token_resp = await conv.get_response()
                         token_text = token_resp.text or ""
                         m = _re.search(r"(\d{8,}:[A-Za-z0-9_-]{35,})", token_text)
                         results.append((uname, m.group(1) if m else None))
-                    except Exception:
+                    except Exception as e:
+                        logger.debug("Notifier: token fetch failed for %s — %s", uname, e)
                         results.append((uname, None))
         except Exception as exc:
             logger.debug("Notifier: _list_kitsune_bots failed — %s", exc)
@@ -247,13 +276,16 @@ class NotifierModule(KitsuneModule):
     async def _get_token_for_bot(self, username: str) -> str | None:
         """Получить токен конкретного бота через BotFather."""
         import re as _re
+        username = username.lstrip("@")
         try:
             async with self.client.conversation("@BotFather", timeout=20) as conv:
                 await conv.send_message(f"@{username}")
-                await conv.get_response()
+                await conv.get_response()  # меню бота
                 await conv.send_message("/token")
                 resp = await conv.get_response()
-                m = _re.search(r"(\d{8,}:[A-Za-z0-9_-]{35,})", resp.text or "")
+                # Ответ может быть кнопкой «Revoke current token» + текстом с токеном
+                token_text = resp.text or ""
+                m = _re.search(r"(\d{8,}:[A-Za-z0-9_-]{35,})", token_text)
                 return m.group(1) if m else None
         except Exception as exc:
             logger.debug("Notifier: _get_token_for_bot failed — %s", exc)
