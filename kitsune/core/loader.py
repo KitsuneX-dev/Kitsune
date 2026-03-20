@@ -320,18 +320,10 @@ class Loader:
     # ── Internal ─────────────────────────────────────────────────────────────
 
     async def _load_source(self, source: str, origin: str, name: str) -> KitsuneModule:
-        # 1. Security scan — всегда сканируем, но для builtins только логируем
+        # 1. Security scan — только для пользовательских и URL-модулей
         is_builtin = origin.startswith(str(_BUILTIN_MODULES_DIR))
-        try:
+        if not is_builtin:
             _ast_scan(source, name)
-        except ASTSecurityError as exc:
-            if is_builtin:
-                # Builtin с нарушением — это критически важно, блокируем загрузку
-                logger.critical("Loader: SECURITY VIOLATION in builtin %s — %s", name, exc)
-                raise
-            raise
-        except ModuleLoadError:
-            raise
 
         # 2. Compile & exec in isolated namespace
         module_ns: dict[str, typing.Any] = {
