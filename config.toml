@@ -25,9 +25,14 @@ web_port = 8080           # порт веб-интерфейса
 # redis_uri = "redis://localhost:6379/0"
 
 # ── Прокси (опционально) ─────────────────────────────────────────
+# Нужен если GitHub или Telegram недоступны напрямую (РФ, блокировки).
+# Прокси применяется к: боту aiogram, git fetch/ls-remote, Telethon.
+#
+# Типы: SOCKS5 (рекомендуется), SOCKS4, HTTP
+#
 # [proxy]
-# type   = "SOCKS5"       # SOCKS4 / SOCKS5 / HTTP
-# host   = "127.0.0.1"
-# port   = 1080
-# username = ""
-# password = ""
+# type     = "SOCKS5"
+# host     = "127.0.0.1"
+# port     = 1080
+# username = ""           # опционально
+# password = ""           # опционально
