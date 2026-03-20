@@ -77,11 +77,18 @@ class HelpModule(KitsuneModule):
             f"📦 <b>{mod.name}</b>  v{mod.version}",
             f"<i>{mod.description or '—'}</i>\n",
         ]
+        dispatcher = getattr(self.client, "_kitsune_dispatcher", None)
+        prefix = dispatcher._prefix if dispatcher else "."
         for attr_name in dir(mod):
             method = getattr(mod, attr_name, None)
             if callable(method) and hasattr(method, "_kitsune_command"):
                 doc = (inspect.getdoc(method) or "").strip()
-                lines.append(f"  • <code>.{method._kitsune_command}</code> — {doc or '—'}")
+                # Убираем из docstring хардкодный префикс если он там есть
+                # чтобы не дублировать: ".loli — ..." → "loli — ..."
+                cmd_name = method._kitsune_command
+                if doc.startswith(("."+cmd_name, prefix+cmd_name)):
+                    doc = doc[len(prefix)+len(cmd_name):].lstrip(" —-")
+                lines.append(f"  • <code>{prefix}{cmd_name}</code> — {doc or '—'}")
         await event.reply("\n".join(lines), parse_mode="html")
 
     @staticmethod
