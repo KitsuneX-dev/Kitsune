@@ -4,9 +4,6 @@ Kitsune Translations
 Supports YAML langpacks (same format as Hikka) plus runtime language switching.
 """
 
-# © Yushi (@Mikasu32), 2024-2026
-# Kitsune Userbot — License: AGPLv3
-
 from __future__ import annotations
 
 import logging
@@ -17,7 +14,6 @@ logger = logging.getLogger(__name__)
 
 _LANGPACKS_DIR = Path(__file__).parent / "langpacks"
 _FALLBACK_LANG = "en"
-
 
 class Translator:
     """
@@ -56,6 +52,5 @@ class Translator:
         except (KeyError, IndexError):
             return str(text)
 
-    # Shortcut
     def __call__(self, key: str, **kwargs: object) -> str:
         return self.translate(key, **kwargs)

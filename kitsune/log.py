@@ -8,9 +8,6 @@ Key fixes vs Hikka:
 - KitsuneException replaces HikkaException (same logic, cleaner code)
 """
 
-# © Yushi (@Mikasu32), 2024-2026
-# Kitsune Userbot — License: AGPLv3
-
 from __future__ import annotations
 
 import asyncio
@@ -30,11 +27,7 @@ LOG_DIR = Path.home() / ".kitsune" / "logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 LOG_FILE = LOG_DIR / "kitsune.log"
 
-# ---------------------------------------------------------------------------
-# Monkeypatch linecache so werkzeug debugger can show dynamic module source
-# ---------------------------------------------------------------------------
 _orig_getlines = linecache.getlines
-
 
 def _patched_getlines(filename: str, module_globals=None) -> list[str]:
     try:
@@ -47,13 +40,7 @@ def _patched_getlines(filename: str, module_globals=None) -> list[str]:
         pass
     return _orig_getlines(filename, module_globals)
 
-
 linecache.getlines = _patched_getlines
-
-
-# ---------------------------------------------------------------------------
-# Exception formatting
-# ---------------------------------------------------------------------------
 
 def _override_text(exc: Exception) -> str | None:
     """Return a human-friendly message for known exception types."""
@@ -64,7 +51,6 @@ def _override_text(exc: Exception) -> str | None:
     except ImportError:
         pass
     return None
-
 
 class KitsuneException:
     """Structured exception container for Telegram log output."""
@@ -150,11 +136,6 @@ class KitsuneException:
 
         return cls(message=error_text, full_stack=full_stack, sysinfo=(exc_type, exc_value, tb))
 
-
-# ---------------------------------------------------------------------------
-# Telegram log handler
-# ---------------------------------------------------------------------------
-
 class KitsuneLogsHandler(logging.Handler):
     """
     Buffers log records and dispatches them to a Telegram chat asynchronously.
@@ -184,7 +165,6 @@ class KitsuneLogsHandler(logging.Handler):
         self.ignore_common: bool = False
         self.web_debugger: typing.Any = None
 
-    # ------------------------------------------------------------------
     def install_tg_log(self, mod: typing.Any) -> None:
         """Register a module as a log target."""
         if self._task and not self._task.done():
@@ -222,7 +202,6 @@ class KitsuneLogsHandler(logging.Handler):
                     else:
                         text_chunks.append(payload)
 
-                # Send exception blocks
                 for exc in exc_items:
                     try:
                         await mod.inline.bot.send_message(
@@ -235,7 +214,6 @@ class KitsuneLogsHandler(logging.Handler):
                     except Exception:
                         pass
 
-                # Send text blocks
                 from . import utils
                 combined = utils.escape_html("".join(text_chunks))
                 chunks = list(utils.chunks(combined, 4096))
@@ -273,7 +251,6 @@ class KitsuneLogsHandler(logging.Handler):
         for chunk in chunks[1:]:
             await bot.send_message(chat_id=call.chat_id, text=chunk)
 
-    # ------------------------------------------------------------------
     def dump(self) -> list[logging.LogRecord]:
         return self.handledbuffer + self.buffer
 
@@ -285,7 +262,6 @@ class KitsuneLogsHandler(logging.Handler):
         ]
 
     def emit(self, record: logging.LogRecord) -> None:
-        # Detect which client triggered this log record
         caller: int | None = None
         try:
             caller = next(
@@ -303,7 +279,6 @@ class KitsuneLogsHandler(logging.Handler):
 
         record.kitsune_caller = caller  # type: ignore[attr-defined]
 
-        # Queue for Telegram delivery (non-blocking)
         if record.levelno >= self.tg_level:
             if record.exc_info:
                 exc = KitsuneException.from_exc_info(
@@ -325,7 +300,6 @@ class KitsuneLogsHandler(logging.Handler):
                 except asyncio.QueueFull:
                     pass
 
-        # Rotate in-memory buffer
         total = len(self.buffer) + len(self.handledbuffer)
         if total >= self.capacity:
             if self.handledbuffer:
@@ -352,11 +326,6 @@ class KitsuneLogsHandler(logging.Handler):
     def setLevel(self, level: int) -> None:  # type: ignore[override]
         self.lvl = level
 
-
-# ---------------------------------------------------------------------------
-# Formatters
-# ---------------------------------------------------------------------------
-
 _main_formatter = logging.Formatter(
     fmt="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
@@ -375,7 +344,6 @@ rotating_handler = RotatingFileHandler(
 )
 rotating_handler.setFormatter(_main_formatter)
 
-
 def init() -> None:
     """Initialize Kitsune logging."""
     console_handler = logging.StreamHandler(sys.stdout)
@@ -387,7 +355,6 @@ def init() -> None:
     root.addHandler(KitsuneLogsHandler([console_handler, rotating_handler], capacity=7000))
     root.setLevel(logging.NOTSET)
 
-    # Reduce noise from third-party libs
     for noisy in ("telethon", "pyrogram", "matplotlib", "aiohttp", "aiogram", "httpx"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
 

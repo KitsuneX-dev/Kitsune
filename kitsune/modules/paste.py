@@ -4,14 +4,10 @@ Kitsune built-in: Paste
 Отправляет длинный текст на Telegraph.
 """
 
-# © Yushi (@Mikasu32), 2024-2026
-# Kitsune Userbot — License: AGPLv3
-
 from __future__ import annotations
 
 from ..core.loader import KitsuneModule, command
 from ..core.security import OWNER
-
 
 class PasteModule(KitsuneModule):
     name        = "paste"
@@ -53,7 +49,6 @@ class PasteModule(KitsuneModule):
         """Publish text to Telegraph and return URL."""
         import httpx
 
-        # Convert plain text to Telegraph node format
         nodes = []
         for paragraph in text.split("\n\n"):
             paragraph = paragraph.strip()
@@ -66,7 +61,6 @@ class PasteModule(KitsuneModule):
                 nodes.append({"tag": "br"})
 
         async with httpx.AsyncClient(timeout=15) as client:
-            # Create page
             resp = await client.post(
                 "https://api.telegra.ph/createPage",
                 json={

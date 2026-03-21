@@ -3,9 +3,6 @@ Kitsune Web Setup — first-run configuration interface.
 Uses client.start() like Hikka does, which handles all auth internally.
 """
 
-# © Yushi (@Mikasu32), 2024-2026
-# Kitsune Userbot — License: AGPLv3
-
 from __future__ import annotations
 
 import asyncio
@@ -27,8 +24,8 @@ _HTML = """<!DOCTYPE html>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   body {
     font-family: 'Segoe UI', system-ui, sans-serif;
-    background: #0d0d1a;
-    color: #e0e0ff;
+    background:
+    color:
     min-height: 100vh;
     display: flex;
     align-items: center;
@@ -38,33 +35,33 @@ _HTML = """<!DOCTYPE html>
   .card {
     width: 100%;
     max-width: 460px;
-    background: #13132a;
-    border: 1px solid #7c3aed33;
+    background:
+    border: 1px solid
     border-radius: 20px;
     padding: 44px 40px;
-    box-shadow: 0 0 60px #7c3aed18;
+    box-shadow: 0 0 60px
   }
   .logo { text-align: center; font-size: 3rem; margin-bottom: 6px; }
-  h1 { text-align: center; font-size: 1.45rem; color: #a78bfa; margin-bottom: 4px; }
-  .sub { text-align: center; font-size: 0.82rem; color: #555; margin-bottom: 36px; }
+  h1 { text-align: center; font-size: 1.45rem; color:
+  .sub { text-align: center; font-size: 0.82rem; color:
   .step { display: none; animation: fadeIn .25s ease; }
   .step.active { display: block; }
   @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
-  .step-title { font-size: 1rem; font-weight: 600; color: #c4b5fd; margin-bottom: 18px; }
-  label { display: block; font-size: 0.8rem; color: #a78bfa; margin: 14px 0 5px; }
+  .step-title { font-size: 1rem; font-weight: 600; color:
+  label { display: block; font-size: 0.8rem; color:
   input {
     width: 100%; padding: 11px 14px;
-    background: #0d0d1a; border: 1px solid #7c3aed44;
-    border-radius: 9px; color: #e0e0ff; font-size: 0.93rem;
+    background:
+    border-radius: 9px; color:
     outline: none; transition: border .2s;
   }
-  input:focus { border-color: #7c3aed; box-shadow: 0 0 0 3px #7c3aed18; }
-  .hint { font-size: 0.77rem; color: #4a4a6a; margin-top: 5px; }
-  .hint a { color: #7c3aed; text-decoration: none; }
+  input:focus { border-color:
+  .hint { font-size: 0.77rem; color:
+  .hint a { color:
   button {
     width: 100%; margin-top: 22px; padding: 13px;
-    background: linear-gradient(135deg, #7c3aed, #5b21b6);
-    border: none; border-radius: 10px; color: #fff;
+    background: linear-gradient(135deg,
+    border: none; border-radius: 10px; color:
     font-size: 0.97rem; font-weight: 600; cursor: pointer;
     transition: opacity .2s, transform .1s;
   }
@@ -73,18 +70,18 @@ _HTML = """<!DOCTYPE html>
   button:disabled { opacity: .35; cursor: not-allowed; }
   .error {
     display: none; margin-top: 14px; padding: 10px 14px;
-    background: #2d0000; border: 1px solid #f87171;
-    border-radius: 8px; font-size: 0.82rem; color: #fca5a5;
+    background:
+    border-radius: 8px; font-size: 0.82rem; color:
   }
   .steps-bar { display: flex; gap: 6px; margin-bottom: 28px; justify-content: center; }
-  .dot { width: 8px; height: 8px; border-radius: 50%; background: #2a2a4a; transition: background .3s; }
-  .dot.active { background: #7c3aed; }
-  .dot.done { background: #5b21b6; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background:
+  .dot.active { background:
+  .dot.done { background:
   .done-wrap { text-align: center; padding: 10px 0; }
   .done-icon { font-size: 3.5rem; margin-bottom: 12px; }
-  .done-title { font-size: 1.2rem; font-weight: 700; color: #86efac; margin-bottom: 6px; }
-  .done-sub { font-size: 0.85rem; color: #555; }
-  .done-info { margin-top: 20px; padding: 12px 16px; background: #0d0d1a; border-radius: 10px; font-size: 0.83rem; color: #888; line-height: 1.8; text-align: left; }
+  .done-title { font-size: 1.2rem; font-weight: 700; color:
+  .done-sub { font-size: 0.85rem; color:
+  .done-info { margin-top: 20px; padding: 12px 16px; background:
 </style>
 </head>
 <body>
@@ -213,7 +210,6 @@ async function check2fa() {
 </body>
 </html>"""
 
-
 class SetupServer:
     def __init__(self, save_config_fn: Callable, get_config_fn: Callable) -> None:
         self._save_config = save_config_fn
@@ -261,13 +257,11 @@ class SetupServer:
             api_hash = str(data["api_hash"]).strip()
             self._phone = str(data["phone"]).strip()
 
-            # Save config
             cfg = self._get_config()
             cfg["api_id"]   = api_id
             cfg["api_hash"] = api_hash
             self._save_config(cfg)
 
-            # Build client like Hikka does — MemorySession first
             from ..tl_cache import KitsuneTelegramClient
             from telethon.sessions import MemorySession
             from pathlib import Path
@@ -275,7 +269,6 @@ class SetupServer:
             DATA_DIR = Path.home() / ".kitsune"
             DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-            # Читаем прокси из конфига — чтобы setup-клиент тоже использовал прокси
             proxy_cfg = cfg.get("proxy") or {}
             proxy = None
             extra: dict = {}
@@ -345,7 +338,6 @@ class SetupServer:
                 me = await self._client.sign_in(
                     self._phone, code, phone_code_hash=self._phone_hash
                 )
-                # Save session to disk like Hikka
                 await self._save_session(me)
                 self._done.set()
                 return web.json_response({"ok": True, "message": f"👤 {me.first_name}  |  id: {me.id}"})

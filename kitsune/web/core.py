@@ -1,19 +1,3 @@
-"""
-Kitsune Web Interface
-
-Provides a minimal browser-based setup/status page.
-Built on aiohttp + aiohttp_jinja2 (same as Hikka, but updated deps).
-
-Improvements vs Hikka:
-- Proper async shutdown via aiohttp AppRunner
-- Config written as TOML, not JSON
-- /api/status endpoint for health checks
-- No werkzeug debug server exposed by default (opt-in via --debug)
-"""
-
-# © Yushi (@Mikasu32), 2024-2026
-# Kitsune Userbot — License: AGPLv3
-
 from __future__ import annotations
 
 import asyncio
@@ -36,7 +20,6 @@ except ImportError:
 _TEMPLATES_DIR = Path(__file__).parent.parent.parent / "web-resources" / "templates"
 _STATIC_DIR    = Path(__file__).parent.parent.parent / "web-resources" / "static"
 
-
 class WebCore:
     def __init__(self, client: typing.Any, db: typing.Any) -> None:
         self._client  = client
@@ -51,14 +34,12 @@ class WebCore:
 
         app = aiohttp.web.Application()
 
-        # Jinja2 templates
         if _TEMPLATES_DIR.exists():
             aiohttp_jinja2.setup(
                 app,
                 loader=jinja2.FileSystemLoader(str(_TEMPLATES_DIR)),
             )
 
-        # Routes
         app.router.add_get("/",               self._handle_root)
         app.router.add_get("/api/status",     self._handle_status)
         app.router.add_post("/api/save_config", self._handle_save_config)
@@ -78,8 +59,6 @@ class WebCore:
         if self._runner:
             await self._runner.cleanup()
 
-    # ── Handlers ──────────────────────────────────────────────────────────────
-
     async def _handle_root(self, request: "aiohttp.web.Request") -> "aiohttp.web.Response":
         from ..version import __version_str__
         me = self._client.tg_me
@@ -90,16 +69,16 @@ class WebCore:
   <title>Kitsune Userbot</title>
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <style>
-    body{{font-family:system-ui,sans-serif;background:#0f0f1a;color:#e0e0ff;
+    body{{font-family:system-ui,sans-serif;background:
          display:flex;flex-direction:column;align-items:center;padding:40px}}
-    h1{{color:#c084fc;font-size:2rem;margin-bottom:.5rem}}
-    .card{{background:#1a1a2e;border:1px solid #c084fc33;border-radius:12px;
+    h1{{color:
+    .card{{background:
            padding:24px 32px;max-width:420px;width:100%;margin-top:20px}}
     .row{{display:flex;justify-content:space-between;padding:6px 0;
-          border-bottom:1px solid #ffffff0f}}
+          border-bottom:1px solid
     .row:last-child{{border-bottom:none}}
-    .label{{color:#a78bfa}}.value{{font-weight:600}}
-    .badge{{background:#c084fc22;color:#c084fc;border-radius:20px;
+    .label{{color:
+    .badge{{background:
             padding:2px 10px;font-size:.8rem}}
   </style>
 </head>

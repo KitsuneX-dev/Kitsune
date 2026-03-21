@@ -9,9 +9,6 @@ Key differences:
 - No global dp instance — clean per-bot setup
 """
 
-# © Yushi (@Mikasu32), 2024-2026
-# Kitsune Userbot — License: AGPLv3
-
 from __future__ import annotations
 
 import asyncio
@@ -42,7 +39,6 @@ except ImportError:
 
 from .types import InlineCall
 
-
 class InlineManager:
     """
     Manages the auxiliary inline bot used by Kitsune modules.
@@ -62,11 +58,8 @@ class InlineManager:
         self._bot:    typing.Any = None
         self._dp:     typing.Any = None
         self._router: typing.Any = None
-        # callback_id → (handler, args, owner_id, disable_security)
         self._callbacks: dict[str, tuple] = {}
         self._started = False
-
-    # ── Lifecycle ─────────────────────────────────────────────────────────────
 
     async def start(self) -> None:
         if not AIOGRAM_AVAILABLE:
@@ -95,8 +88,6 @@ class InlineManager:
             await self._dp.stop_polling()
             await self._bot.session.close()
             self._started = False
-
-    # ── Public API ────────────────────────────────────────────────────────────
 
     def generate_markup(
         self,
@@ -169,8 +160,6 @@ class InlineManager:
             logger.exception("InlineManager.form: send failed")
             return None
 
-    # ── Handlers ──────────────────────────────────────────────────────────────
-
     async def _on_callback(self, call: "CallbackQuery") -> None:  # type: ignore[name-defined]
         entry = self._callbacks.get(call.data)
         if entry is None:
@@ -199,5 +188,4 @@ class InlineManager:
             await call.answer("❌ Ошибка обработки.", show_alert=True)
 
     async def _on_inline_query(self, query: "InlineQuery") -> None:  # type: ignore[name-defined]
-        # Default empty handler — modules override via subclassing or registration
         await query.answer([], cache_time=0)

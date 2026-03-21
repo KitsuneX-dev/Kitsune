@@ -3,9 +3,6 @@ Kitsune utility functions.
 Cleaned-up version of Hikka's utils.py — removed dead code, full type hints.
 """
 
-# © Yushi (@Mikasu32), 2024-2026
-# Kitsune Userbot — License: AGPLv3
-
 from __future__ import annotations
 
 import asyncio
@@ -19,17 +16,12 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-
-# ── Text helpers ──────────────────────────────────────────────────────────────
-
 def escape_html(text: typing.Any) -> str:
     return html.escape(str(text))
-
 
 def chunks(text: str, size: int) -> list[str]:
     """Split *text* into chunks of at most *size* characters."""
     return [text[i : i + size] for i in range(0, len(text), size)]
-
 
 def smart_split(text: str, entities: list, max_len: int = 4096) -> typing.Generator[str, None, None]:
     """
@@ -37,24 +29,16 @@ def smart_split(text: str, entities: list, max_len: int = 4096) -> typing.Genera
     reconstructing HTML tags around each chunk.
     Yields plain strings.
     """
-    # Simple fallback: chunk on raw text
     for chunk in chunks(text, max_len):
         yield chunk
 
-
 def truncate(text: str, max_len: int = 512, suffix: str = "…") -> str:
     return text if len(text) <= max_len else text[: max_len - len(suffix)] + suffix
-
-
-# ── Async helpers ─────────────────────────────────────────────────────────────
 
 async def run_sync(func: typing.Callable, *args: typing.Any, **kwargs: typing.Any) -> typing.Any:
     """Run a blocking callable in the default executor."""
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(None, lambda: func(*args, **kwargs))
-
-
-# ── Telegram helpers ──────────────────────────────────────────────────────────
 
 async def asset_channel(
     client: typing.Any,
@@ -83,7 +67,6 @@ async def asset_channel(
         channel = result.chats[0]
         channel_id = channel.id
 
-        # Mute notifications
         with __import__("contextlib").suppress(Exception):
             await client(
                 UpdateNotifySettingsRequest(
@@ -115,7 +98,6 @@ async def asset_channel(
     except Exception as exc:
         raise RuntimeError(f"Could not create asset channel {title!r}: {exc}") from exc
 
-
 def find_caller(
     stack: list[inspect.FrameInfo],
 ) -> typing.Callable | None:
@@ -135,7 +117,6 @@ def find_caller(
             return method
     return None
 
-
 def is_serializable(value: typing.Any) -> bool:
     import json
     try:
@@ -144,9 +125,6 @@ def is_serializable(value: typing.Any) -> bool:
     except (TypeError, ValueError):
         return False
 
-
-# ── Auto-delete ───────────────────────────────────────────────────────────────
-
 async def auto_delete(message: typing.Any, delay: float | None = None) -> None:
     """
     Удалить сервисное сообщение через delay секунд.
@@ -154,7 +132,6 @@ async def auto_delete(message: typing.Any, delay: float | None = None) -> None:
     Если настройка = 0 — ничего не делает.
     """
     if delay is None:
-        # Пробуем получить клиент и БД из объекта сообщения
         try:
             client = message.client
             db = getattr(client, "_kitsune_db", None)
@@ -171,9 +148,6 @@ async def auto_delete(message: typing.Any, delay: float | None = None) -> None:
     await asyncio.sleep(delay)
     with __import__("contextlib").suppress(Exception):
         await message.delete()
-
-
-# ── Progress bar ──────────────────────────────────────────────────────────────
 
 def progress_bar(current: int | float, total: int | float, width: int = 12) -> str:
     """
@@ -194,7 +168,6 @@ def progress_bar(current: int | float, total: int | float, width: int = 12) -> s
     bar = "█" * filled + "░" * empty
     percent = int(pct * 100)
     return f"{bar}  {percent}%"
-
 
 class ProgressMessage:
     """
@@ -255,9 +228,6 @@ class ProgressMessage:
         with __import__("contextlib").suppress(Exception):
             await self._msg.edit(text, parse_mode="html")
 
-
-# ── System detection ──────────────────────────────────────────────────────────
-
 def detect_environment() -> dict[str, bool]:
     """Detect the runtime environment."""
     import contextlib, platform
@@ -277,7 +247,6 @@ def detect_environment() -> dict[str, bool]:
         "windows":    platform.system() == "Windows",
         "macos":      platform.system() == "Darwin",
     }
-
 
 ENV = detect_environment()
 IS_TERMUX    = ENV["termux"]

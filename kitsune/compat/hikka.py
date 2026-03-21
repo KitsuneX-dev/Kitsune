@@ -9,9 +9,6 @@ modification.
 Usage: automatically applied by Loader when it detects Hikka-style modules.
 """
 
-# © Yushi (@Mikasu32), 2024-2026
-# Kitsune Userbot — License: AGPLv3
-
 from __future__ import annotations
 
 import sys
@@ -21,7 +18,6 @@ import logging
 logger = logging.getLogger(__name__)
 
 _SHIM_APPLIED = False
-
 
 def apply() -> None:
     """Install Hikka compatibility shims into sys.modules."""
@@ -35,13 +31,11 @@ def apply() -> None:
         GROUP_ADMIN_ANY, GROUP_MEMBER, PM, EVERYONE, BITMAP,
     )
 
-    # ── hikka.loader shim ─────────────────────────────────────────────────
     loader_shim = types.ModuleType("hikka.loader")
     loader_shim.Module    = KitsuneModule  # type: ignore[attr-defined]
     loader_shim.command   = command        # type: ignore[attr-defined]
     loader_shim.watcher   = watcher        # type: ignore[attr-defined]
 
-    # ── hikka.security shim ───────────────────────────────────────────────
     security_shim = types.ModuleType("hikka.security")
     security_shim.OWNER             = OWNER        # type: ignore[attr-defined]
     security_shim.SUDO              = SUDO         # type: ignore[attr-defined]
@@ -54,7 +48,6 @@ def apply() -> None:
     security_shim.EVERYONE          = EVERYONE     # type: ignore[attr-defined]
     security_shim.BITMAP            = BITMAP       # type: ignore[attr-defined]
 
-    # ── hikka.utils shim ──────────────────────────────────────────────────
     from .. import utils as kitsune_utils
     utils_shim = types.ModuleType("hikka.utils")
     utils_shim.escape_html   = kitsune_utils.escape_html   # type: ignore[attr-defined]
@@ -63,7 +56,6 @@ def apply() -> None:
     utils_shim.find_caller   = kitsune_utils.find_caller   # type: ignore[attr-defined]
     utils_shim.is_serializable = kitsune_utils.is_serializable  # type: ignore[attr-defined]
 
-    # ── hikka top-level shim ──────────────────────────────────────────────
     hikka_shim = types.ModuleType("hikka")
     hikka_shim.loader   = loader_shim    # type: ignore[attr-defined]
     hikka_shim.security = security_shim  # type: ignore[attr-defined]
@@ -74,14 +66,12 @@ def apply() -> None:
     sys.modules["hikka.security"] = security_shim
     sys.modules["hikka.utils"]    = utils_shim
 
-    # hikkatl → telethon alias
     try:
         import telethon
         sys.modules.setdefault("hikkatl", telethon)
     except ImportError:
         pass
 
-    # hikkapyro → hydrogram alias (fallback to pyrogram)
     try:
         import hydrogram
         sys.modules.setdefault("hikkapyro", hydrogram)

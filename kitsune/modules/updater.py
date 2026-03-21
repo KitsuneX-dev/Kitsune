@@ -3,9 +3,6 @@ Kitsune built-in: Updater
 Команды: .update .restart
 """
 
-# © Yushi (@Mikasu32), 2024-2026
-# Kitsune Userbot — License: AGPLv3
-
 from __future__ import annotations
 
 import asyncio
@@ -18,7 +15,6 @@ from ..core.security import OWNER
 from ..utils import escape_html, auto_delete, ProgressMessage
 
 _DB_OWNER = "kitsune.updater"
-
 
 class UpdaterModule(KitsuneModule):
     name        = "updater"
@@ -71,7 +67,6 @@ class UpdaterModule(KitsuneModule):
         restart_start = restart_data.get("start_time", 0)
         now           = time.time()
         total_elapsed = now - restart_start
-        # Approximate restart time as first 40% of total (process startup)
         restart_elapsed = total_elapsed * 0.4
 
         restart_time = _fmt_time(restart_elapsed)
@@ -80,7 +75,6 @@ class UpdaterModule(KitsuneModule):
         loader    = getattr(self.client, "_kitsune_loader", None)
         mod_count = len(loader.modules) if loader else 0
 
-        # Register callback handler for update confirmation buttons
         from telethon import events as _events
         self.client.add_event_handler(self._on_callback, _events.CallbackQuery)
 
@@ -90,7 +84,6 @@ class UpdaterModule(KitsuneModule):
             total_time=total_time,
         )
 
-        # Edit the original "Перезапуск..." message if we have its location
         chat_id = restart_data.get("chat_id", 0)
         msg_id  = restart_data.get("msg_id",  0)
         if chat_id and msg_id:
@@ -99,7 +92,6 @@ class UpdaterModule(KitsuneModule):
             except Exception:
                 await self.client.send_message(chat_id, report, parse_mode="html")
 
-        # Also send via bot if available
         notifier = loader.modules.get("notifier") if loader else None
         if notifier:
             await notifier.send_restart_report(
@@ -132,8 +124,6 @@ class UpdaterModule(KitsuneModule):
                 )
             except Exception:
                 pass
-
-    # ── Commands ──────────────────────────────────────────────────────────────
 
     @command("update", required=OWNER)
     async def update_cmd(self, event) -> None:
@@ -175,14 +165,12 @@ class UpdaterModule(KitsuneModule):
                 changes=changes,
             )
 
-            # Store pending update info in db
             await self.db.set(_DB_OWNER, "pending_update", {
                 "repo_path": repo_path,
                 "chat_id":   event.chat_id,
                 "msg_id":    m.id,
             })
 
-            # Userbot accounts CANNOT send inline buttons — send via bot instead
             loader = getattr(self.client, "_kitsune_loader", None)
             notifier = loader.modules.get("notifier") if loader else None
             bot_sent = False
@@ -211,7 +199,6 @@ class UpdaterModule(KitsuneModule):
                     parse_mode="html",
                 )
             else:
-                # Fallback: no bot — ask user to reply with yes/no
                 await m.edit(
                     confirm_text + "\n\n<i>Ответь <code>да</code> или <code>нет</code> на это сообщение</i>",
                     parse_mode="html",
@@ -231,7 +218,6 @@ class UpdaterModule(KitsuneModule):
             except Exception:
                 pass
 
-        # Шаг 1 — git fetch + reset, config.toml защищаем
         bar1 = "████░░░░░░░░  33%"
         await edit(f"⬇️ <b>Скачиваю обновление...</b>\n{bar1}")
         try:
@@ -242,7 +228,6 @@ class UpdaterModule(KitsuneModule):
             except TypeError:
                 branch = "main"
 
-            # Сохраняем config.toml во временный файл перед reset
             config_path = os.path.join(repo_path, "config.toml")
             config_backup = None
             if os.path.exists(config_path):
@@ -254,7 +239,6 @@ class UpdaterModule(KitsuneModule):
             origin = repo.remote("origin")
             origin.fetch()
 
-            # Убираем config.toml из индекса если он там есть (чтоб reset не трогал)
             try:
                 repo.git.rm("--cached", "config.toml", "--ignore-unmatch")
             except Exception:
@@ -262,7 +246,6 @@ class UpdaterModule(KitsuneModule):
 
             repo.git.reset("--hard", f"origin/{branch}")
 
-            # Восстанавливаем config.toml
             if config_backup and os.path.exists(config_backup):
                 shutil.copy2(config_backup, config_path)
                 os.unlink(config_backup)
@@ -271,7 +254,6 @@ class UpdaterModule(KitsuneModule):
             await edit(self.strings("git_err").format(err=escape_html(str(exc))))
             return
 
-        # Шаг 2 — pip install
         bar2 = "████████░░░░  67%"
         await edit(f"📦 <b>Обновляю зависимости...</b>\n{bar2}")
         proc = await asyncio.create_subprocess_exec(
@@ -286,7 +268,6 @@ class UpdaterModule(KitsuneModule):
             await edit(f"⚠️ pip install вернул ошибку:\n<code>{escape_html(stderr.decode()[:500])}</code>")
             return
 
-        # Шаг 3 — перезапуск
         bar3 = "████████████  100%"
         await edit(f"🔄 <b>Перезапускаю...</b>\n{bar3}")
         await self._save_restart_start(chat_id=chat_id, msg_id=msg_id)
@@ -301,8 +282,6 @@ class UpdaterModule(KitsuneModule):
         await asyncio.sleep(1)
         os.execl(sys.executable, sys.executable, "-m", "kitsune")
 
-    # ── Helpers ───────────────────────────────────────────────────────────────
-
     async def _save_restart_start(self, chat_id: int = 0, msg_id: int = 0) -> None:
         """Save restart timestamp before exiting."""
         now = time.time()
@@ -312,7 +291,6 @@ class UpdaterModule(KitsuneModule):
             "msg_id":     msg_id,
         })
         await self.db.force_save()
-
 
 def _fmt_time(seconds: float) -> str:
     if seconds < 1:

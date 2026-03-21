@@ -3,9 +3,6 @@ Kitsune built-in: Module Loader
 Команды: .dlmod .loadmod .unloadmod .reloadmod .watchmod .mods
 """
 
-# © Yushi (@Mikasu32), 2024-2026
-# Kitsune Userbot — License: AGPLv3
-
 from __future__ import annotations
 
 import asyncio
@@ -21,12 +18,10 @@ from ..utils import auto_delete, ProgressMessage
 logger = logging.getLogger(__name__)
 
 _DB_OWNER         = "kitsune.loader"
-_DB_KEY_MODS      = "user_modules"       # список URL-модулей (для dlmod)
+_DB_KEY_MODS      = "user_modules"
 _USER_MODULES_DIR = Path.home() / ".kitsune" / "modules"
 
-# Разрешённые домены для dlmod
 _ALLOWED_HOSTS = {"raw.githubusercontent.com", "github.com", "gist.githubusercontent.com"}
-
 
 def _is_github_url(url: str) -> bool:
     try:
@@ -35,7 +30,6 @@ def _is_github_url(url: str) -> bool:
         return host in _ALLOWED_HOSTS
     except Exception:
         return False
-
 
 class LoaderModule(KitsuneModule):
     name        = "loader"
@@ -69,10 +63,7 @@ class LoaderModule(KitsuneModule):
         self._watch_mtimes: dict[str, float] = {}
         self._watch_task: asyncio.Task | None = None
 
-    # ── Lifecycle ─────────────────────────────────────────────────────────────
-
     async def on_load(self) -> None:
-        # Восстанавливаем URL-модули загруженные через dlmod
         saved = self.db.get(_DB_OWNER, _DB_KEY_MODS, [])
         if saved:
             loader = self._get_loader()
@@ -89,8 +80,6 @@ class LoaderModule(KitsuneModule):
     async def on_unload(self) -> None:
         self._stop_watcher()
 
-    # ── Commands ──────────────────────────────────────────────────────────────
-
     @command("dlmod", required=OWNER)
     async def dlmod_cmd(self, event) -> None:
         """.dlmod <github url> — загрузить модуль с GitHub"""
@@ -103,7 +92,6 @@ class LoaderModule(KitsuneModule):
             await event.reply(self.strings("not_github"), parse_mode="html")
             return
 
-        # Конвертируем обычную github.com ссылку в raw если нужно
         url = _to_raw_url(url)
 
         m = await event.reply(
@@ -123,7 +111,6 @@ class LoaderModule(KitsuneModule):
                 await prog.update(1)
                 mod = await loader.load_from_url(url)
                 await prog.update(2)
-                # Сохраняем URL для восстановления после перезапуска
                 saved = list(self.db.get(_DB_OWNER, _DB_KEY_MODS, []))
                 if url not in saved:
                     saved.append(url)
@@ -149,7 +136,6 @@ class LoaderModule(KitsuneModule):
             await event.reply(self.strings("no_file"), parse_mode="html")
             return
 
-        # Проверяем что это .py файл
         fname = getattr(reply.file, "name", "") or ""
         if not fname.endswith(".py"):
             await event.reply("❌ Файл должен быть .py", parse_mode="html")
@@ -164,11 +150,9 @@ class LoaderModule(KitsuneModule):
             return
 
         try:
-            # Скачиваем во временный файл
             raw: bytes = await reply.download_media(bytes)
             source = raw.decode("utf-8")
 
-            # Сохраняем в ~/.kitsune/modules/ чтобы выжил после перезапуска
             _USER_MODULES_DIR.mkdir(parents=True, exist_ok=True)
             dest = _USER_MODULES_DIR / fname
             dest.write_text(source, encoding="utf-8")
@@ -195,7 +179,6 @@ class LoaderModule(KitsuneModule):
 
         loader = self._get_loader()
         if loader and await loader.unload(name):
-            # Убираем из сохранённых URL если был загружен через dlmod
             saved = [u for u in self.db.get(_DB_OWNER, _DB_KEY_MODS, []) if name not in u.lower()]
             await self.db.set(_DB_OWNER, _DB_KEY_MODS, saved)
             await event.reply(self.strings("unloaded").format(name=name), parse_mode="html")
@@ -216,7 +199,6 @@ class LoaderModule(KitsuneModule):
 
         path = self._find_module_path(name)
 
-        # Если файла нет — пробуем переcкачать по сохранённому URL (dlmod)
         if path is None:
             saved_urls: list[str] = self.db.get(_DB_OWNER, _DB_KEY_MODS, [])
             url = next((u for u in saved_urls if name in u.lower()), None)
@@ -276,8 +258,6 @@ class LoaderModule(KitsuneModule):
                 desc=mod.description or "—",
             )
         await event.reply(text, parse_mode="html")
-
-    # ── File watcher ──────────────────────────────────────────────────────────
 
     def _start_watcher(self) -> None:
         self._stop_watcher()
@@ -340,8 +320,6 @@ class LoaderModule(KitsuneModule):
                 parse_mode="html",
             )
 
-    # ── Helpers ───────────────────────────────────────────────────────────────
-
     def _get_loader(self):
         return getattr(self.client, "_kitsune_loader", None)
 
@@ -361,7 +339,6 @@ class LoaderModule(KitsuneModule):
             deps = err.split("requires")[-1].strip().strip("[]").replace("'", "")
             return self.strings("requires_err").format(deps=deps)
         return self.strings("load_err").format(err=err)
-
 
 def _to_raw_url(url: str) -> str:
     """

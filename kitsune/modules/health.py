@@ -7,9 +7,6 @@ Kitsune built-in: Health Monitor
 - Команда .health для мгновенного статуса
 """
 
-# © Yushi (@Mikasu32), 2024-2026
-# Kitsune Userbot — License: AGPLv3
-
 from __future__ import annotations
 
 import asyncio
@@ -21,10 +18,9 @@ from ..core.loader import KitsuneModule, command
 from ..core.security import OWNER
 
 _DB_OWNER = "kitsune.health"
-_DEFAULT_INTERVAL  = 5 * 60   # 5 минут
-_DEFAULT_RAM_LIMIT = 85        # % RAM — порог алерта
-_DEFAULT_CPU_LIMIT = 90        # % CPU — порог алерта
-
+_DEFAULT_INTERVAL  = 5 * 60
+_DEFAULT_RAM_LIMIT = 85
+_DEFAULT_CPU_LIMIT = 90
 
 class HealthModule(KitsuneModule):
     name        = "health"
@@ -57,8 +53,6 @@ class HealthModule(KitsuneModule):
     async def on_unload(self) -> None:
         self._stop_monitor()
 
-    # ── Commands ──────────────────────────────────────────────────────────────
-
     @command("health", required=OWNER)
     async def health_cmd(self, event) -> None:
         """.health — показать статус системы"""
@@ -85,8 +79,6 @@ class HealthModule(KitsuneModule):
             self.strings("monitor_on").format(interval=interval_min),
             parse_mode="html",
         )
-
-    # ── Internal ──────────────────────────────────────────────────────────────
 
     def _build_status(self) -> str:
         try:
