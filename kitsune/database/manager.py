@@ -10,9 +10,6 @@ Key improvements vs Hikka:
 - Revision history with configurable depth
 """
 
-# © Yushi (@Mikasu32), 2024-2026
-# Kitsune Userbot — License: AGPLv3
-
 from __future__ import annotations
 
 import asyncio
@@ -32,18 +29,12 @@ JSONValue = typing.Union[
     typing.Dict[str, typing.Any],
 ]
 
-
 def _is_serializable(value: typing.Any) -> bool:
     try:
         json.dumps(value)
         return True
     except (TypeError, ValueError):
         return False
-
-
-# ---------------------------------------------------------------------------
-# Backends
-# ---------------------------------------------------------------------------
 
 class SQLiteBackend:
     """
@@ -107,7 +98,6 @@ class SQLiteBackend:
             logger.exception("SQLite: failed to save database")
             return False
 
-
 class RedisBackend:
     """Optional Redis backend (requires redis package)."""
 
@@ -138,11 +128,6 @@ class RedisBackend:
             logger.exception("Redis: failed to save")
             return False
 
-
-# ---------------------------------------------------------------------------
-# DatabaseManager
-# ---------------------------------------------------------------------------
-
 class DatabaseManager:
     """
     Central database manager. Wraps an in-memory dict with async-safe
@@ -157,7 +142,7 @@ class DatabaseManager:
     """
 
     _MAX_REVISIONS = 20
-    _REVISION_INTERVAL = 3  # seconds
+    _REVISION_INTERVAL = 3
 
     def __init__(self, client: typing.Any) -> None:
         self._client = client
@@ -169,16 +154,11 @@ class DatabaseManager:
         self._pending_save: asyncio.Task | None = None
         self._assets_channel: int | None = None
 
-    # ------------------------------------------------------------------
-    # Init
-    # ------------------------------------------------------------------
-
     async def init(self) -> None:
         """Initialize backends and load data."""
         import os as _os
         from pathlib import Path as _Path
 
-        # Redis takes priority if configured
         redis_uri = _os.environ.get("REDIS_URL")
         if not redis_uri:
             try:
@@ -206,7 +186,6 @@ class DatabaseManager:
             self._data = await self._backend.load()
             logger.info("Database: SQLite backend active (%s)", db_path)
 
-        # Assets channel
         try:
             from .. import utils
             self._assets_channel, _ = await utils.asset_channel(
@@ -217,10 +196,6 @@ class DatabaseManager:
             )
         except Exception:
             logger.warning("Database: Could not get/create assets channel")
-
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
 
     def get(
         self,
@@ -284,10 +259,6 @@ class DatabaseManager:
             snapshot = dict(self._data)
         return await self._backend.save(snapshot)
 
-    # ------------------------------------------------------------------
-    # Assets
-    # ------------------------------------------------------------------
-
     async def store_asset(self, message: typing.Any) -> int:
         from telethon.tl.types import Message
         if not self._assets_channel:
@@ -305,10 +276,6 @@ class DatabaseManager:
             raise RuntimeError("Assets channel not available")
         msgs = await self._client.get_messages(self._assets_channel, ids=[asset_id])
         return msgs[0] if msgs else None
-
-    # ------------------------------------------------------------------
-    # Internal
-    # ------------------------------------------------------------------
 
     def _maybe_snapshot(self) -> None:
         now = time.monotonic()
@@ -334,10 +301,6 @@ class DatabaseManager:
             async with self._lock:
                 snapshot = {o: dict(s) for o, s in self._data.items()}
             await self._backend.save(snapshot)
-
-    # ------------------------------------------------------------------
-    # Compatibility helpers (used by modules that expect dict-like API)
-    # ------------------------------------------------------------------
 
     def __contains__(self, item: object) -> bool:
         return item in self._data

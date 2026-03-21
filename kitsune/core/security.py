@@ -1,16 +1,3 @@
-"""
-Kitsune Security Manager
-
-Improvements vs Hikka:
-- Async TTL cache for group membership (avoids repeated API calls)
-- Full type annotations
-- Cleaner bitmask resolution logic
-- No circular imports (db injected, not imported)
-"""
-
-# © Yushi (@Mikasu32), 2024-2026
-# Kitsune Userbot — License: AGPLv3
-
 from __future__ import annotations
 
 import asyncio
@@ -20,7 +7,6 @@ import typing
 
 logger = logging.getLogger(__name__)
 
-# ── Permission bits ──────────────────────────────────────────────────────────
 OWNER                    = 1 << 0
 SUDO                     = 1 << 1
 SUPPORT                  = 1 << 2
@@ -45,9 +31,8 @@ GROUP_ADMIN_ANY = (
 )
 
 DEFAULT_PERMISSIONS = OWNER
-_CACHE_TTL = 60.0          # seconds to cache group membership lookups
+_CACHE_TTL = 60.0
 _DB_KEY    = "kitsune.security"
-
 
 class SecurityManager:
     """Central permission checker for Kitsune commands."""
@@ -56,14 +41,11 @@ class SecurityManager:
         self._client = client
         self._db     = db
         self._me: typing.Any = None
-        # cache[(chat_id, user_id)] = (resolved_bits, expires_at)
         self._cache: dict[tuple[int, int], tuple[int, float]] = {}
         self._lock = asyncio.Lock()
 
     async def init(self) -> None:
         self._me = await self._client.get_me()
-
-    # ── Public API ────────────────────────────────────────────────────────────
 
     async def check(self, message: typing.Any, required: int) -> bool:
         """Return True if the message sender satisfies *required* bitmask."""
@@ -74,7 +56,6 @@ class SecurityManager:
         if sender_id is None:
             return False
 
-        # Owner shortcut — always has OWNER bit
         if sender_id == self._me.id and (required & OWNER):
             return True
 
@@ -95,28 +76,23 @@ class SecurityManager:
         users = [u for u in self.get_sudo_users() if u != user_id]
         await self._db.set(_DB_KEY, "sudo", users)
 
-    # ── Internal ──────────────────────────────────────────────────────────────
-
     async def _resolve(self, message: typing.Any, sender_id: int) -> int:
         """Resolve and return the full permission bitmask for *sender_id*."""
         bits = 0
 
-        # Owner
         if sender_id == self._me.id:
             bits |= OWNER
 
-        # Sudo / Support
         if sender_id in self.get_sudo_users():
             bits |= SUDO
         if sender_id in self.get_support_users():
             bits |= SUPPORT
 
-        # Chat context
         chat_id = message.chat_id
         if chat_id is None:
             return bits
 
-        if chat_id == sender_id:          # private message
+        if chat_id == sender_id:
             bits |= PM
         else:
             bits |= await self._resolve_group_bits(chat_id, sender_id)

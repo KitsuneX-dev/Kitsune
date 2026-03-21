@@ -3,13 +3,9 @@ Kitsune built-in: Help
 Команда .help — список всех модулей и команд.
 """
 
-# © Yushi (@Mikasu32), 2024-2026
-# Kitsune Userbot — License: AGPLv3
-
 from ..core.loader import KitsuneModule, command
 from ..core.security import OWNER
 
-# Human-friendly display names for built-in modules
 _DISPLAY_NAMES: dict[str, str] = {
     "backup":   "Backup",
     "eval":     "Evaluator",
@@ -23,7 +19,6 @@ _DISPLAY_NAMES: dict[str, str] = {
     "settings": "Settings",
     "updater":  "Updater",
 }
-
 
 class HelpModule(KitsuneModule):
     name        = "help"
@@ -56,7 +51,6 @@ class HelpModule(KitsuneModule):
             await event.reply(self.strings("no_modules"), parse_mode="html")
             return
 
-        # Get current prefix for showing commands
         dispatcher = getattr(self.client, "_kitsune_dispatcher", None)
         prefix = dispatcher._prefix if dispatcher else "."
 
@@ -83,8 +77,6 @@ class HelpModule(KitsuneModule):
             method = getattr(mod, attr_name, None)
             if callable(method) and hasattr(method, "_kitsune_command"):
                 doc = (inspect.getdoc(method) or "").strip()
-                # Убираем из docstring хардкодный префикс если он там есть
-                # чтобы не дублировать: ".loli — ..." → "loli — ..."
                 cmd_name = method._kitsune_command
                 if doc.startswith(("."+cmd_name, prefix+cmd_name)):
                     doc = doc[len(prefix)+len(cmd_name):].lstrip(" —-")

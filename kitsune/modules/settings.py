@@ -3,14 +3,10 @@ Kitsune built-in: Settings
 Команды: .prefix .lang .setowner
 """
 
-# © Yushi (@Mikasu32), 2024-2026
-# Kitsune Userbot — License: AGPLv3
-
 from ..core.loader import KitsuneModule, command
 from ..core.security import OWNER
 
 _DB_OWNER = "kitsune.core"
-
 
 class SettingsModule(KitsuneModule):
     name        = "settings"
@@ -32,14 +28,12 @@ class SettingsModule(KitsuneModule):
         """.prefix <символ> — сменить префикс команд"""
         dispatcher = getattr(self.client, "_kitsune_dispatcher", None)
         current_prefix = dispatcher._prefix if dispatcher else "."
-        # Strip prefix + command name to get the argument
         raw = event.message.text[len(current_prefix):].split(maxsplit=1)
         if len(raw) < 2 or not raw[1].strip():
             await event.reply(self.strings("prefix_usage"), parse_mode="html")
             return
 
         new_prefix = raw[1].strip()[:3]
-        # Берём текущий префикс из диспетчера (не из БД), чтобы сравнение было точным
         old_prefix = dispatcher._prefix if dispatcher else self.db.get(_DB_OWNER, "prefix", ".")
 
         if new_prefix == old_prefix:
@@ -50,12 +44,10 @@ class SettingsModule(KitsuneModule):
 
         await self.db.set(_DB_OWNER, "prefix", new_prefix)
 
-        # Apply to dispatcher immediately
         dispatcher = getattr(self.client, "_kitsune_dispatcher", None)
         if dispatcher:
             dispatcher.set_prefix(new_prefix)
 
-        # Save to config.toml so it persists after restart
         try:
             import toml
             from pathlib import Path
@@ -114,7 +106,6 @@ class SettingsModule(KitsuneModule):
             return
 
         await self.db.set(_DB_OWNER, "auto_delete_delay", delay)
-        # Сохраняем ссылку на БД в клиенте для утилиты auto_delete
         self.client._kitsune_db = self.db
         await event.reply(
             f"🗑 Авто-удаление сервисных сообщений через <b>{delay:.0f} сек</b>.",

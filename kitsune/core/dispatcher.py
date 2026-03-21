@@ -1,17 +1,3 @@
-"""
-Kitsune Command Dispatcher
-
-Improvements vs Hikka:
-- Integrated RateLimiter (token-bucket) — prevents Telegram flood bans
-- Explicit async exception handling per-handler (no silent drops)
-- Clean watcher / command split
-- Telethon + Hydrogram dual-client support
-- Per-command permission check via SecurityManager
-"""
-
-# © Yushi (@Mikasu32), 2024-2026
-# Kitsune Userbot — License: AGPLv3
-
 from __future__ import annotations
 
 import asyncio
@@ -27,15 +13,13 @@ logger = logging.getLogger(__name__)
 
 _FLOOD_REPLY = "⏳ <b>Слишком часто. Подожди немного.</b>"
 
-
 class CommandDispatcher:
     """
     Routes incoming Telethon events to registered module handlers.
 
     Lifecycle:
         dispatcher = CommandDispatcher(client, db, security)
-        dispatcher.load_modules(loader)   # called by Loader
-        # Telethon event handlers registered automatically
+        dispatcher.load_modules(loader)
     """
 
     def __init__(
@@ -52,14 +36,10 @@ class CommandDispatcher:
         self._limiter  = RateLimiter()
         self._loader: typing.Any = None
 
-        # {command_name: (handler_coro, required_permission)}
         self._commands: dict[str, tuple[typing.Callable, int]] = {}
-        # list of (filter_func, handler_coro)
         self._watchers: list[tuple[typing.Callable | None, typing.Callable]] = []
 
         self._client.add_event_handler(self._on_message, events.NewMessage(outgoing=True))
-
-    # ── Public API ────────────────────────────────────────────────────────────
 
     def register_command(
         self,
@@ -94,8 +74,6 @@ class CommandDispatcher:
         self._limiter.set_owner(owner_id)
         self._limiter.start_cleanup()
 
-    # ── Event handler ─────────────────────────────────────────────────────────
-
     async def _on_message(self, event: events.NewMessage.Event) -> None:
         message = event.message
         if not message or not message.text:
@@ -103,14 +81,13 @@ class CommandDispatcher:
 
         text: str = (message.raw_text or message.text or "").strip()
 
-        # ── Command dispatch ─────────────────────────────────────────────────
         if text.startswith(self._prefix):
             raw = text[len(self._prefix):]
             parts = raw.split(maxsplit=1)
             if not parts:
                 return
 
-            cmd_name = parts[0].lower().split("@")[0]   # strip @botname suffix
+            cmd_name = parts[0].lower().split("@")[0]
             entry = self._commands.get(cmd_name)
             if entry is None:
                 return
@@ -118,7 +95,6 @@ class CommandDispatcher:
             handler, required = entry
             sender_id = message.sender_id or 0
 
-            # Rate limit check
             if not await self._limiter.check(sender_id, cmd_name):
                 try:
                     await message.respond(_FLOOD_REPLY, parse_mode="html")
@@ -126,7 +102,6 @@ class CommandDispatcher:
                     pass
                 return
 
-            # Permission check
             try:
                 allowed = await self._security.check(message, required)
             except Exception:
@@ -139,7 +114,6 @@ class CommandDispatcher:
             await self._safe_call(handler, event, cmd_name)
             return
 
-        # ── Watcher dispatch ─────────────────────────────────────────────────
         for filter_func, handler in list(self._watchers):
             try:
                 if filter_func is not None and not filter_func(message):
@@ -147,8 +121,6 @@ class CommandDispatcher:
             except Exception:
                 continue
             await self._safe_call(handler, event, f"watcher:{handler.__name__}")
-
-    # ── Internal ──────────────────────────────────────────────────────────────
 
     async def _safe_call(
         self,

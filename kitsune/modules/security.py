@@ -3,12 +3,8 @@ Kitsune built-in: Security
 Команды: .addsudo .delsudo .sudolist
 """
 
-# © Yushi (@Mikasu32), 2024-2026
-# Kitsune Userbot — License: AGPLv3
-
 from ..core.loader import KitsuneModule, command
 from ..core.security import OWNER
-
 
 class SecurityModule(KitsuneModule):
     name        = "security"

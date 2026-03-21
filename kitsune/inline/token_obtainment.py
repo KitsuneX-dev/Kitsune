@@ -5,9 +5,6 @@ Automates the /newbot flow via BotFather using the Telethon client,
 so the user doesn't have to manually create a bot.
 """
 
-# © Yushi (@Mikasu32), 2024-2026
-# Kitsune Userbot — License: AGPLv3
-
 from __future__ import annotations
 
 import asyncio
@@ -19,7 +16,6 @@ logger = logging.getLogger(__name__)
 
 _BOTFATHER = "BotFather"
 _TOKEN_RE  = re.compile(r"\d+:[A-Za-z0-9_-]{35,}")
-
 
 async def obtain_token(client: typing.Any, bot_name: str | None = None) -> str | None:
     """
@@ -45,15 +41,12 @@ async def obtain_token(client: typing.Any, bot_name: str | None = None) -> str |
         await client.send_message(_BOTFATHER, "/newbot")
         await asyncio.sleep(2)
 
-        # Display name
         await client.send_message(_BOTFATHER, "Kitsune Userbot")
         await asyncio.sleep(2)
 
-        # Username
         await client.send_message(_BOTFATHER, bot_name)
         await asyncio.sleep(3)
 
-        # Read last message from BotFather
         msgs = await client.get_messages(_BOTFATHER, limit=3)
         for msg in msgs:
             if msg.text:

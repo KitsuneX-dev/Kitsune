@@ -4,9 +4,6 @@ Kitsune built-in: Notifier
 Команды: .resetbot
 """
 
-# © Yushi (@Mikasu32), 2024-2026
-# Kitsune Userbot — License: AGPLv3
-
 from __future__ import annotations
 
 import asyncio
@@ -20,8 +17,7 @@ from ..core.security import OWNER
 logger = logging.getLogger(__name__)
 
 _DB_OWNER       = "kitsune.notifier"
-_CHECK_INTERVAL = 30  # секунд между проверками обновлений
-
+_CHECK_INTERVAL = 30
 
 def _extract_buttons(message) -> list[str]:
     """
@@ -44,7 +40,6 @@ def _extract_buttons(message) -> list[str]:
     except Exception:
         pass
     return result
-
 
 class NotifierModule(KitsuneModule):
     name        = "notifier"
@@ -82,10 +77,7 @@ class NotifierModule(KitsuneModule):
         self._polling_task: asyncio.Task | None = None
         self._check_task:   asyncio.Task | None = None
 
-    # ── Lifecycle ─────────────────────────────────────────────────────────────
-
     async def on_load(self) -> None:
-        # 1. Токен из config.toml имеет приоритет (восстановление замороженного бота)
         config_token = self._load_token_from_config()
         if config_token:
             await self.db.set(_DB_OWNER, "bot_token", config_token)
@@ -94,24 +86,18 @@ class NotifierModule(KitsuneModule):
         token = self.db.get(_DB_OWNER, "bot_token", None)
 
         if token:
-            # Бот уже есть — подключаемся.
-            # Проверяем отдельно — спрашивали ли уже про интервал бэкапа.
-            # Это нужно для тех кто обновился со старой версии без авто-бэкапа.
             backup_asked = self.db.get(_DB_OWNER, "backup_interval_asked", False)
             asyncio.ensure_future(self._start_polling(
                 str(token), first_run=not backup_asked
             ))
             self._check_task = asyncio.ensure_future(self._update_check_loop())
         else:
-            # Первый запуск — ищем существующего бота или создаём нового
             asyncio.ensure_future(self._auto_setup())
 
     async def on_unload(self) -> None:
         if self._check_task and not self._check_task.done():
             self._check_task.cancel()
         await self._stop_polling()
-
-    # ── Commands ──────────────────────────────────────────────────────────────
 
     @command("resetbot", required=OWNER)
     async def resetbot_cmd(self, event) -> None:
@@ -162,10 +148,8 @@ class NotifierModule(KitsuneModule):
                 )
                 return
 
-            # Останавливаем текущий polling
             await self._stop_polling()
 
-            # Сохраняем новый токен
             await self.db.set(_DB_OWNER, "bot_token", token)
             await self.db.set(_DB_OWNER, "bot_username", arg)
             self._save_token_to_config(token)
@@ -177,8 +161,6 @@ class NotifierModule(KitsuneModule):
             )
         except Exception as exc:
             await m.edit(f"❌ Ошибка: <code>{exc}</code>", parse_mode="html")
-
-    # ── Auto setup ────────────────────────────────────────────────────────────
 
     async def _auto_setup(self) -> None:
         """
@@ -192,20 +174,17 @@ class NotifierModule(KitsuneModule):
             me = await self.client.get_me()
             logger.info("Notifier: first run for tg_id=%d", me.id)
 
-            # Сохраняем tg_id — по нему потом определяем «свой» аккаунт
             await self.db.set(_DB_OWNER, "owner_tg_id", me.id)
 
             bot_name = f"Kitsune {me.first_name}"
             token    = None
             reused   = False
 
-            # Пробуем найти существующего бота через BotFather (список My Bots)
             token, bot_username = await self._find_existing_bot(me.id)
             if token:
                 reused = True
                 logger.info("Notifier: found existing bot @%s", bot_username)
             else:
-                # Создаём нового
                 token, bot_username = await self._create_bot(me, bot_name)
 
             if not token:
@@ -218,7 +197,6 @@ class NotifierModule(KitsuneModule):
             await self.db.set(_DB_OWNER, "owner_id",     me.id)
             self._save_token_to_config(token)
 
-            # Уведомляем пользователя в Saved Messages
             key = "reused" if reused else "done"
             await self.client.send_message(
                 "me",
@@ -226,7 +204,6 @@ class NotifierModule(KitsuneModule):
                 parse_mode="html",
             )
 
-            # Запускаем polling — first_run=True чтобы показать выбор интервала бэкапа
             asyncio.ensure_future(self._start_polling(token, first_run=not reused))
             self._check_task = asyncio.ensure_future(self._update_check_loop())
 
@@ -248,17 +225,13 @@ class NotifierModule(KitsuneModule):
                 await conv.send_message("/mybots")
                 resp = await conv.get_response()
 
-                # BotFather присылает кнопки вида "@kitsune_123_bot"
-                # Читаем из reply_markup
                 usernames = _extract_buttons(resp)
                 if not usernames:
-                    # fallback: попробуем из текста (старые версии BotFather)
                     usernames = _re.findall(r"@([a-zA-Z0-9_]+bot)", resp.text or "", _re.IGNORECASE)
 
                 for uname in usernames:
                     uname = uname.lstrip("@")
                     try:
-                        # BotFather после @username сразу присылает меню с токеном
                         await conv.send_message(f"@{uname}")
                         menu_resp = await conv.get_response()
                         token_text = menu_resp.text or ""
@@ -266,7 +239,6 @@ class NotifierModule(KitsuneModule):
                         if m:
                             results.append((uname, m.group(1)))
                         else:
-                            # Токена в меню нет — запрашиваем явно
                             await conv.send_message("/token")
                             token_resp = await conv.get_response()
                             token_text2 = token_resp.text or ""
@@ -287,12 +259,10 @@ class NotifierModule(KitsuneModule):
             async with self.client.conversation("@BotFather", timeout=20) as conv:
                 await conv.send_message(f"@{username}")
                 menu_resp = await conv.get_response()
-                # BotFather иногда сразу присылает токен в меню бота
                 token_text = menu_resp.text or ""
                 m = _re.search(r"(\d{8,}:[A-Za-z0-9_-]{35,})", token_text)
                 if m:
                     return m.group(1)
-                # Токена в меню нет — запрашиваем явно через /token
                 await conv.send_message("/token")
                 token_resp = await conv.get_response()
                 token_text2 = token_resp.text or ""
@@ -313,7 +283,6 @@ class NotifierModule(KitsuneModule):
                 resp = await conv.get_response()
                 text = resp.text or ""
 
-                # Ищем username вида kitsune_<tg_id>..._bot
                 pattern = rf"kitsune_{tg_id}[a-z0-9_]*_bot"
                 match   = re.search(pattern, text, re.IGNORECASE)
                 if not match:
@@ -321,7 +290,6 @@ class NotifierModule(KitsuneModule):
 
                 username = match.group(0)
 
-                # Нажимаем кнопку с ботом или отправляем его username
                 await conv.send_message(f"@{username}")
                 await conv.get_response()
 
@@ -374,8 +342,6 @@ class NotifierModule(KitsuneModule):
             logger.error("Notifier: _create_bot failed — %s", exc)
             return None, None
 
-    # ── Config helpers ────────────────────────────────────────────────────────
-
     def _load_token_from_config(self) -> str | None:
         try:
             import toml
@@ -400,8 +366,6 @@ class NotifierModule(KitsuneModule):
                 cfg_path.write_text(toml.dumps(cfg), encoding="utf-8")
         except Exception:
             logger.warning("Notifier: could not write token to config.toml")
-
-    # ── Polling ───────────────────────────────────────────────────────────────
 
     async def _start_polling(self, token: str, *, first_run: bool = False) -> None:
         try:
@@ -445,11 +409,9 @@ class NotifierModule(KitsuneModule):
                     backup = loader.modules.get("backup") if loader else None
 
                     if not backup_asked and backup:
-                        # Первый запуск — сразу показываем выбор интервала
                         await backup.show_interval_setup(ref._bot, msg.from_user.id)
                         await ref.db.set(_DB_OWNER, "backup_interval_asked", True)
                     else:
-                        # Повторный /start — показываем статус
                         interval_h = ref.db.get("kitsune.backup", "interval_h", None)
                         backup_status = (
                             f"каждые <b>{interval_h} ч</b>" if interval_h
@@ -470,7 +432,6 @@ class NotifierModule(KitsuneModule):
                 except Exception as e:
                     logger.warning("Notifier: on_start answer failed — %s", e)
 
-            # ── Callback: обновление (из .update) ────────────────────────────
             @router.callback_query(lambda c: c.data in ("update_yes", "update_no", "do_update"))
             async def on_update_cb(call: CallbackQuery) -> None:
                 owner_id = ref.db.get(_DB_OWNER, "owner_id", None)
@@ -495,7 +456,6 @@ class NotifierModule(KitsuneModule):
                 except Exception as exc:
                     await call.message.edit_text(f"❌ Ошибка:\n<code>{exc}</code>")
 
-            # ── Callback: интервал авто-бэкапа ───────────────────────────────
             @router.callback_query(lambda c: c.data and c.data.startswith("backup_interval:"))
             async def on_backup_interval(call: CallbackQuery) -> None:
                 owner_id = ref.db.get(_DB_OWNER, "owner_id", None)
@@ -514,11 +474,10 @@ class NotifierModule(KitsuneModule):
             )
             logger.info("Notifier: polling started (first_run=%s)", first_run)
 
-            # Если первый запуск — показываем выбор интервала бэкапа
             if first_run:
                 owner_id = self.db.get(_DB_OWNER, "owner_id", None)
                 if owner_id:
-                    await asyncio.sleep(2)  # дать время polling'у стартовать
+                    await asyncio.sleep(2)
                     loader = getattr(self.client, "_kitsune_loader", None)
                     backup = loader.modules.get("backup") if loader else None
                     if backup:
@@ -546,10 +505,7 @@ class NotifierModule(KitsuneModule):
         self._dp           = None
         self._polling_task = None
 
-    # ── Update check loop ─────────────────────────────────────────────────────
-
     async def _update_check_loop(self) -> None:
-        # Первая проверка через 5 минут после старта
         await asyncio.sleep(300)
         while True:
             try:
@@ -558,7 +514,7 @@ class NotifierModule(KitsuneModule):
                 break
             except Exception:
                 logger.exception("Notifier: update check failed")
-            await asyncio.sleep(600)  # раз в 10 минут
+            await asyncio.sleep(600)
 
     async def _check_for_updates(self) -> None:
         """
@@ -585,7 +541,6 @@ class NotifierModule(KitsuneModule):
             logger.debug("Notifier: git repo unavailable — %s", exc)
             return
 
-        # Подтягиваем refs со всех remote (как у Hikka: for remote in repo.remotes)
         try:
             for remote in repo.remotes:
                 remote.fetch()
@@ -593,7 +548,6 @@ class NotifierModule(KitsuneModule):
             logger.debug("Notifier: git fetch failed — %s", exc)
             return
 
-        # Проверяем есть ли новые коммиты (как у Hikka: repo.git.log([...]))
         try:
             diff = repo.git.log([f"HEAD..origin/{branch}", "--oneline"])
         except Exception as exc:
@@ -601,9 +555,8 @@ class NotifierModule(KitsuneModule):
             return
 
         if not diff:
-            return  # всё актуально
+            return
 
-        # Получаем SHA последнего коммита на remote (как у Hikka: iter_commits)
         try:
             remote_sha = next(
                 repo.iter_commits(f"origin/{branch}", max_count=1)
@@ -611,13 +564,11 @@ class NotifierModule(KitsuneModule):
         except Exception:
             return
 
-        # Уже уведомляли об этом коммите?
         if remote_sha == self.db.get(_DB_OWNER, "last_notified_commit", None):
             return
 
         await self.db.set(_DB_OWNER, "last_notified_commit", remote_sha)
 
-        # Формируем список изменений (как у Hikka: diff.splitlines()[:10])
         log_lines  = diff.splitlines()[:10]
         count      = len(diff.splitlines())
         changes    = "\n".join(
@@ -648,8 +599,6 @@ class NotifierModule(KitsuneModule):
             default=DefaultBotProperties(parse_mode=ParseMode.HTML),
             session=AiohttpSession(timeout=30),
         )
-
-    # ── Public API ────────────────────────────────────────────────────────────
 
     async def send_restart_report(self, restart_time: str, total_time: str, mod_count: int) -> None:
         token    = self.db.get(_DB_OWNER, "bot_token", None)
@@ -692,8 +641,6 @@ class NotifierModule(KitsuneModule):
             await bot.session.close()
         except Exception:
             logger.exception("Notifier: failed to send update notification")
-
-    # ── Update logic ──────────────────────────────────────────────────────────
 
     async def _do_update(self) -> None:
         import sys

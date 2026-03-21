@@ -1,18 +1,3 @@
-"""
-Kitsune Userbot — Main entry point.
-
-Improvements vs Hikka main.py:
-- Config via TOML (readable, supports comments) + pydantic validation
-- Clean async startup sequence with proper error handling
-- Dual-stack: Telethon primary + optional Hydrogram secondary
-- No eval() of config keys — explicit typed access
-- Environment detection using utils.ENV
-- Graceful shutdown on SIGINT/SIGTERM
-"""
-
-# © Yushi (@Mikasu32), 2024-2026
-# Kitsune Userbot — License: AGPLv3
-
 from __future__ import annotations
 
 import argparse
@@ -26,8 +11,6 @@ import sys
 from pathlib import Path
 from typing import Any
 
-# ── Paths ─────────────────────────────────────────────────────────────────────
-
 BASE_DIR = (
     "/data"
     if "DOCKER" in os.environ
@@ -40,12 +23,8 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 logger = logging.getLogger(__name__)
 
-
-# ── Config helpers ────────────────────────────────────────────────────────────
-
 _config_cache: dict[str, Any] | None = None
 _config_mtime: float = 0.0
-
 
 def _load_raw_config() -> dict[str, Any]:
     """Load config.toml with mtime-based cache. Falls back to config.json (migration)."""
@@ -69,7 +48,6 @@ def _load_raw_config() -> dict[str, Any]:
             if _config_cache is not None:
                 return _config_cache
 
-    # Legacy JSON migration
     legacy = BASE_PATH / "config.json"
     if legacy.exists():
         with contextlib.suppress(Exception):
@@ -80,13 +58,11 @@ def _load_raw_config() -> dict[str, Any]:
 
     return {}
 
-
 def _invalidate_config_cache() -> None:
     """Call after writing config so next read sees fresh data."""
     global _config_cache, _config_mtime
     _config_cache = None
     _config_mtime = 0.0
-
 
 def _save_config(data: dict[str, Any]) -> None:
     try:
@@ -96,18 +72,13 @@ def _save_config(data: dict[str, Any]) -> None:
     except Exception:
         logger.exception("main: failed to save config.toml")
 
-
 def get_config_key(key: str, default: Any = None) -> Any:
     return _load_raw_config().get(key, default)
-
 
 def set_config_key(key: str, value: Any) -> None:
     data = _load_raw_config()
     data[key] = value
     _save_config(data)
-
-
-# ── Auth helpers ──────────────────────────────────────────────────────────────
 
 async def _interactive_login(client: Any) -> None:
     """Walk the user through Telethon interactive login."""
@@ -149,9 +120,6 @@ async def _interactive_login(client: Any) -> None:
         print("❌ Session duplicated. Delete session file and retry.")
         sys.exit(1)
 
-
-# ── Hydrogram secondary client ────────────────────────────────────────────────
-
 async def _start_hydrogram(api_id: int, api_hash: str, session_name: str) -> Any | None:
     """Optionally start a Hydrogram client for modules that prefer its API."""
     try:
@@ -179,9 +147,6 @@ async def _start_hydrogram(api_id: int, api_hash: str, session_name: str) -> Any
         logger.exception("main: Hydrogram startup failed, continuing without it")
         return None
 
-
-# ── Main startup ──────────────────────────────────────────────────────────────
-
 async def _startup(args: argparse.Namespace) -> None:
     from . import log, utils
     from .tl_cache import KitsuneTelegramClient
@@ -193,16 +158,13 @@ async def _startup(args: argparse.Namespace) -> None:
 
     log.init()
 
-    # ── Config ────────────────────────────────────────────────────────────────
     cfg = _load_raw_config()
     api_id:   int = int(cfg.get("api_id") or os.environ.get("API_ID", 0))
     api_hash: str = str(cfg.get("api_hash") or os.environ.get("API_HASH", ""))
     prefix:   str = str(cfg.get("prefix", "."))
 
-    # ── Telethon client ───────────────────────────────────────────────────────
     session_path = DATA_DIR / "kitsune"
 
-    # ── Proxy — parsed once, used everywhere (Hikka-style _get_proxy()) ─────
     from telethon.network.connection import (
         ConnectionTcpFull,
         ConnectionTcpMTProxyRandomizedIntermediate,
@@ -220,7 +182,6 @@ async def _startup(args: argparse.Namespace) -> None:
         else:
             logger.warning("main: non-MTProto proxy in config — ignored (use MTProto)")
 
-    # If api_id/api_hash missing OR session file doesn't exist → run web setup
     session_file = Path(str(session_path) + ".session")
     need_setup = (not api_id or not api_hash or not session_file.exists())
 
@@ -269,15 +230,8 @@ async def _startup(args: argparse.Namespace) -> None:
             )
             sys.exit(1)
 
-        # Если файл сессии существует и имеет ненулевой размер —
-        # доверяем ему и НЕ проверяем is_user_authorized() при старте.
-        # Этот чек ненадёжен сразу после перезапуска (сеть ещё не поднялась)
-        # и ложно запускает web setup даже когда сессия валидна.
-        # Telethon сам обработает невалидную сессию — выбросит исключение
-        # при первом реальном запросе, и тогда уже можно запустить setup.
         session_size = session_file.stat().st_size if session_file.exists() else 0
         if session_size < 100:
-            # Файл есть но пустой или повреждён — это реальная проблема
             logger.info("main: session file too small (%d bytes), launching web setup", session_size)
             from .web.setup import SetupServer
             web_port = int(cfg.get("web_port", 8080))
@@ -293,42 +247,33 @@ async def _startup(args: argparse.Namespace) -> None:
     client.tg_me = me
     logger.info("main: logged in as %s (id=%d)", me.first_name, me.id)
 
-    # ── Hydrogram secondary ───────────────────────────────────────────────────
     if not args.no_hydrogram:
         hydro = await _start_hydrogram(api_id, api_hash, str(session_path))
         client.hydrogram = hydro
 
-    # ── Database ──────────────────────────────────────────────────────────────
     db = DatabaseManager(client)
     await db.init()
     client._kitsune_db = db
 
-    # ── Security ──────────────────────────────────────────────────────────────
     security = SecurityManager(client, db)
     await security.init()
 
-    # ── Dispatcher ────────────────────────────────────────────────────────────
-    # После инициализации БД берём префикс из неё (приоритет над config.toml),
-    # чтобы .prefix * корректно сохранялся после перезапуска
     db_prefix = db.get("kitsune.core", "prefix", None)
     if db_prefix and isinstance(db_prefix, str):
         prefix = db_prefix
     dispatcher = CommandDispatcher(client, db, security, prefix=prefix)
     dispatcher.set_owner(me.id)
 
-    # ── Loader ────────────────────────────────────────────────────────────────
     client._kitsune_dispatcher = dispatcher
     loader = Loader(client, db, dispatcher)
     client._kitsune_loader = loader
     await loader.load_all_builtin()
     await loader.load_all_user()
 
-    # ── Translator ────────────────────────────────────────────────────────────
     translator = Translator(db)
     lang = db.get("kitsune.core", "lang", "ru")
     translator.set_language(lang)
 
-    # ── Web interface (optional) ───────────────────────────────────────────────
     if not args.no_web:
         try:
             from .web.core import WebCore
@@ -343,10 +288,8 @@ async def _startup(args: argparse.Namespace) -> None:
         except Exception:
             logger.exception("main: web startup failed")
 
-    # ── Banner ────────────────────────────────────────────────────────────────
     _print_banner(me)
 
-    # ── Keep alive ────────────────────────────────────────────────────────────
     stop_event = asyncio.Event()
 
     def _shutdown(*_: object) -> None:
@@ -368,7 +311,6 @@ async def _startup(args: argparse.Namespace) -> None:
         await db.force_save()
         logger.info("main: goodbye 🦊")
 
-
 def _print_banner(me: Any) -> None:
     from .version import __version_str__
     from colorama import Fore, Style, init as colorama_init
@@ -381,16 +323,12 @@ def _print_banner(me: Any) -> None:
         f"{Fore.MAGENTA}{'━' * 42}{Style.RESET_ALL}\n"
     )
 
-
-# ── CLI ───────────────────────────────────────────────────────────────────────
-
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Kitsune Userbot")
     p.add_argument("--no-web",       action="store_true", help="Disable web interface")
     p.add_argument("--no-hydrogram", action="store_true", help="Disable Hydrogram secondary client")
     p.add_argument("--debug",        action="store_true", help="Enable DEBUG logging")
     return p.parse_args()
-
 
 def main() -> None:
     args = parse_args()

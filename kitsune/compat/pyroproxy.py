@@ -6,9 +6,6 @@ If Hydrogram is installed, redirect those imports to Hydrogram
 since its API is compatible.
 """
 
-# © Yushi (@Mikasu32), 2024-2026
-# Kitsune Userbot — License: AGPLv3
-
 from __future__ import annotations
 
 import sys
@@ -16,16 +13,14 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-
 def apply() -> None:
     """If hydrogram is present but pyrogram is not, alias pyrogram → hydrogram."""
     if "pyrogram" in sys.modules:
-        return   # pyrogram already available, nothing to do
+        return
 
     try:
         import hydrogram as _hydro
         sys.modules["pyrogram"] = _hydro
-        # Sub-modules commonly used
         for sub in ("types", "filters", "handlers", "errors", "raw", "enums"):
             full = f"hydrogram.{sub}"
             alias = f"pyrogram.{sub}"

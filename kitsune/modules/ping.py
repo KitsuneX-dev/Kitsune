@@ -3,9 +3,6 @@ Kitsune built-in: Ping & Utils
 Команды: .ping .id .me
 """
 
-# © Yushi (@Mikasu32), 2024-2026
-# Kitsune Userbot — License: AGPLv3
-
 from __future__ import annotations
 
 import time
@@ -13,7 +10,6 @@ import time
 from ..core.loader import KitsuneModule, command
 from ..core.security import OWNER
 from ..utils import auto_delete
-
 
 def _fmt_uptime(seconds: float) -> str:
     """Format uptime seconds into human-readable string."""
@@ -28,7 +24,6 @@ def _fmt_uptime(seconds: float) -> str:
         parts.append(f"{hours}ч")
     parts.append(f"{minutes}м")
     return " ".join(parts)
-
 
 class PingModule(KitsuneModule):
     name        = "ping"
@@ -63,11 +58,9 @@ class PingModule(KitsuneModule):
         ),
     }
 
-    # Store startup time at class level so it survives hot-reloads
     _start_time: float = time.time()
 
     async def on_load(self) -> None:
-        # Всегда сбрасываем время при запуске — аптайм считается с текущего старта
         PingModule._start_time = time.time()
         await self.db.set("kitsune.ping", "start_time", PingModule._start_time)
 

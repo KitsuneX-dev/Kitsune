@@ -3,9 +3,6 @@ Kitsune built-in: Eval
 Команды: .e (eval) .ex (exec) .sh (terminal)
 """
 
-# © Yushi (@Mikasu32), 2024-2026
-# Kitsune Userbot — License: AGPLv3
-
 from __future__ import annotations
 
 import asyncio
@@ -16,7 +13,6 @@ import traceback
 from ..core.loader import KitsuneModule, command
 from ..core.security import OWNER
 from ..utils import escape_html, truncate
-
 
 class EvalModule(KitsuneModule):
     name        = "eval"
@@ -91,8 +87,6 @@ class EvalModule(KitsuneModule):
             out = f"❌ <code>{escape_html(str(exc))}</code>"
 
         await m.edit(out, parse_mode="html")
-
-    # ── Helpers ───────────────────────────────────────────────────────────────
 
     async def _eval(self, expr: str, event) -> tuple[object, str]:
         try:

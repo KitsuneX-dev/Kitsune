@@ -5,9 +5,6 @@ Token-bucket algorithm to prevent accidental Telegram API flood bans.
 New in Kitsune — Hikka has no built-in rate limiting.
 """
 
-# © Yushi (@Mikasu32), 2024-2026
-# Kitsune Userbot — License: AGPLv3
-
 from __future__ import annotations
 
 import asyncio
@@ -16,7 +13,6 @@ import time
 import typing
 
 logger = logging.getLogger(__name__)
-
 
 class TokenBucket:
     """
@@ -55,7 +51,6 @@ class TokenBucket:
         elapsed = time.monotonic() - self._last_refill
         return min(self.capacity, self._tokens + elapsed * self.rate)
 
-
 class RateLimiter:
     """
     Global rate limiter for Kitsune commands.
@@ -67,7 +62,6 @@ class RateLimiter:
         limiter = RateLimiter()
         allowed = await limiter.check(user_id=12345678, command="eval")
         if not allowed:
-            # notify user and return
     """
 
     def __init__(

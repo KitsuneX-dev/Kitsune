@@ -4,9 +4,6 @@ Kitsune built-in: Backup
 Авто-бэкап по расписанию — отправляет в группу KitsuneBackup или через бота.
 """
 
-# © Yushi (@Mikasu32), 2024-2026
-# Kitsune Userbot — License: AGPLv3
-
 from __future__ import annotations
 
 import asyncio
@@ -23,9 +20,7 @@ logger = logging.getLogger(__name__)
 
 _DB_OWNER = "kitsune.backup"
 
-# Варианты интервала авто-бэкапа (часы)
 _INTERVAL_OPTIONS = [2, 4, 6, 8, 12, 24, 48]
-
 
 class BackupModule(KitsuneModule):
     name        = "backup"
@@ -56,8 +51,6 @@ class BackupModule(KitsuneModule):
         super().__init__(*args, **kwargs)
         self._auto_task: asyncio.Task | None = None
 
-    # ── Lifecycle ─────────────────────────────────────────────────────────────
-
     async def on_load(self) -> None:
         interval_h = self.db.get(_DB_OWNER, "interval_h", None)
         if interval_h:
@@ -65,8 +58,6 @@ class BackupModule(KitsuneModule):
 
     async def on_unload(self) -> None:
         self._stop_auto()
-
-    # ── Commands ──────────────────────────────────────────────────────────────
 
     @command("backup", required=OWNER)
     async def backup_cmd(self, event) -> None:
@@ -77,7 +68,6 @@ class BackupModule(KitsuneModule):
             await prog.update(2)
             await self._send_backup(dest)
             await prog.done("✅ Резервная копия отправлена.")
-        # Авто-удаление финального сообщения если настроено
         done_msg = await event.get_reply_message()
         await auto_delete(done_msg)
 
@@ -110,8 +100,6 @@ class BackupModule(KitsuneModule):
             except Exception as exc:
                 await prog.done(f"❌ Ошибка: <code>{exc}</code>")
 
-    # ── Auto-backup loop ──────────────────────────────────────────────────────
-
     def _start_auto(self, interval_h: int) -> None:
         self._stop_auto()
         self._auto_task = asyncio.ensure_future(self._auto_loop(interval_h))
@@ -133,8 +121,6 @@ class BackupModule(KitsuneModule):
                 break
             except Exception:
                 logger.exception("Backup: auto-backup failed")
-
-    # ── Public: called by notifier after first bot setup ──────────────────────
 
     async def show_interval_setup(self, bot, owner_id: int) -> None:
         """
@@ -191,8 +177,6 @@ class BackupModule(KitsuneModule):
             parse_mode="HTML",
         )
 
-    # ── Internal ──────────────────────────────────────────────────────────────
-
     async def _ensure_backup_dest(self) -> int:
         """
         Возвращает chat_id группы KitsuneBackup.
@@ -208,8 +192,6 @@ class BackupModule(KitsuneModule):
                 logger.warning("Backup: saved group_id %s is invalid, recreating", chat_id)
                 await self.db.delete(_DB_OWNER, "group_id")
 
-        # Создаём мегагруппу (супергруппу) через CreateChannelRequest —
-        # он возвращает нормальный объект с .chats и не требует users
         from telethon.tl.functions.channels import CreateChannelRequest
         from telethon.tl.functions.channels import InviteToChannelRequest
 
@@ -217,13 +199,12 @@ class BackupModule(KitsuneModule):
             result = await self.client(CreateChannelRequest(
                 title="KitsuneBackup",
                 about="🦊 Kitsune Userbot — автоматические резервные копии базы данных",
-                megagroup=True,  # создаём как супергруппу сразу
+                megagroup=True,
             ))
             gid = result.chats[0].id
         except Exception as exc:
             raise RuntimeError(f"Не удалось создать группу KitsuneBackup: {exc}") from exc
 
-        # Добавляем бота в группу если знаем его username
         try:
             bot_username = self.db.get("kitsune.notifier", "bot_username", None)
             if bot_username:

@@ -1,9 +1,5 @@
 """Kitsune version info"""
 
-# © Yushi (@Mikasu32), 2024-2026
-# Kitsune Userbot
-# License: AGPLv3
-
 from __future__ import annotations
 
 import contextlib
