@@ -1,1 +1,0 @@
-"""Kitsune web interface."""

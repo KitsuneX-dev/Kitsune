@@ -1,10 +1,3 @@
-"""
-Hydrogram ↔ Pyrogram proxy.
-
-Some third-party modules import from `pyrogram` directly.
-If Hydrogram is installed, redirect those imports to Hydrogram
-since its API is compatible.
-"""
 
 from __future__ import annotations
 
@@ -14,7 +7,6 @@ import logging
 logger = logging.getLogger(__name__)
 
 def apply() -> None:
-    """If hydrogram is present but pyrogram is not, alias pyrogram → hydrogram."""
     if "pyrogram" in sys.modules:
         return
 

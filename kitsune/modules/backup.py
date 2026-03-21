@@ -1,8 +1,3 @@
-"""
-Kitsune built-in: Backup
-Команды: .backup .restore
-Авто-бэкап по расписанию — отправляет в группу KitsuneBackup или через бота.
-"""
 
 from __future__ import annotations
 
@@ -61,7 +56,6 @@ class BackupModule(KitsuneModule):
 
     @command("backup", required=OWNER)
     async def backup_cmd(self, event) -> None:
-        """.backup — создать резервную копию вручную"""
         async with ProgressMessage(event, "🗂 Создаю резервную копию...", total=3) as prog:
             await prog.update(1)
             dest = await self._ensure_backup_dest()
@@ -73,7 +67,6 @@ class BackupModule(KitsuneModule):
 
     @command("restore", required=OWNER)
     async def restore_cmd(self, event) -> None:
-        """.restore — восстановить базу из прикреплённого файла"""
         reply = await event.message.get_reply_message()
         if not reply or not reply.file:
             m = await event.reply(
@@ -123,10 +116,6 @@ class BackupModule(KitsuneModule):
                 logger.exception("Backup: auto-backup failed")
 
     async def show_interval_setup(self, bot, owner_id: int) -> None:
-        """
-        Вызывается из NotifierModule после первого запуска бота.
-        Отправляет кнопки выбора интервала прямо в бота.
-        """
         try:
             from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
             buttons = []
@@ -156,7 +145,6 @@ class BackupModule(KitsuneModule):
             logger.exception("Backup: failed to send interval setup")
 
     async def handle_interval_callback(self, call) -> None:
-        """Обработка нажатия кнопки выбора интервала."""
         try:
             h = int(call.data.split(":")[1])
         except (IndexError, ValueError):
@@ -178,11 +166,6 @@ class BackupModule(KitsuneModule):
         )
 
     async def _ensure_backup_dest(self) -> int:
-        """
-        Возвращает chat_id группы KitsuneBackup.
-        Если группа ещё не создана — создаёт её и сохраняет id в БД.
-        Если сохранённый id больше не валиден — пересоздаёт.
-        """
         chat_id = self.db.get(_DB_OWNER, "group_id", None)
         if chat_id:
             try:
@@ -229,7 +212,6 @@ class BackupModule(KitsuneModule):
         return gid
 
     async def _send_backup(self, dest: int, *, auto: bool = False) -> None:
-        """Сформировать JSON и отправить в чат dest."""
         raw = self.db._data
         if not raw:
             raise RuntimeError("no data")

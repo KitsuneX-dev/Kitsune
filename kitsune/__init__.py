@@ -1,8 +1,3 @@
-"""
-Kitsune Userbot
-Developer: Yushi (@Mikasu32)
-License: AGPLv3
-"""
 
 __author__ = "Yushi"
 __contact__ = "@Mikasu32"

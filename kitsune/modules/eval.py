@@ -1,7 +1,3 @@
-"""
-Kitsune built-in: Eval
-Команды: .e (eval) .ex (exec) .sh (terminal)
-"""
 
 from __future__ import annotations
 
@@ -21,7 +17,6 @@ class EvalModule(KitsuneModule):
 
     @command("e", required=OWNER)
     async def eval_cmd(self, event) -> None:
-        """.e <expr> — вычислить Python-выражение"""
         code = event.message.text.split(maxsplit=1)
         if len(code) < 2:
             await event.reply("❌ Укажи выражение.", parse_mode="html")
@@ -40,7 +35,6 @@ class EvalModule(KitsuneModule):
 
     @command("ex", required=OWNER)
     async def exec_cmd(self, event) -> None:
-        """.ex <code> — выполнить Python-код (async)"""
         parts = event.message.text.split(maxsplit=1)
         if len(parts) < 2:
             await event.reply("❌ Укажи код.", parse_mode="html")
@@ -58,7 +52,6 @@ class EvalModule(KitsuneModule):
 
     @command("sh", required=OWNER)
     async def shell_cmd(self, event) -> None:
-        """.sh <cmd> — выполнить команду в оболочке"""
         parts = event.message.text.split(maxsplit=1)
         if len(parts) < 2:
             await event.reply("❌ Укажи команду.", parse_mode="html")

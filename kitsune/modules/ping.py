@@ -1,7 +1,3 @@
-"""
-Kitsune built-in: Ping & Utils
-Команды: .ping .id .me
-"""
 
 from __future__ import annotations
 
@@ -12,7 +8,6 @@ from ..core.security import OWNER
 from ..utils import auto_delete
 
 def _fmt_uptime(seconds: float) -> str:
-    """Format uptime seconds into human-readable string."""
     seconds = int(seconds)
     days, rem = divmod(seconds, 86400)
     hours, rem = divmod(rem, 3600)
@@ -66,7 +61,6 @@ class PingModule(KitsuneModule):
 
     @command("ping", required=OWNER)
     async def ping_cmd(self, event) -> None:
-        """.ping — проверить задержку до Telegram"""
         from ..version import __version_str__
 
         start = time.perf_counter()
@@ -88,7 +82,6 @@ class PingModule(KitsuneModule):
 
     @command("me", required=OWNER)
     async def me_cmd(self, event) -> None:
-        """.me — информация о своём аккаунте"""
         me = await self.client.get_me()
         name = me.first_name
         if me.last_name:
@@ -106,7 +99,6 @@ class PingModule(KitsuneModule):
 
     @command("id", required=OWNER)
     async def id_cmd(self, event) -> None:
-        """.id — ID текущего чата и сообщения (или ответа)"""
         reply = await event.message.get_reply_message()
         if reply:
             await event.reply(

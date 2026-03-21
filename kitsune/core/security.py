@@ -35,7 +35,6 @@ _CACHE_TTL = 60.0
 _DB_KEY    = "kitsune.security"
 
 class SecurityManager:
-    """Central permission checker for Kitsune commands."""
 
     def __init__(self, client: typing.Any, db: typing.Any) -> None:
         self._client = client
@@ -48,7 +47,6 @@ class SecurityManager:
         self._me = await self._client.get_me()
 
     async def check(self, message: typing.Any, required: int) -> bool:
-        """Return True if the message sender satisfies *required* bitmask."""
         if self._me is None:
             await self.init()
 
@@ -77,7 +75,6 @@ class SecurityManager:
         await self._db.set(_DB_KEY, "sudo", users)
 
     async def _resolve(self, message: typing.Any, sender_id: int) -> int:
-        """Resolve and return the full permission bitmask for *sender_id*."""
         bits = 0
 
         if sender_id == self._me.id:
@@ -149,7 +146,6 @@ class SecurityManager:
         return bits
 
     def invalidate_cache(self, chat_id: int | None = None) -> None:
-        """Flush cached entries (call after membership changes)."""
         if chat_id is None:
             self._cache.clear()
         else:

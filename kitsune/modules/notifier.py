@@ -1,8 +1,3 @@
-"""
-Kitsune built-in: Notifier
-Авто-создание бота, уведомления, авто-бэкап по расписанию.
-Команды: .resetbot
-"""
 
 from __future__ import annotations
 
@@ -20,11 +15,6 @@ _DB_OWNER       = "kitsune.notifier"
 _CHECK_INTERVAL = 30
 
 def _extract_buttons(message) -> list[str]:
-    """
-    Вытащить текст всех inline-кнопок из сообщения BotFather.
-    BotFather на /mybots присылает кнопки вида "@kitsune_123_bot".
-    Telethon хранит их в message.reply_markup.rows[].buttons[].text
-    """
     result = []
     try:
         markup = getattr(message, "reply_markup", None)
@@ -101,7 +91,6 @@ class NotifierModule(KitsuneModule):
 
     @command("resetbot", required=OWNER)
     async def resetbot_cmd(self, event) -> None:
-        """.resetbot — сбросить бота (будет найден/создан заново при перезапуске)"""
         await self.db.delete(_DB_OWNER, "bot_token")
         await self.db.delete(_DB_OWNER, "bot_name")
         await self.db.delete(_DB_OWNER, "bot_username")
@@ -110,7 +99,6 @@ class NotifierModule(KitsuneModule):
 
     @command("mybots", required=OWNER)
     async def mybots_cmd(self, event) -> None:
-        """.mybots — показать список ботов Kitsune на этом аккаунте"""
         m = await event.reply("🔍 Ищу ботов...", parse_mode="html")
         try:
             bots = await self._list_kitsune_bots()
@@ -129,7 +117,6 @@ class NotifierModule(KitsuneModule):
 
     @command("setbot", required=OWNER)
     async def setbot_cmd(self, event) -> None:
-        """.setbot @username — выбрать какого бота использовать"""
         arg = self.get_args(event).strip().lstrip("@")
         if not arg:
             await event.reply(
@@ -163,13 +150,6 @@ class NotifierModule(KitsuneModule):
             await m.edit(f"❌ Ошибка: <code>{exc}</code>", parse_mode="html")
 
     async def _auto_setup(self) -> None:
-        """
-        Логика первого запуска:
-        1. Проверяем — есть ли уже бот созданный под этот tg_id в БД другого устройства
-           (токен мог прийти через sync БД или config.toml).
-        2. Если нет — создаём нового через BotFather.
-        3. Помечаем этот tg_id как «уже настроенный».
-        """
         try:
             me = await self.client.get_me()
             logger.info("Notifier: first run for tg_id=%d", me.id)
@@ -213,11 +193,6 @@ class NotifierModule(KitsuneModule):
             logger.exception("Notifier: auto setup failed")
 
     async def _list_kitsune_bots(self) -> list[tuple[str, str | None]]:
-        """
-        Получить список всех ботов через /mybots у BotFather.
-        BotFather отвечает inline-кнопками — читаем их, а не text.
-        Возвращает [(username, token_or_None), ...]
-        """
         import re as _re
         results = []
         try:
@@ -252,7 +227,6 @@ class NotifierModule(KitsuneModule):
         return results
 
     async def _get_token_for_bot(self, username: str) -> str | None:
-        """Получить токен конкретного бота через BotFather."""
         import re as _re
         username = username.lstrip("@")
         try:
@@ -273,10 +247,6 @@ class NotifierModule(KitsuneModule):
             return None
 
     async def _find_existing_bot(self, tg_id: int) -> tuple[str | None, str | None]:
-        """
-        Спрашиваем BotFather /mybots — ищем бота с именем kitsune_{tg_id}.
-        Если находим — берём его токен через /token.
-        """
         try:
             async with self.client.conversation("@BotFather", timeout=20) as conv:
                 await conv.send_message("/mybots")
@@ -307,7 +277,6 @@ class NotifierModule(KitsuneModule):
         return None, None
 
     async def _create_bot(self, me, bot_name: str) -> tuple[str | None, str | None]:
-        """Создать нового бота через BotFather."""
         try:
             async with self.client.conversation("@BotFather", timeout=30) as conv:
                 await conv.send_message("/start")
@@ -517,18 +486,6 @@ class NotifierModule(KitsuneModule):
             await asyncio.sleep(600)
 
     async def _check_for_updates(self) -> None:
-        """
-        Проверка обновлений через GitPython напрямую — как делает Hikka.
-
-        Алгоритм Hikka (update_notifier.py):
-          1. repo.remotes → remote.fetch()   — подтягиваем refs без checkout
-          2. repo.git.log("HEAD..origin/branch", "--oneline") — список новых коммитов
-          3. next(repo.iter_commits("origin/branch", max_count=1)).hexsha — latest SHA
-
-        Никакого GitHub API, никакого aiohttp, никакого прокси.
-        GitPython использует системный git, который уже настроен на работу
-        через тот же канал что и Telethon (MTProto не нужен для git over HTTPS).
-        """
         try:
             import git as gitpython
             repo_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -588,7 +545,6 @@ class NotifierModule(KitsuneModule):
         )
 
     def _make_bot(self, token: str) -> "Bot":
-        """Создать Bot с базовой сессией — без прокси, как у Hikka."""
         from aiogram import Bot
         from aiogram.client.default import DefaultBotProperties
         from aiogram.enums import ParseMode

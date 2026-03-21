@@ -25,27 +25,10 @@ _BLOCKED_IMPORTS: frozenset[str] = frozenset({
 _BUILTIN_MODULES_DIR = Path(__file__).parent.parent / "modules"
 
 class ModuleLoadError(Exception):
-    """Raised when a module fails to load."""
 
 class ASTSecurityError(ModuleLoadError):
-    """Raised when a module contains potentially dangerous code."""
 
 class KitsuneModule:
-    """
-    Base class for all Kitsune modules.
-
-    Subclass this and define command methods with the @command decorator
-    or watcher methods with the @watcher decorator.
-
-    Example:
-        class MyModule(KitsuneModule):
-            name = "mymodule"
-            description = "Does cool stuff"
-
-            @command("hello", required=OWNER)
-            async def hello_cmd(self, event):
-                await event.reply("👋 Hello!")
-    """
 
     name: str = ""
     description: str = ""
@@ -65,13 +48,10 @@ class KitsuneModule:
         self.inline: typing.Any = None
 
     async def on_load(self) -> None:
-        """Called once after the module is loaded. Override for setup."""
 
     async def on_unload(self) -> None:
-        """Called before the module is unloaded. Override for cleanup."""
 
     def get_args(self, event: "typing.Any") -> str:
-        """Return command arguments from event, correctly stripping prefix+command."""
         dispatcher = getattr(self.client, "_kitsune_dispatcher", None)
         prefix = dispatcher._prefix if dispatcher else "."
         text = event.message.raw_text or event.message.text or ""
@@ -81,7 +61,6 @@ class KitsuneModule:
         return parts[1].strip() if len(parts) > 1 else ""
 
     def strings(self, key: str, lang: str = "ru") -> str:
-        """Get a localised string from the module's strings_* dict."""
         attr = f"strings_{lang}" if lang != "en" else "strings_en"
         pool = getattr(self, attr, None)
 
@@ -99,7 +78,6 @@ class KitsuneModule:
         return pool.get(key, f"<missing:{key}>")
 
 def command(name: str, required: int | None = None):
-    """Mark an async method as a command handler."""
     from .security import OWNER as _OWNER
     _required = required if required is not None else _OWNER
 
@@ -110,7 +88,6 @@ def command(name: str, required: int | None = None):
     return decorator
 
 def watcher(filter_func: typing.Callable | None = None):
-    """Mark an async method as a watcher."""
     def decorator(func: typing.Callable) -> typing.Callable:
         func._kitsune_watcher = True
         func._kitsune_filter = filter_func
@@ -169,7 +146,6 @@ class _SafetyVisitor(ast.NodeVisitor):
         self.generic_visit(node)
 
 def _ast_scan(source: str, name: str) -> None:
-    """Raise ASTSecurityError if source contains blocked patterns."""
     try:
         tree = ast.parse(source)
     except SyntaxError as exc:
@@ -183,13 +159,6 @@ def _ast_scan(source: str, name: str) -> None:
         )
 
 class Loader:
-    """
-    Manages loading, unloading and reloading of KitsuneModules.
-
-    Built-in modules are loaded from kitsune/modules/.
-    User modules are loaded from ~/.kitsune/modules/.
-    Remote modules can be loaded from a URL (with AST scan).
-    """
 
     def __init__(
         self,
@@ -203,7 +172,6 @@ class Loader:
         self._modules: dict[str, tuple[KitsuneModule, str]] = {}
 
     async def load_all_builtin(self) -> None:
-        """Load every .py file from kitsune/modules/."""
         for path in sorted(_BUILTIN_MODULES_DIR.glob("*.py")):
             if path.name.startswith("_"):
                 continue
@@ -213,7 +181,6 @@ class Loader:
                 logger.exception("Loader: failed to load builtin %s", path.name)
 
     async def load_all_user(self) -> None:
-        """Load every .py file from ~/.kitsune/modules/."""
         user_dir = Path.home() / ".kitsune" / "modules"
         user_dir.mkdir(parents=True, exist_ok=True)
         for path in sorted(user_dir.glob("*.py")):
@@ -231,7 +198,6 @@ class Loader:
         return await self._load_source(source, str(path), path.stem)
 
     async def load_from_url(self, url: str) -> KitsuneModule:
-        """Download and load a module from a URL after AST scan."""
         import httpx
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.get(url)
@@ -332,7 +298,6 @@ class Loader:
         return instance
 
 class _SourceLoader:
-    """Minimal loader so werkzeug debugger can fetch module source."""
     def __init__(self, source: str) -> None:
         self._source = source
 

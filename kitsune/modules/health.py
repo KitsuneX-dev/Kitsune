@@ -1,11 +1,3 @@
-"""
-Kitsune built-in: Health Monitor
-
-Новый модуль (в Hikka отсутствует).
-- Мониторинг RAM / CPU каждые N минут
-- Алерт в лог-чат при превышении порогов
-- Команда .health для мгновенного статуса
-"""
 
 from __future__ import annotations
 
@@ -55,12 +47,10 @@ class HealthModule(KitsuneModule):
 
     @command("health", required=OWNER)
     async def health_cmd(self, event) -> None:
-        """.health — показать статус системы"""
         await event.reply(self._build_status(), parse_mode="html")
 
     @command("monitor", required=OWNER)
     async def monitor_cmd(self, event) -> None:
-        """.monitor [on|off] [interval_min] — управление мониторингом"""
         parts = event.message.text.split()
         action = parts[1].lower() if len(parts) > 1 else "on"
 

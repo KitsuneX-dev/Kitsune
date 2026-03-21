@@ -1,11 +1,3 @@
-"""
-Kitsune TL Cache — Custom Telethon client wrapper.
-
-Adds:
-- tg_id shortcut property
-- Automatic entity caching with TTL
-- Hydrogram client reference for dual-stack modules
-"""
 
 from __future__ import annotations
 
@@ -22,14 +14,6 @@ logger = logging.getLogger(__name__)
 _ENTITY_TTL = 300.0
 
 class KitsuneTelegramClient(TelegramClient):
-    """
-    Extended Telethon client used throughout Kitsune.
-
-    Extra attributes set after login:
-        .tg_id       — int, the account's Telegram user ID
-        .tg_me       — full User object
-        .hydrogram   — optional Hydrogram Client reference (dual-stack)
-    """
 
     def __init__(self, session: str | SQLiteSession | MemorySession, *args, **kwargs) -> None:
         super().__init__(session, *args, **kwargs)
@@ -40,7 +24,6 @@ class KitsuneTelegramClient(TelegramClient):
         self._entity_lock = asyncio.Lock()
 
     async def get_entity_cached(self, entity: int | str) -> typing.Any:
-        """get_entity() with a 5-minute in-memory cache."""
         now = time.monotonic()
         async with self._entity_lock:
             cached = self._entity_cache.get(entity)

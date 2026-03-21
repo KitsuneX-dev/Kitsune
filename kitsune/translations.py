@@ -1,8 +1,3 @@
-"""
-Kitsune Translations
-
-Supports YAML langpacks (same format as Hikka) plus runtime language switching.
-"""
 
 from __future__ import annotations
 
@@ -16,11 +11,6 @@ _LANGPACKS_DIR = Path(__file__).parent / "langpacks"
 _FALLBACK_LANG = "en"
 
 class Translator:
-    """
-    Loads YAML langpacks and resolves translation keys.
-
-    Priority: user_lang → fallback (en) → raw key
-    """
 
     def __init__(self, db: typing.Any = None) -> None:
         self._db = db

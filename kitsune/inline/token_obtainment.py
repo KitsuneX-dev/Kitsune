@@ -1,9 +1,3 @@
-"""
-Kitsune — Bot token obtainment helper.
-
-Automates the /newbot flow via BotFather using the Telethon client,
-so the user doesn't have to manually create a bot.
-"""
 
 from __future__ import annotations
 
@@ -18,12 +12,6 @@ _BOTFATHER = "BotFather"
 _TOKEN_RE  = re.compile(r"\d+:[A-Za-z0-9_-]{35,}")
 
 async def obtain_token(client: typing.Any, bot_name: str | None = None) -> str | None:
-    """
-    Interactively obtain a bot token from BotFather.
-
-    If *bot_name* is None, auto-generates one from the account first name.
-    Returns the token string, or None on failure.
-    """
     import typing
 
     if bot_name is None:

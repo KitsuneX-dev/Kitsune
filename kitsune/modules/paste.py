@@ -1,8 +1,3 @@
-"""
-Kitsune built-in: Paste
-Команды: .paste
-Отправляет длинный текст на Telegraph.
-"""
 
 from __future__ import annotations
 
@@ -24,7 +19,6 @@ class PasteModule(KitsuneModule):
 
     @command("paste", required=OWNER)
     async def paste_cmd(self, event) -> None:
-        """.paste [текст] — опубликовать текст на Telegraph"""
         text = self.get_args(event) or None
 
         if not text:
@@ -46,7 +40,6 @@ class PasteModule(KitsuneModule):
             await m.edit(self.strings("error").format(err=str(exc)), parse_mode="html")
 
     async def _publish(self, text: str) -> str:
-        """Publish text to Telegraph and return URL."""
         import httpx
 
         nodes = []
@@ -76,7 +69,6 @@ class PasteModule(KitsuneModule):
             return data["result"]["url"]
 
     async def _get_token(self, client) -> str:
-        """Get or create Telegraph account token."""
         token = self.db.get("kitsune.paste", "telegraph_token", None)
         if token:
             return str(token)

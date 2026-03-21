@@ -1,7 +1,3 @@
-"""
-Kitsune built-in: Security
-Команды: .addsudo .delsudo .sudolist
-"""
 
 from ..core.loader import KitsuneModule, command
 from ..core.security import OWNER
@@ -37,7 +33,6 @@ class SecurityModule(KitsuneModule):
 
     @command("addsudo", required=OWNER)
     async def addsudo_cmd(self, event) -> None:
-        """.addsudo <id> — добавить sudo"""
         uid = await self._resolve_user(event)
         if uid is None:
             await event.reply(self.strings("no_user"), parse_mode="html")
@@ -49,7 +44,6 @@ class SecurityModule(KitsuneModule):
 
     @command("delsudo", required=OWNER)
     async def delsudo_cmd(self, event) -> None:
-        """.delsudo <id> — убрать sudo"""
         uid = await self._resolve_user(event)
         if uid is None:
             await event.reply(self.strings("no_user"), parse_mode="html")
@@ -61,7 +55,6 @@ class SecurityModule(KitsuneModule):
 
     @command("sudolist", required=OWNER)
     async def sudolist_cmd(self, event) -> None:
-        """.sudolist — список sudo"""
         sec = self._get_security()
         users = sec.get_sudo_users() if sec else []
         if users:

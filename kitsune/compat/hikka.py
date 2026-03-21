@@ -1,13 +1,3 @@
-"""
-Hikka → Kitsune compatibility layer.
-
-If someone loads a Hikka module that imports from `hikka` or uses
-`loader.Module` / `loader.command` etc., this shim redirects
-those imports to Kitsune equivalents so the module works without
-modification.
-
-Usage: automatically applied by Loader when it detects Hikka-style modules.
-"""
 
 from __future__ import annotations
 
@@ -20,7 +10,6 @@ logger = logging.getLogger(__name__)
 _SHIM_APPLIED = False
 
 def apply() -> None:
-    """Install Hikka compatibility shims into sys.modules."""
     global _SHIM_APPLIED
     if _SHIM_APPLIED:
         return
