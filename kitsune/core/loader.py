@@ -25,8 +25,10 @@ _BLOCKED_IMPORTS: frozenset[str] = frozenset({
 _BUILTIN_MODULES_DIR = Path(__file__).parent.parent / "modules"
 
 class ModuleLoadError(Exception):
+    pass
 
 class ASTSecurityError(ModuleLoadError):
+    pass
 
 class KitsuneModule:
 
@@ -48,8 +50,10 @@ class KitsuneModule:
         self.inline: typing.Any = None
 
     async def on_load(self) -> None:
+        pass
 
     async def on_unload(self) -> None:
+        pass
 
     def get_args(self, event: "typing.Any") -> str:
         dispatcher = getattr(self.client, "_kitsune_dispatcher", None)
