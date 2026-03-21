@@ -6,7 +6,6 @@
 # ============================================================
 set -euo pipefail
 
-# ── Colors ────────────────────────────────────────────────────
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
 CYAN='\033[0;36m'; MAGENTA='\033[1;35m'; RESET='\033[0m'
 BOLD='\033[1m'
@@ -17,7 +16,6 @@ warn() { echo -e "${YELLOW}⚠️  $*${RESET}"; }
 err()  { echo -e "${RED}❌ $*${RESET}"; exit 1; }
 step() { echo -e "\n${MAGENTA}${BOLD}── $* ──${RESET}"; }
 
-# ── Banner ────────────────────────────────────────────────────
 clear
 echo -e "${MAGENTA}${BOLD}"
 cat << 'EOF'
@@ -30,7 +28,6 @@ cat << 'EOF'
 EOF
 echo -e "${RESET}${CYAN}           Userbot by Yushi (@Mikasu32)${RESET}\n"
 
-# ── Detect environment ────────────────────────────────────────
 IS_TERMUX=false
 IS_UBUNTU=false
 
@@ -44,7 +41,6 @@ else
     warn "Неизвестная среда. Попытка продолжить..."
 fi
 
-# ── Check Python ──────────────────────────────────────────────
 step "Проверка Python"
 PYTHON=""
 for cmd in python3.12 python3.11 python3.10 python3; do
@@ -73,7 +69,6 @@ if [[ -z "$PYTHON" ]]; then
     ok "Python установлен: $PYTHON"
 fi
 
-# ── Install system deps ───────────────────────────────────────
 step "Системные зависимости"
 if $IS_TERMUX; then
     pkg install -y git libjpeg-turbo openssl libffi 2>/dev/null || true
@@ -94,7 +89,6 @@ elif $IS_UBUNTU; then
     ok "Системные пакеты установлены"
 fi
 
-# ── Clone / update repo ───────────────────────────────────────
 step "Исходный код"
 INSTALL_DIR="$HOME/Kitsune"
 
@@ -110,7 +104,6 @@ else
     ok "Репозиторий склонирован: $INSTALL_DIR"
 fi
 
-# ── Virtual environment ───────────────────────────────────────
 step "Виртуальное окружение"
 VENV_DIR="$INSTALL_DIR/venv"
 if [[ ! -d "$VENV_DIR" ]]; then
@@ -123,7 +116,6 @@ fi
 PIP="$VENV_DIR/bin/pip"
 PYTHON_VENV="$VENV_DIR/bin/python"
 
-# ── Install Python deps ───────────────────────────────────────
 step "Python зависимости"
 "$PIP" install --upgrade pip --quiet
 "$PIP" install --no-cache-dir -r requirements.txt \
@@ -131,15 +123,12 @@ step "Python зависимости"
     --quiet
 ok "Зависимости установлены"
 
-# ── Hydrogram ────────────────────────────────────────────────
 "$PIP" install --no-cache-dir hydrogram tgcrypto --quiet 2>/dev/null && ok "Hydrogram установлен" || warn "Hydrogram не удалось установить, продолжаю без него"
 
-# ── Data directory ────────────────────────────────────────────
 step "Директория данных"
 mkdir -p "$HOME/.kitsune/modules" "$HOME/.kitsune/logs"
 ok "Директории созданы: ~/.kitsune/"
 
-# ── Autostart ────────────────────────────────────────────────
 step "Автозапуск"
 if $IS_TERMUX; then
     if [[ -z "${NO_AUTOSTART:-}" ]]; then
@@ -176,7 +165,6 @@ SERVICE
     fi
 fi
 
-# ── Done ──────────────────────────────────────────────────────
 echo ""
 echo -e "${MAGENTA}${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
 echo -e "  ${GREEN}${BOLD}🦊 Kitsune установлен!${RESET}"
