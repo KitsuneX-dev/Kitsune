@@ -13,7 +13,6 @@ info() { echo -e "${CYAN}ℹ️   $*${RESET}"; }
 err()  { echo -e "${RED}❌  $*${RESET}"; exit 1; }
 step() { echo -e "\n${MAGENTA}${BOLD}── $* ──${RESET}"; }
 
-# ── Sanity check ─────────────────────────────────────────────
 if [[ -z "${PREFIX:-}" || "$PREFIX" != *"com.termux"* ]]; then
     err "Этот скрипт предназначен только для Termux!"
 fi
