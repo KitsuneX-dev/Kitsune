@@ -1,4 +1,3 @@
-"""Kitsune database package."""
 
 from .manager import DatabaseManager, JSONValue
 

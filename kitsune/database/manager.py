@@ -1,14 +1,3 @@
-"""
-Kitsune Database Manager
-
-Key improvements vs Hikka:
-- Does NOT inherit from dict — avoids accidental mutation without save()
-- asyncio.Lock() on all write operations — no race conditions
-- SQLite with WAL journal mode — no data loss on crashes
-- Clean separation: SQLiteBackend / RedisBackend
-- Pydantic-validated writes — fails early on bad data
-- Revision history with configurable depth
-"""
 
 from __future__ import annotations
 
@@ -37,10 +26,6 @@ def _is_serializable(value: typing.Any) -> bool:
         return False
 
 class SQLiteBackend:
-    """
-    Async-friendly SQLite backend using WAL journal mode.
-    All blocking I/O is run in an executor to avoid blocking the event loop.
-    """
 
     def __init__(self, path: Path) -> None:
         self._path = path
@@ -99,7 +84,6 @@ class SQLiteBackend:
             return False
 
 class RedisBackend:
-    """Optional Redis backend (requires redis package)."""
 
     def __init__(self, uri: str, client_id: int) -> None:
         import redis as _redis
@@ -129,17 +113,6 @@ class RedisBackend:
             return False
 
 class DatabaseManager:
-    """
-    Central database manager. Wraps an in-memory dict with async-safe
-    access methods and pluggable storage backends.
-
-    Usage:
-        db = DatabaseManager(client)
-        await db.init()
-
-        db.get("MyModule", "some_key", default=[])
-        db.set("MyModule", "some_key", [1, 2, 3])
-    """
 
     _MAX_REVISIONS = 20
     _REVISION_INTERVAL = 3
@@ -155,7 +128,6 @@ class DatabaseManager:
         self._assets_channel: int | None = None
 
     async def init(self) -> None:
-        """Initialize backends and load data."""
         import os as _os
         from pathlib import Path as _Path
 
@@ -203,7 +175,6 @@ class DatabaseManager:
         key: str,
         default: JSONValue = None,
     ) -> JSONValue:
-        """Get a value. Thread-safe read (no lock needed for dict reads in CPython)."""
         return self._data.get(owner, {}).get(key, default)
 
     async def set(
@@ -212,7 +183,6 @@ class DatabaseManager:
         key: str,
         value: JSONValue,
     ) -> bool:
-        """Set a value and persist asynchronously."""
         if not isinstance(owner, str):
             raise TypeError(f"owner must be str, got {type(owner).__name__}")
         if not isinstance(key, str):
@@ -230,10 +200,6 @@ class DatabaseManager:
         return True
 
     def set_sync(self, owner: str, key: str, value: JSONValue) -> bool:
-        """
-        Synchronous set — schedules a save but does not await it.
-        Use only from synchronous contexts (module config, etc.).
-        """
         if not _is_serializable(value):
             raise ValueError(f"Value for {owner}.{key} is not JSON-serializable")
         self._data.setdefault(owner, {})[key] = value
@@ -242,7 +208,6 @@ class DatabaseManager:
         return True
 
     async def delete(self, owner: str, key: str) -> bool:
-        """Delete a single key."""
         async with self._lock:
             if owner in self._data and key in self._data[owner]:
                 del self._data[owner][key]
@@ -252,7 +217,6 @@ class DatabaseManager:
         return True
 
     async def force_save(self) -> bool:
-        """Immediately persist to backend, bypassing debounce."""
         if self._backend is None:
             return False
         async with self._lock:
@@ -288,14 +252,11 @@ class DatabaseManager:
                 self._revisions.pop(0)
 
     def _kick_save(self) -> None:
-        """Дебаунс: отменяем предыдущую задачу и запускаем новую с задержкой 1 сек.
-        Сколько бы раз set() ни вызвали подряд — SQLite запишется ровно один раз."""
         if self._pending_save and not self._pending_save.done():
             self._pending_save.cancel()
         self._pending_save = asyncio.ensure_future(self._schedule_save())
 
     async def _schedule_save(self) -> None:
-        """Подождать 1 сек (debounce window), затем сохранить один раз."""
         await asyncio.sleep(1)
         if self._backend:
             async with self._lock:

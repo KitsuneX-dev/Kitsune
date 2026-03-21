@@ -1,7 +1,3 @@
-"""
-Kitsune built-in: Updater
-Команды: .update .restart
-"""
 
 from __future__ import annotations
 
@@ -57,7 +53,6 @@ class UpdaterModule(KitsuneModule):
     }
 
     async def on_load(self) -> None:
-        """Check if we just restarted and send notification."""
         restart_data = self.db.get(_DB_OWNER, "pending_restart", None)
         if not restart_data:
             return
@@ -101,7 +96,6 @@ class UpdaterModule(KitsuneModule):
             )
 
     async def _on_callback(self, event) -> None:
-        """Handle inline button callbacks for update confirmation."""
         data = event.data
         if data == b"update_yes":
             await event.answer()
@@ -127,7 +121,6 @@ class UpdaterModule(KitsuneModule):
 
     @command("update", required=OWNER)
     async def update_cmd(self, event) -> None:
-        """.update — проверить и установить обновление"""
         m = await event.reply(self.strings("checking"), parse_mode="html")
         try:
             import git
@@ -208,7 +201,6 @@ class UpdaterModule(KitsuneModule):
             await m.edit(self.strings("git_err").format(err=escape_html(str(exc))), parse_mode="html")
 
     async def _do_update(self, repo_path: str, chat_id: int, msg_id: int) -> None:
-        """Actually perform the update after confirmation."""
         import shutil
         import tempfile
 
@@ -276,14 +268,12 @@ class UpdaterModule(KitsuneModule):
 
     @command("restart", required=OWNER)
     async def restart_cmd(self, event) -> None:
-        """.restart — перезапустить Kitsune"""
         m = await event.reply(self.strings("restarting"), parse_mode="html")
         await self._save_restart_start(chat_id=event.chat_id, msg_id=m.id)
         await asyncio.sleep(1)
         os.execl(sys.executable, sys.executable, "-m", "kitsune")
 
     async def _save_restart_start(self, chat_id: int = 0, msg_id: int = 0) -> None:
-        """Save restart timestamp before exiting."""
         now = time.time()
         await self.db.set(_DB_OWNER, "pending_restart", {
             "start_time": now,

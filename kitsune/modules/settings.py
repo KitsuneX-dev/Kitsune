@@ -1,7 +1,3 @@
-"""
-Kitsune built-in: Settings
-Команды: .prefix .lang .setowner
-"""
 
 from ..core.loader import KitsuneModule, command
 from ..core.security import OWNER
@@ -25,7 +21,6 @@ class SettingsModule(KitsuneModule):
 
     @command("prefix", required=OWNER)
     async def prefix_cmd(self, event) -> None:
-        """.prefix <символ> — сменить префикс команд"""
         dispatcher = getattr(self.client, "_kitsune_dispatcher", None)
         current_prefix = dispatcher._prefix if dispatcher else "."
         raw = event.message.text[len(current_prefix):].split(maxsplit=1)
@@ -63,7 +58,6 @@ class SettingsModule(KitsuneModule):
 
     @command("lang", required=OWNER)
     async def lang_cmd(self, event) -> None:
-        """.lang <код> — сменить язык интерфейса"""
         dispatcher = getattr(self.client, "_kitsune_dispatcher", None)
         current_prefix = dispatcher._prefix if dispatcher else "."
         raw = event.message.text[len(current_prefix):].split(maxsplit=1)
@@ -77,7 +71,6 @@ class SettingsModule(KitsuneModule):
 
     @command("autodel", required=OWNER)
     async def autodel_cmd(self, event) -> None:
-        """.autodel <секунд|off> — автоудаление сервисных сообщений"""
         arg = self.get_args(event).strip().lower()
         if not arg:
             current = self.db.get(_DB_OWNER, "auto_delete_delay", 0)
@@ -114,7 +107,6 @@ class SettingsModule(KitsuneModule):
 
     @command("info", required=OWNER)
     async def info_cmd(self, event) -> None:
-        """.info — информация о боте и системе"""
         import platform, sys, psutil
         from ..version import __version_str__
         from ..utils import IS_TERMUX, IS_DOCKER

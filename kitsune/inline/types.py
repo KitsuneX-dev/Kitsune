@@ -1,9 +1,3 @@
-"""
-Kitsune Inline Types
-
-Defines typed wrappers for aiogram inline interactions.
-Cleaner than Hikka's approach — uses dataclasses instead of bare dicts.
-"""
 
 from __future__ import annotations
 
@@ -13,7 +7,6 @@ from dataclasses import dataclass, field
 
 @dataclass
 class InlineButton:
-    """A single inline keyboard button."""
     text: str
     callback: typing.Callable | None = None
     url: str | None = None
@@ -23,7 +16,6 @@ class InlineButton:
 
 @dataclass
 class InlineCall:
-    """Wraps an aiogram CallbackQuery for Kitsune handlers."""
     id: str
     chat_id: int
     message_id: int
@@ -45,10 +37,6 @@ class InlineCall:
 def markup_from_buttons(
     buttons: list[InlineButton | list[InlineButton]],
 ) -> list[list[dict]]:
-    """
-    Convert a flat list or list-of-rows of InlineButton into the
-    raw dict structure that InlineManager.generate_markup() expects.
-    """
     rows: list[list[InlineButton]] = []
     for item in buttons:
         if isinstance(item, list):

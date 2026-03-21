@@ -1,7 +1,3 @@
-"""
-Kitsune utility functions.
-Cleaned-up version of Hikka's utils.py — removed dead code, full type hints.
-"""
 
 from __future__ import annotations
 
@@ -20,15 +16,9 @@ def escape_html(text: typing.Any) -> str:
     return html.escape(str(text))
 
 def chunks(text: str, size: int) -> list[str]:
-    """Split *text* into chunks of at most *size* characters."""
     return [text[i : i + size] for i in range(0, len(text), size)]
 
 def smart_split(text: str, entities: list, max_len: int = 4096) -> typing.Generator[str, None, None]:
-    """
-    Split an HTML-parsed (text, entities) pair into chunks ≤ max_len,
-    reconstructing HTML tags around each chunk.
-    Yields plain strings.
-    """
     for chunk in chunks(text, max_len):
         yield chunk
 
@@ -36,7 +26,6 @@ def truncate(text: str, max_len: int = 512, suffix: str = "…") -> str:
     return text if len(text) <= max_len else text[: max_len - len(suffix)] + suffix
 
 async def run_sync(func: typing.Callable, *args: typing.Any, **kwargs: typing.Any) -> typing.Any:
-    """Run a blocking callable in the default executor."""
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(None, lambda: func(*args, **kwargs))
 
@@ -47,10 +36,6 @@ async def asset_channel(
     archive: bool = True,
     avatar: str | None = None,
 ) -> tuple[int, bool]:
-    """
-    Get or create a private channel used as asset storage.
-    Returns (channel_id, created: bool).
-    """
     from telethon.tl.functions.channels import CreateChannelRequest
     from telethon.tl.functions.account import UpdateNotifySettingsRequest
     from telethon.tl.types import InputNotifyPeer, InputPeerNotifySettings
@@ -101,7 +86,6 @@ async def asset_channel(
 def find_caller(
     stack: list[inspect.FrameInfo],
 ) -> typing.Callable | None:
-    """Return the first non-kitsune-internals callable on the call stack."""
     for frame_info in stack:
         frame = frame_info.frame
         locals_ = frame.f_locals
@@ -126,11 +110,6 @@ def is_serializable(value: typing.Any) -> bool:
         return False
 
 async def auto_delete(message: typing.Any, delay: float | None = None) -> None:
-    """
-    Удалить сервисное сообщение через delay секунд.
-    Если delay=None — читает настройку из БД (kitsune.core / auto_delete_delay).
-    Если настройка = 0 — ничего не делает.
-    """
     if delay is None:
         try:
             client = message.client
@@ -150,13 +129,6 @@ async def auto_delete(message: typing.Any, delay: float | None = None) -> None:
         await message.delete()
 
 def progress_bar(current: int | float, total: int | float, width: int = 12) -> str:
-    """
-    Возвращает красивую строку прогресс-бара.
-
-    Пример: ████████░░░░  67%
-
-    Использует filled/empty блоки без кринжовых ASCII-символов.
-    """
     if total <= 0:
         pct = 0.0
     else:
@@ -170,15 +142,6 @@ def progress_bar(current: int | float, total: int | float, width: int = 12) -> s
     return f"{bar}  {percent}%"
 
 class ProgressMessage:
-    """
-    Хелпер для обновления прогресс-бара прямо в Telegram-сообщении.
-
-    Использование:
-        async with ProgressMessage(event, "⬇️ Скачиваю", total=100) as prog:
-            for i in range(100):
-                await do_work()
-                await prog.update(i + 1)
-    """
 
     def __init__(
         self,
@@ -210,7 +173,6 @@ class ProgressMessage:
         pass
 
     async def update(self, current: int | float, *, force: bool = False) -> None:
-        """Обновить значение прогресса. Сообщение редактируется не чаще update_every секунд."""
         self._current = current
         now = asyncio.get_event_loop().time()
         if not force and (now - self._last_update) < self._update_every:
@@ -224,12 +186,10 @@ class ProgressMessage:
             )
 
     async def done(self, text: str) -> None:
-        """Заменить бар финальным сообщением."""
         with __import__("contextlib").suppress(Exception):
             await self._msg.edit(text, parse_mode="html")
 
 def detect_environment() -> dict[str, bool]:
-    """Detect the runtime environment."""
     import contextlib, platform
 
     is_wsl = False

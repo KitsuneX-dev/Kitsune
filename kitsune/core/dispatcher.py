@@ -14,13 +14,6 @@ logger = logging.getLogger(__name__)
 _FLOOD_REPLY = "⏳ <b>Слишком часто. Подожди немного.</b>"
 
 class CommandDispatcher:
-    """
-    Routes incoming Telethon events to registered module handlers.
-
-    Lifecycle:
-        dispatcher = CommandDispatcher(client, db, security)
-        dispatcher.load_modules(loader)
-    """
 
     def __init__(
         self,

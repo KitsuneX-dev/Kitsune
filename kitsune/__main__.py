@@ -1,4 +1,3 @@
-"""Entry point: python -m kitsune"""
 
 from .main import main
 

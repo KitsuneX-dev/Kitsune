@@ -1,7 +1,3 @@
-"""
-Kitsune Web Setup — first-run configuration interface.
-Uses client.start() like Hikka does, which handles all auth internally.
-"""
 
 from __future__ import annotations
 
@@ -359,7 +355,6 @@ class SetupServer:
             return self._err(str(exc))
 
     async def _save_session(self, me: Any) -> None:
-        """Save session to SQLiteSession like Hikka does"""
         from telethon.sessions import SQLiteSession
         from pathlib import Path
         DATA_DIR = Path.home() / ".kitsune"

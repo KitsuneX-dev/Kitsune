@@ -1,12 +1,3 @@
-"""
-Kitsune logging system.
-
-Key fixes vs Hikka:
-- asyncio.Queue instead of ensure_future() inside emit() (sync method)
-- Logs stored in ~/.kitsune/logs/ instead of project root
-- Structured log records with proper caller detection
-- KitsuneException replaces HikkaException (same logic, cleaner code)
-"""
 
 from __future__ import annotations
 
@@ -43,7 +34,6 @@ def _patched_getlines(filename: str, module_globals=None) -> list[str]:
 linecache.getlines = _patched_getlines
 
 def _override_text(exc: Exception) -> str | None:
-    """Return a human-friendly message for known exception types."""
     try:
         from aiogram.exceptions import TelegramNetworkError
         if isinstance(exc, TelegramNetworkError):
@@ -53,7 +43,6 @@ def _override_text(exc: Exception) -> str | None:
     return None
 
 class KitsuneException:
-    """Structured exception container for Telegram log output."""
 
     __slots__ = ("message", "full_stack", "sysinfo", "debug_url")
 
@@ -137,14 +126,6 @@ class KitsuneException:
         return cls(message=error_text, full_stack=full_stack, sysinfo=(exc_type, exc_value, tb))
 
 class KitsuneLogsHandler(logging.Handler):
-    """
-    Buffers log records and dispatches them to a Telegram chat asynchronously.
-
-    Unlike Hikka's implementation, this handler uses an asyncio.Queue and a
-    dedicated coroutine to send messages, instead of calling
-    asyncio.ensure_future() inside the synchronous emit() method (which is
-    not safe and can lose messages if the event loop is not running).
-    """
 
     def __init__(self, targets: list[logging.Handler], capacity: int = 7000) -> None:
         super().__init__(logging.NOTSET)
@@ -166,14 +147,12 @@ class KitsuneLogsHandler(logging.Handler):
         self.web_debugger: typing.Any = None
 
     def install_tg_log(self, mod: typing.Any) -> None:
-        """Register a module as a log target."""
         if self._task and not self._task.done():
             self._task.cancel()
         self._mods[mod.tg_id] = mod
         self._task = asyncio.ensure_future(self._queue_worker())
 
     async def _queue_worker(self) -> None:
-        """Dedicated worker that drains the queue every 3 seconds."""
         while True:
             await asyncio.sleep(3)
             await self._flush()
@@ -345,7 +324,6 @@ rotating_handler = RotatingFileHandler(
 rotating_handler.setFormatter(_main_formatter)
 
 def init() -> None:
-    """Initialize Kitsune logging."""
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setLevel(logging.INFO)
     console_handler.setFormatter(_main_formatter)

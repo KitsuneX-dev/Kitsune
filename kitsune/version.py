@@ -1,4 +1,3 @@
-"""Kitsune version info"""
 
 from __future__ import annotations
 

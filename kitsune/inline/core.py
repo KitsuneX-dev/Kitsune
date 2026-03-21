@@ -1,13 +1,3 @@
-"""
-Kitsune Inline Manager
-
-Migrated from aiogram 2.x (Hikka) → aiogram 3.x.
-Key differences:
-- Router-based handler registration (not dp.register_*)
-- FSM context injection via Dispatcher, not middleware hacks
-- CallbackQuery answers via call.answer() directly
-- No global dp instance — clean per-bot setup
-"""
 
 from __future__ import annotations
 
@@ -40,16 +30,6 @@ except ImportError:
 from .types import InlineCall
 
 class InlineManager:
-    """
-    Manages the auxiliary inline bot used by Kitsune modules.
-
-    Usage (inside a module):
-        await self.inline.form(
-            text="Choose:",
-            message=event.message,
-            reply_markup=[[{"text": "OK", "callback": my_handler}]],
-        )
-    """
 
     def __init__(self, client: typing.Any, db: typing.Any, token: str) -> None:
         self._client  = client
@@ -93,17 +73,6 @@ class InlineManager:
         self,
         buttons: list[list[dict] | dict],
     ) -> InlineKeyboardMarkup | None:
-        """
-        Convert a nested list of button dicts into an aiogram InlineKeyboardMarkup.
-
-        Button dict keys:
-            text             (required)
-            url              → URL button
-            callback         → callable, registered with a unique data id
-            args             → extra args for callback
-            disable_security → bool
-            data             → raw callback_data string
-        """
         if not AIOGRAM_AVAILABLE:
             return None
 
@@ -142,7 +111,6 @@ class InlineManager:
         parse_mode: str = "HTML",
         silent: bool = True,
     ) -> typing.Any:
-        """Send a message with an inline keyboard via the bot."""
         if not self._bot:
             logger.warning("InlineManager.form: bot not started")
             return None

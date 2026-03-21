@@ -1,7 +1,3 @@
-"""
-Kitsune built-in: Module Loader
-Команды: .dlmod .loadmod .unloadmod .reloadmod .watchmod .mods
-"""
 
 from __future__ import annotations
 
@@ -82,7 +78,6 @@ class LoaderModule(KitsuneModule):
 
     @command("dlmod", required=OWNER)
     async def dlmod_cmd(self, event) -> None:
-        """.dlmod <github url> — загрузить модуль с GitHub"""
         url = self.get_args(event).strip()
         if not url:
             await event.reply(self.strings("no_url"), parse_mode="html")
@@ -130,7 +125,6 @@ class LoaderModule(KitsuneModule):
 
     @command("loadmod", required=OWNER)
     async def loadmod_cmd(self, event) -> None:
-        """.loadmod — ответь на .py файл чтобы загрузить модуль"""
         reply = await event.message.get_reply_message()
         if not reply or not reply.file:
             await event.reply(self.strings("no_file"), parse_mode="html")
@@ -171,7 +165,6 @@ class LoaderModule(KitsuneModule):
 
     @command("unloadmod", required=OWNER)
     async def unloadmod_cmd(self, event) -> None:
-        """.unloadmod <название> — выгрузить модуль"""
         name = self.get_args(event).strip().lower()
         if not name:
             await event.reply(self.strings("no_name"), parse_mode="html")
@@ -187,7 +180,6 @@ class LoaderModule(KitsuneModule):
 
     @command("reloadmod", required=OWNER)
     async def reloadmod_cmd(self, event) -> None:
-        """.reloadmod <название> — перезагрузить модуль без перезапуска"""
         name = self.get_args(event).strip().lower()
         if not name:
             await event.reply("❌ Укажи имя модуля.", parse_mode="html")
@@ -232,7 +224,6 @@ class LoaderModule(KitsuneModule):
 
     @command("watchmod", required=OWNER)
     async def watchmod_cmd(self, event) -> None:
-        """.watchmod — вкл/выкл авто-перезагрузку при изменении файлов"""
         enabled = not self.db.get(_DB_OWNER, "watch_enabled", False)
         await self.db.set(_DB_OWNER, "watch_enabled", enabled)
         if enabled:
@@ -244,7 +235,6 @@ class LoaderModule(KitsuneModule):
 
     @command("mods", required=OWNER)
     async def mods_cmd(self, event) -> None:
-        """.mods — список загруженных модулей"""
         loader = self._get_loader()
         if not loader or not loader.modules:
             await event.reply(self.strings("no_mods"), parse_mode="html")
@@ -341,10 +331,6 @@ class LoaderModule(KitsuneModule):
         return self.strings("load_err").format(err=err)
 
 def _to_raw_url(url: str) -> str:
-    """
-    Конвертировать обычную github.com/user/repo/blob/branch/file.py
-    в raw.githubusercontent.com/user/repo/branch/file.py
-    """
     if "raw.githubusercontent.com" in url:
         return url
     url = url.replace("https://github.com/", "https://raw.githubusercontent.com/")

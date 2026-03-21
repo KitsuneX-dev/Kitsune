@@ -1,7 +1,3 @@
-"""
-Kitsune built-in: Help
-Команда .help — список всех модулей и команд.
-"""
 
 from ..core.loader import KitsuneModule, command
 from ..core.security import OWNER
@@ -33,7 +29,6 @@ class HelpModule(KitsuneModule):
 
     @command("help", required=OWNER)
     async def help_cmd(self, event) -> None:
-        """.help [module] — показать помощь"""
         args = self.get_args(event)
         loader = getattr(self.client, "_kitsune_loader", None)
 

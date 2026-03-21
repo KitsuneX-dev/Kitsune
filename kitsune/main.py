@@ -27,7 +27,6 @@ _config_cache: dict[str, Any] | None = None
 _config_mtime: float = 0.0
 
 def _load_raw_config() -> dict[str, Any]:
-    """Load config.toml with mtime-based cache. Falls back to config.json (migration)."""
     global _config_cache, _config_mtime
 
     if CONFIG_PATH.exists():
@@ -59,7 +58,6 @@ def _load_raw_config() -> dict[str, Any]:
     return {}
 
 def _invalidate_config_cache() -> None:
-    """Call after writing config so next read sees fresh data."""
     global _config_cache, _config_mtime
     _config_cache = None
     _config_mtime = 0.0
@@ -81,7 +79,6 @@ def set_config_key(key: str, value: Any) -> None:
     _save_config(data)
 
 async def _interactive_login(client: Any) -> None:
-    """Walk the user through Telethon interactive login."""
     from telethon.errors import (
         ApiIdInvalidError,
         AuthKeyDuplicatedError,
@@ -121,7 +118,6 @@ async def _interactive_login(client: Any) -> None:
         sys.exit(1)
 
 async def _start_hydrogram(api_id: int, api_hash: str, session_name: str) -> Any | None:
-    """Optionally start a Hydrogram client for modules that prefer its API."""
     try:
         from hydrogram import Client as HydroClient
         from hydrogram.errors import AuthKeyUnregistered
