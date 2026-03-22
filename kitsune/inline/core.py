@@ -167,19 +167,16 @@ class InlineManager:
             except Exception:
                 return None
 
-        chat_id  = getattr(message, "chat_id", None)
         reply_to = getattr(message, "reply_to_msg_id", None)
 
         try:
-            entity = await self._client.get_input_entity(chat_id)
+            peer = getattr(message, "input_chat", None) or getattr(message, "peer_id", None)
+            if peer is None:
+                peer = await self._client.get_input_entity(getattr(message, "chat_id", None))
+            entity = peer
         except Exception:
-            try:
-                entity = await self._client.get_input_entity(
-                    getattr(message, "peer_id", None) or chat_id
-                )
-            except Exception:
-                logger.error("InlineManager: cannot resolve entity for chat_id=%s", chat_id)
-                return None
+            logger.error("InlineManager: cannot resolve entity", exc_info=True)
+            return None
 
         await asyncio.sleep(0.5)
 
