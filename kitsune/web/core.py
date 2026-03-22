@@ -61,40 +61,185 @@ class WebCore:
 
     async def _handle_root(self, request: "aiohttp.web.Request") -> "aiohttp.web.Response":
         from ..version import __version_str__
+        import psutil, time
         me = self._client.tg_me
+        mem = psutil.virtual_memory()
+        cpu = psutil.cpu_percent(interval=0.1)
+        mem_used = mem.used // 1024 // 1024
+        mem_total = mem.total // 1024 // 1024
+        mem_pct = int(mem.percent)
+        name = me.first_name if me else "—"
+        uid  = me.id if me else "—"
         html = f"""<!DOCTYPE html>
 <html lang="ru">
 <head>
-  <meta charset="UTF-8">
-  <title>Kitsune Userbot</title>
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <style>
-    body{{font-family:system-ui,sans-serif;background:
-         display:flex;flex-direction:column;align-items:center;padding:40px}}
-    h1{{color:
-    .card{{background:
-           padding:24px 32px;max-width:420px;width:100%;margin-top:20px}}
-    .row{{display:flex;justify-content:space-between;padding:6px 0;
-          border-bottom:1px solid
-    .row:last-child{{border-bottom:none}}
-    .label{{color:
-    .badge{{background:
-            padding:2px 10px;font-size:.8rem}}
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Kitsune Userbot</title>
+<style>
+*, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
+body {{
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  background: #0a0a12;
+  color: #c8b8f0;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background-image:
+    linear-gradient(rgba(120,80,255,0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(120,80,255,0.03) 1px, transparent 1px);
+  background-size: 40px 40px;
+}}
+.card {{
+  width: 100%;
+  max-width: 460px;
+  background: #12121e;
+  border: 1px solid rgba(140,90,255,0.2);
+  border-radius: 20px;
+  padding: 36px;
+  box-shadow: 0 0 60px rgba(120,60,255,0.12), 0 0 120px rgba(120,60,255,0.05);
+}}
+.header {{
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 28px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid rgba(140,90,255,0.12);
+}}
+.logo {{ font-size: 2.2rem; }}
+.header-text h1 {{
+  font-size: 1.3rem;
+  font-weight: 700;
+  color: #e0d0ff;
+  letter-spacing: 0.3px;
+}}
+.version {{
+  font-size: 0.75rem;
+  color: #6a5a8a;
+  margin-top: 2px;
+}}
+.badge-online {{
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: rgba(74,222,128,0.1);
+  border: 1px solid rgba(74,222,128,0.25);
+  border-radius: 20px;
+  padding: 3px 10px;
+  font-size: 0.75rem;
+  color: #4ade80;
+  margin-left: auto;
+}}
+.dot-green {{
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: #4ade80;
+  box-shadow: 0 0 6px #4ade80;
+  animation: pulse 2s infinite;
+}}
+@keyframes pulse {{
+  0%, 100% {{ opacity: 1; }}
+  50% {{ opacity: 0.5; }}
+}}
+.rows {{ display: flex; flex-direction: column; gap: 2px; margin-bottom: 24px; }}
+.row {{
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 14px;
+  border-radius: 10px;
+  transition: background .15s;
+}}
+.row:hover {{ background: rgba(120,80,255,0.05); }}
+.label {{ font-size: 0.82rem; color: #6a5a8a; }}
+.value {{ font-size: 0.88rem; color: #d0b8ff; font-weight: 500; }}
+.divider {{
+  height: 1px;
+  background: rgba(140,90,255,0.1);
+  margin: 20px 0;
+}}
+.stats-title {{
+  font-size: 0.78rem;
+  color: #5a4880;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 14px;
+}}
+.stat-row {{
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+}}
+.stat-label {{
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.8rem;
+  color: #8070a8;
+}}
+.bar-bg {{
+  height: 6px;
+  background: rgba(120,80,255,0.1);
+  border-radius: 4px;
+  overflow: hidden;
+}}
+.bar-fill {{
+  height: 100%;
+  background: linear-gradient(90deg, #7030d0, #a050f0);
+  border-radius: 4px;
+  box-shadow: 0 0 8px rgba(160,80,240,0.4);
+}}
+.footer {{
+  text-align: center;
+  font-size: 0.75rem;
+  color: #3d3060;
+  margin-top: 4px;
+}}
+</style>
 </head>
 <body>
-  <h1>🦊 Kitsune Userbot</h1>
-  <span class="badge">v{__version_str__}</span>
-  <div class="card">
-    <div class="row"><span class="label">Аккаунт</span>
-         <span class="value">{me.first_name if me else '—'}</span></div>
-    <div class="row"><span class="label">ID</span>
-         <span class="value">{me.id if me else '—'}</span></div>
-    <div class="row"><span class="label">Статус</span>
-         <span class="value" style="color:#4ade80">● Online</span></div>
-    <div class="row"><span class="label">Разработчик</span>
-         <span class="value">Yushi (@Mikasu32)</span></div>
+<div class="card">
+  <div class="header">
+    <div class="logo">🦊</div>
+    <div class="header-text">
+      <h1>Kitsune Userbot</h1>
+      <div class="version">v{__version_str__}</div>
+    </div>
+    <div class="badge-online"><div class="dot-green"></div> Online</div>
   </div>
+
+  <div class="rows">
+    <div class="row">
+      <span class="label">Аккаунт</span>
+      <span class="value">{name}</span>
+    </div>
+    <div class="row">
+      <span class="label">ID</span>
+      <span class="value">{uid}</span>
+    </div>
+    <div class="row">
+      <span class="label">Разработчик</span>
+      <span class="value">Yushi (@Mikasu32)</span>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+  <div class="stats-title">Система</div>
+
+  <div class="stat-row">
+    <div class="stat-label"><span>CPU</span><span>{cpu:.0f}%</span></div>
+    <div class="bar-bg"><div class="bar-fill" style="width:{cpu:.0f}%"></div></div>
+  </div>
+  <div class="stat-row">
+    <div class="stat-label"><span>RAM</span><span>{mem_used} / {mem_total} MB</span></div>
+    <div class="bar-bg"><div class="bar-fill" style="width:{mem_pct}%"></div></div>
+  </div>
+
+  <div class="footer">Kitsune · AGPLv3</div>
+</div>
 </body>
 </html>"""
         return aiohttp.web.Response(text=html, content_type="text/html")
