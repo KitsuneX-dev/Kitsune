@@ -1,15 +1,6 @@
 <div align="center">
 
-```
-██╗  ██╗██╗████████╗███████╗██╗   ██╗███╗   ██╗███████╗
-██║ ██╔╝██║╚══██╔══╝██╔════╝██║   ██║████╗  ██║██╔════╝
-█████╔╝ ██║   ██║   ███████╗██║   ██║██╔██╗ ██║█████╗
-██╔═██╗ ██║   ██║   ╚════██║██║   ██║██║╚██╗██║██╔══╝
-██║  ██╗██║   ██║   ███████║╚██████╔╝██║ ╚████║███████╗
-╚═╝  ╚═╝╚═╝   ╚═╝   ╚══════╝ ╚═════╝ ╚═╝  ╚═══╝╚══════╝
-```
-
-**Быстрый · Стабильный · Современный Telegram Userbot**
+<img src="banner.png" alt="Kitsune Userbot" width="860"/>
 
 [![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
 [![License](https://img.shields.io/badge/License-AGPLv3-blue?style=flat-square)](LICENSE)
