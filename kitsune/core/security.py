@@ -80,6 +80,10 @@ class SecurityManager:
         if sender_id == self._me.id:
             bits |= OWNER
 
+        co_owners = self._db.get("kitsune.security", "co_owners", [])
+        if isinstance(co_owners, list) and sender_id in co_owners:
+            bits |= OWNER
+
         if sender_id in self.get_sudo_users():
             bits |= SUDO
         if sender_id in self.get_support_users():

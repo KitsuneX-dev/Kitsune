@@ -1,16 +1,24 @@
+from __future__ import annotations
 
 from ..core.loader import KitsuneModule, command
 from ..core.security import OWNER
+
+_BUILTIN_NAMES = {
+    "backup", "eval", "health", "help", "info",
+    "loader", "notifier", "paste", "ping",
+    "security", "settings", "updater",
+}
 
 _DISPLAY_NAMES: dict[str, str] = {
     "backup":   "Backup",
     "eval":     "Evaluator",
     "health":   "Health",
     "help":     "Help",
+    "info":     "Info",
     "loader":   "Loader",
     "notifier": "Notifier",
     "paste":    "Pastebin",
-    "ping":     "Ping",
+    "ping":     "Tester",
     "security": "Security",
     "settings": "Settings",
     "updater":  "Updater",
@@ -23,7 +31,10 @@ class HelpModule(KitsuneModule):
 
     strings_ru = {
         "header":     "🦊 <b>Kitsune Userbot</b> — {count} модулей загружено:\n\n",
-        "module_fmt": "▫️ <b>{name}:</b> ( {cmds} )\n",
+        "sys_header": "◼️ <b>Системные модули:</b>\n",
+        "usr_header": "\n▫️ <b>Пользовательские модули:</b>\n",
+        "module_sys": "◼️ <b>{name}:</b> ( {cmds} )\n",
+        "module_usr": "▫️ <b>{name}:</b> ( {cmds} )\n",
         "no_modules": "Модули не загружены.",
     }
 
@@ -52,11 +63,29 @@ class HelpModule(KitsuneModule):
         count = len(loader.modules)
         text = self.strings("header").format(count=count)
 
+        sys_mods = {}
+        usr_mods = {}
         for name, mod in sorted(loader.modules.items()):
-            cmds = self._get_commands(mod)
-            display = _DISPLAY_NAMES.get(name) or (mod.name or name).capitalize()
-            cmds_str = " | ".join(f"<code>{prefix}{c}</code>" for c in cmds) if cmds else "—"
-            text += self.strings("module_fmt").format(name=display, cmds=cmds_str)
+            if getattr(mod, "_is_builtin", name in _BUILTIN_NAMES):
+                sys_mods[name] = mod
+            else:
+                usr_mods[name] = mod
+
+        if sys_mods:
+            text += self.strings("sys_header")
+            for name, mod in sys_mods.items():
+                cmds = self._get_commands(mod)
+                display = _DISPLAY_NAMES.get(name) or (mod.name or name).capitalize()
+                cmds_str = " | ".join(f"<code>{prefix}{c}</code>" for c in cmds) if cmds else "—"
+                text += self.strings("module_sys").format(name=display, cmds=cmds_str)
+
+        if usr_mods:
+            text += self.strings("usr_header")
+            for name, mod in usr_mods.items():
+                cmds = self._get_commands(mod)
+                display = _DISPLAY_NAMES.get(name) or (mod.name or name).capitalize()
+                cmds_str = " | ".join(f"<code>{prefix}{c}</code>" for c in cmds) if cmds else "—"
+                text += self.strings("module_usr").format(name=display, cmds=cmds_str)
 
         await event.reply(text, parse_mode="html")
 
@@ -73,8 +102,8 @@ class HelpModule(KitsuneModule):
             if callable(method) and hasattr(method, "_kitsune_command"):
                 doc = (inspect.getdoc(method) or "").strip()
                 cmd_name = method._kitsune_command
-                if doc.startswith(("."+cmd_name, prefix+cmd_name)):
-                    doc = doc[len(prefix)+len(cmd_name):].lstrip(" —-")
+                if doc.startswith(("." + cmd_name, prefix + cmd_name)):
+                    doc = doc[len(prefix) + len(cmd_name):].lstrip(" —-")
                 lines.append(f"  • <code>{prefix}{cmd_name}</code> — {doc or '—'}")
         await event.reply("\n".join(lines), parse_mode="html")
 
