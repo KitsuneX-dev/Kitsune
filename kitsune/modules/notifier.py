@@ -50,14 +50,21 @@ class NotifierModule(KitsuneModule):
         ),
         "update_notify": (
             "🦊 <b>Kitsune Userbot</b>\n\n"
-            "🆕 Доступно обновление!\n"
-            "Текущая версия: <code>{current}</code>\n"
-            "Новая версия: <code>{new}</code>\n\n"
-            "<b>Изменения:</b>\n{changes}"
+            "🆕 <b>Доступно обновление!</b>\n"
+            "New update available!\n\n"
+            "📌 Версия / Version: <code>{current}</code> → <code>{new}</code>\n\n"
+            "📋 <b>Изменения / Changes:</b>\n{changes}"
         ),
-        "updating":    "⏳ Обновляю Kitsune...",
-        "update_done": "✅ Обновление завершено! Перезапускаю...",
-        "update_err":  "❌ Ошибка:\n<code>{err}</code>",
+        "update_step1": "⬇️ <b>Скачиваю обновление...</b>\nDownloading update...",
+        "update_step2": "📦 <b>Устанавливаю обновление...</b>\nInstalling update...",
+        "update_step3": "🔄 <b>Перезапускаю бота...</b>\nRestarting bot...",
+        "update_done":  (
+            "✅ <b>Обновление успешно установлено!</b>\n"
+            "Update installed successfully!\n\n"
+            "⏱ Время перезапуска: <code>{restart_time}</code>\n"
+            "📦 Модули загружены: <code>{mod_count}</code>"
+        ),
+        "update_err":  "❌ Ошибка / Error:\n<code>{err}</code>",
     }
 
     def __init__(self, *args, **kwargs) -> None:
@@ -81,6 +88,7 @@ class NotifierModule(KitsuneModule):
                 str(token), first_run=not backup_asked
             ))
             self._check_task = asyncio.ensure_future(self._update_check_loop())
+            asyncio.ensure_future(self._notify_update_done())
         else:
             asyncio.ensure_future(self._auto_setup())
 
@@ -419,11 +427,14 @@ class NotifierModule(KitsuneModule):
                     await call.message.edit_text("❌ Данные устарели. Запусти .update снова.")
                     return
                 await ref.db.delete("kitsune.updater", "pending_update")
-                await call.message.edit_text("⬇️ Скачиваю обновление...")
+                await call.message.edit_text(ref.strings("update_step1"), parse_mode="HTML")
                 try:
-                    await ref._do_update()
+                    await ref._do_update(call.message)
                 except Exception as exc:
-                    await call.message.edit_text(f"❌ Ошибка:\n<code>{exc}</code>")
+                    await call.message.edit_text(
+                        ref.strings("update_err").format(err=str(exc)),
+                        parse_mode="HTML"
+                    )
 
             @router.callback_query(lambda c: c.data and c.data.startswith("backup_interval:"))
             async def on_backup_interval(call: CallbackQuery) -> None:
@@ -585,7 +596,7 @@ class NotifierModule(KitsuneModule):
             from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
             bot = self._make_bot(str(token))
             kb  = InlineKeyboardMarkup(inline_keyboard=[[
-                InlineKeyboardButton(text="⬆️ Обновить", callback_data="do_update"),
+                InlineKeyboardButton(text="⬆️ Обновить / Update", callback_data="do_update"),
             ]])
             await bot.send_message(
                 chat_id=int(owner_id),
@@ -598,9 +609,63 @@ class NotifierModule(KitsuneModule):
         except Exception:
             logger.exception("Notifier: failed to send update notification")
 
-    async def _do_update(self) -> None:
-        import sys
+    async def _notify_update_done(self) -> None:
+        import time
+        chat_id     = self.db.get(_DB_OWNER, "update_msg_chat", None)
+        msg_id      = self.db.get(_DB_OWNER, "update_msg_id",   None)
+        start_time  = self.db.get(_DB_OWNER, "update_start_time", None)
+        if not chat_id or not msg_id or not start_time:
+            return
+
+        await self.db.delete(_DB_OWNER, "update_msg_chat")
+        await self.db.delete(_DB_OWNER, "update_msg_id")
+        await self.db.delete(_DB_OWNER, "update_start_time")
+
+        await asyncio.sleep(3)
+
+        elapsed = time.time() - float(start_time)
+        if elapsed < 1:
+            restart_time = f"{elapsed * 1000:.0f} мс"
+        elif elapsed < 60:
+            restart_time = f"{elapsed:.1f} с"
+        else:
+            m, s = divmod(int(elapsed), 60)
+            restart_time = f"{m}м {s}с"
+
+        loader    = getattr(self.client, "_kitsune_loader", None)
+        mod_count = len(loader.modules) if loader else 0
+
+        token    = self.db.get(_DB_OWNER, "bot_token", None)
+        owner_id = self.db.get(_DB_OWNER, "owner_id",  None)
+        if not token or not owner_id:
+            return
+
+        try:
+            bot = self._make_bot(str(token))
+            await bot.edit_message_text(
+                chat_id=int(chat_id),
+                message_id=int(msg_id),
+                text=self.strings("update_done").format(
+                    restart_time=restart_time,
+                    mod_count=mod_count,
+                ),
+                parse_mode="HTML",
+            )
+            await bot.session.close()
+        except Exception:
+            logger.exception("Notifier: failed to send update_done message")
+
+    async def _do_update(self, msg=None) -> None:
+        import sys, time, shutil, tempfile
         repo_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+
+        async def edit(text: str) -> None:
+            if msg:
+                try:
+                    await msg.edit_text(text, parse_mode="HTML")
+                except Exception:
+                    pass
+
         try:
             import git
             repo   = git.Repo(repo_path)
@@ -610,9 +675,25 @@ class NotifierModule(KitsuneModule):
                 branch = repo.active_branch.name
             except TypeError:
                 branch = "main"
+
+            config_path = os.path.join(repo_path, "config.toml")
+            config_backup = None
+            if os.path.exists(config_path):
+                tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".toml")
+                shutil.copy2(config_path, tmp.name)
+                config_backup = tmp.name
+                tmp.close()
+
             repo.git.reset("--hard", f"origin/{branch}")
+
+            if config_backup and os.path.exists(config_backup):
+                shutil.copy2(config_backup, config_path)
+                os.unlink(config_backup)
+
         except Exception as exc:
             raise RuntimeError(f"Git update failed: {exc}") from exc
+
+        await edit(self.strings("update_step2"))
 
         proc = await asyncio.create_subprocess_exec(
             sys.executable, "-m", "pip", "install", "-r", "requirements.txt",
@@ -623,6 +704,22 @@ class NotifierModule(KitsuneModule):
         _, stderr = await proc.communicate()
         if proc.returncode != 0:
             raise RuntimeError(stderr.decode()[:300])
+
+        await edit(self.strings("update_step3"))
+
+        loader = getattr(self.client, "_kitsune_loader", None)
+        mod_count = len(loader.modules) if loader else 0
+        restart_start = time.time()
+
+        updater = loader.modules.get("updater") if loader else None
+        if updater:
+            await updater._save_restart_start(
+                chat_id=0, msg_id=0,
+            )
+        await self.db.set(_DB_OWNER, "update_msg_chat", msg.chat.id if msg else 0)
+        await self.db.set(_DB_OWNER, "update_msg_id",   msg.message_id if msg else 0)
+        await self.db.set(_DB_OWNER, "update_start_time", restart_start)
+        await self.db.force_save()
 
         await asyncio.sleep(1)
         os.execl(sys.executable, sys.executable, "-m", "kitsune")
