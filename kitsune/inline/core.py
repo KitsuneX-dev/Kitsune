@@ -32,46 +32,40 @@ _UNIT_TTL = 60 * 60 * 24
 class InlineManager:
 
     def __init__(self, client: typing.Any, db: typing.Any, token: str) -> None:
-        self._client      = client
-        self._db          = db
-        self._token       = token
-        self._bot:        typing.Any = None
-        self._dp:         typing.Any = None
-        self._callbacks:  dict[str, tuple] = {}
-        self._units:      dict[str, dict]  = {}
-        self._error_events: dict[str, asyncio.Event] = {}
-        self._started     = False
-        self._bot_username: str | None = None
-
-    async def _ensure_bot_username(self) -> str | None:
-        if self._bot_username:
-            return self._bot_username
-        if self._bot:
-            try:
-                me = await self._bot.get_me()
-                self._bot_username = me.username
-                return self._bot_username
-            except Exception:
-                pass
-        return None
+        self._client   = client
+        self._db       = db
+        self._token    = token
+        self._bot:     typing.Any = None
+        self._dp:      typing.Any = None
+        self._router:  typing.Any = None
+        self._callbacks: dict[str, tuple] = {}
+        self._units:     dict[str, dict]  = {}
+        self._bot_username: str | None    = None
+        self._started  = False
 
     async def start(self) -> None:
-        if not AIOGRAM_AVAILABLE or self._started:
+        if not AIOGRAM_AVAILABLE:
+            return
+        if self._started:
             return
         self._bot = Bot(
             token=self._token,
             default=DefaultBotProperties(parse_mode=ParseMode.HTML),
         )
         self._dp     = Dispatcher()
-        router       = Router()
-        self._dp.include_router(router)
-        router.callback_query.register(self._on_callback)
-        router.inline_query.register(self._on_inline_query)
+        self._router = Router()
+        self._dp.include_router(self._router)
+        self._router.callback_query.register(self._on_callback)
+        self._router.inline_query.register(self._on_inline_query)
         self._started = True
         asyncio.ensure_future(self._dp.start_polling(self._bot, handle_signals=False))
         asyncio.ensure_future(self._cleaner())
-        await self._ensure_bot_username()
-        logger.info("InlineManager: started (bot=@%s)", self._bot_username)
+        try:
+            me = await self._bot.get_me()
+            self._bot_username = me.username
+        except Exception:
+            pass
+        logger.info("InlineManager: started")
 
     async def stop(self) -> None:
         if self._bot and self._started:
@@ -83,12 +77,9 @@ class InlineManager:
         while True:
             await asyncio.sleep(300)
             now = time.time()
-            stale_cb = [k for k, v in self._callbacks.items() if v[4] < now]
-            for k in stale_cb:
-                del self._callbacks[k]
-            stale_u = [k for k, v in self._units.items() if v.get("ttl", now + 1) < now]
-            for k in stale_u:
-                del self._units[k]
+            for uid in list(self._units.keys()):
+                if self._units[uid].get("ttl", now + 1) < now:
+                    del self._units[uid]
 
     def generate_markup(self, buttons: list) -> InlineKeyboardMarkup | None:
         if not AIOGRAM_AVAILABLE:
@@ -108,20 +99,17 @@ class InlineManager:
                     kb_row.append(InlineKeyboardButton(text=text, url=url))
                 elif "callback" in btn:
                     cb_id = str(uuid.uuid4())[:12]
-                    expires = int(time.time()) + _UNIT_TTL
                     self._callbacks[cb_id] = (
                         btn["callback"],
                         btn.get("args", ()),
                         self._client.tg_id,
                         btn.get("disable_security", False),
-                        expires,
                     )
                     kb_row.append(InlineKeyboardButton(text=text, callback_data=cb_id))
                 elif raw := btn.get("data"):
                     kb_row.append(InlineKeyboardButton(text=text, callback_data=raw))
             if kb_row:
                 keyboard.append(kb_row)
-
         return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
     async def form(
@@ -129,105 +117,88 @@ class InlineManager:
         text: str,
         message: typing.Any,
         reply_markup: list | None = None,
-        *,
-        parse_mode: str = "HTML",
     ) -> typing.Any:
-        if not self._bot:
-            return None
-
         unit_id = str(uuid.uuid4())[:16]
-        markup  = self.generate_markup(reply_markup or [])
-
         self._units[unit_id] = {
             "text":    text,
             "buttons": reply_markup or [],
-            "markup":  markup,
-            "ttl":     int(time.time()) + _UNIT_TTL,
+            "ttl":     time.time() + _UNIT_TTL,
             "future":  asyncio.Event(),
         }
-
-        bot_username = await self._ensure_bot_username()
-        if not bot_username:
-            del self._units[unit_id]
-            return None
-
-        try:
-            chat_id = message.chat_id if hasattr(message, "chat_id") else getattr(message, "peer_id", None)
-
-            results = await self._client.inline_query(bot_username, unit_id)
-            if not results:
-                raise RuntimeError("No inline results")
-
-            sent = await results[0].click(
-                chat_id,
-                reply_to=getattr(message, "id", None),
-            )
-
-            self._units[unit_id]["chat_id"]    = getattr(sent, "chat_id", None)
-            self._units[unit_id]["message_id"] = getattr(sent, "id", None)
-
-            try:
-                await message.delete()
-            except Exception:
-                pass
-
-            return sent
-
-        except Exception as exc:
-            logger.exception("InlineManager.form: failed (%s)", exc)
-            del self._units[unit_id]
-            try:
-                await message.edit(text)
-            except Exception:
-                pass
-            return None
+        result = await self._invoke_unit(unit_id, message)
+        return result
 
     async def edit(
         self,
         call_or_msg: typing.Any,
         text: str,
         reply_markup: list | None = None,
-        *,
-        parse_mode: str = "HTML",
     ) -> None:
         if not AIOGRAM_AVAILABLE or not self._bot:
             return
         markup = self.generate_markup(reply_markup or [])
         try:
             if hasattr(call_or_msg, "_edit"):
-                await call_or_msg._edit(text, reply_markup=markup, parse_mode=parse_mode)
+                await call_or_msg._edit(text, reply_markup=markup, parse_mode="HTML")
+            elif hasattr(call_or_msg, "inline_message_id") and call_or_msg.inline_message_id:
+                await self._bot.edit_message_text(
+                    inline_message_id=call_or_msg.inline_message_id,
+                    text=text,
+                    reply_markup=markup,
+                    parse_mode="HTML",
+                )
             elif hasattr(call_or_msg, "chat_id") and hasattr(call_or_msg, "message_id"):
                 await self._bot.edit_message_text(
                     chat_id=call_or_msg.chat_id,
                     message_id=call_or_msg.message_id,
                     text=text,
                     reply_markup=markup,
-                    parse_mode=parse_mode,
+                    parse_mode="HTML",
                 )
-            elif hasattr(call_or_msg, "edit"):
-                await call_or_msg.edit(text, reply_markup=markup, parse_mode=parse_mode)
         except Exception:
             logger.exception("InlineManager.edit: failed")
 
+    async def _invoke_unit(self, unit_id: str, message: typing.Any) -> typing.Any:
+        if not self._bot_username:
+            try:
+                me = await self._bot.get_me()
+                self._bot_username = me.username
+            except Exception:
+                return None
+
+        try:
+            results = await self._client.inline_query(self._bot_username, unit_id)
+            if not results:
+                return None
+            chat_id = getattr(message, "chat_id", None) or getattr(message, "chat", {})
+            reply_to = getattr(message, "reply_to_msg_id", None)
+            sent = await results[0].click(chat_id, reply_to=reply_to)
+            try:
+                await message.delete()
+            except Exception:
+                pass
+            return sent
+        except Exception:
+            logger.exception("InlineManager._invoke_unit failed")
+            return None
+
     async def _on_inline_query(self, query: "InlineQuery") -> None:
         unit_id = query.query.strip()
-        unit    = self._units.get(unit_id)
-
-        if not unit or query.from_user.id != self._client.tg_id:
+        unit = self._units.get(unit_id)
+        if not unit:
             await query.answer([], cache_time=0)
             return
 
-        markup = unit.get("markup") or self.generate_markup(unit.get("buttons", []))
-
+        markup = self.generate_markup(unit.get("buttons", []))
         try:
             await query.answer(
-                [
+                results=[
                     InlineQueryResultArticle(
-                        id=unit_id,
+                        id=str(uuid.uuid4()),
                         title="Kitsune",
                         input_message_content=InputTextMessageContent(
                             message_text=unit["text"],
-                            parse_mode=ParseMode.HTML,
+                            parse_mode="HTML",
                             disable_web_page_preview=True,
                         ),
                         reply_markup=markup,
@@ -236,10 +207,7 @@ class InlineManager:
                 cache_time=0,
             )
         except Exception:
-            logger.exception("InlineManager: inline query answer failed")
-
-        if "future" in unit:
-            unit["future"].set()
+            logger.exception("InlineManager._on_inline_query failed")
 
     async def _on_callback(self, call: "CallbackQuery") -> None:
         entry = self._callbacks.get(call.data)
@@ -247,7 +215,7 @@ class InlineManager:
             await call.answer("⚠️ Устаревшая кнопка.", show_alert=True)
             return
 
-        handler, args, owner_id, disable_security, _expires = entry
+        handler, args, owner_id, disable_security = entry
 
         if not disable_security and call.from_user.id != owner_id:
             await call.answer("🚫 Нет доступа.", show_alert=True)
@@ -255,12 +223,13 @@ class InlineManager:
 
         wrapped = InlineCall(
             id=call.id,
-            chat_id=call.message.chat.id,
-            message_id=call.message.message_id,
+            chat_id=call.message.chat.id if call.message else 0,
+            message_id=call.message.message_id if call.message else 0,
             data=call.data,
             _answer=call.answer,
-            _edit=call.message.edit_text,
+            _edit=call.message.edit_text if call.message else None,
         )
+        wrapped.inline_message_id = call.inline_message_id
 
         try:
             await handler(wrapped, *args)
