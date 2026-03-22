@@ -24,11 +24,11 @@ class BackupModule(KitsuneModule):
     author      = "Yushi"
 
     strings_ru = {
-        "creating":       "⏳ Создаю резервную копию...",
+        "creating":       "⏳ Создаю резервную копию базы данных...",
         "done":           "✅ Резервная копия отправлена (зашифрована 🔐).",
         "done_auto":      "🗂 Авто-бэкап выполнен (зашифрован 🔐).",
         "no_backup":      "❌ Нет данных для резервирования.",
-        "restoring":      "⏳ Восстанавливаю из резервной копии...",
+        "restoring":      "⏳ Восстанавливаю базу данных из резервной копии...",
         "restored":       "✅ База данных восстановлена. Перезапустите бота.",
         "bad_file":       "❌ Неверный формат файла резервной копии.",
         "decrypt_fail":   "❌ Не удалось расшифровать бэкап. Проверь ключ (~/.kitsune/kitsune.key).",
@@ -41,6 +41,12 @@ class BackupModule(KitsuneModule):
         ),
         "interval_set":   "✅ Авто-бэкап каждые <b>{h} ч</b>. Следующий через {h} ч.",
         "interval_off":   "🔕 Авто-бэкап отключён.",
+                "mods_creating":  "⏳ Создаю резервную копию модулей...",
+        "mods_done":      "✅ Бэкап модулей отправлен.",
+        "mods_no_mods":   "❌ Нет установленных пользовательских модулей.",
+        "mods_restoring": "⏳ Восстанавливаю модули...",
+        "mods_restored":  "✅ Модули восстановлены: {count} шт.",
+        "mods_bad_file":  "❌ Неверный формат файла бэкапа модулей.",
         "backup_caption": "🦊 <b>Kitsune Backup</b>\n🔐 Зашифрован\n🕐 {ts}\n🔁 Интервал: каждые {h} ч",
     }
 
@@ -56,8 +62,8 @@ class BackupModule(KitsuneModule):
     async def on_unload(self) -> None:
         self._stop_auto()
 
-    @command("backup", required=OWNER)
-    async def backup_cmd(self, event) -> None:
+    @command("backupdb", required=OWNER)
+    async def backupdb_cmd(self, event) -> None:
         async with ProgressMessage(event, "🗂 Создаю резервную копию...", total=3) as prog:
             await prog.update(1)
             dest = await self._ensure_backup_dest()
@@ -67,8 +73,8 @@ class BackupModule(KitsuneModule):
         done_msg = await event.get_reply_message()
         await auto_delete(done_msg)
 
-    @command("restore", required=OWNER)
-    async def restore_cmd(self, event) -> None:
+    @command("restoredb", required=OWNER)
+    async def restoredb_cmd(self, event) -> None:
         reply = await event.message.get_reply_message()
         if not reply or not reply.file:
             m = await event.reply(
@@ -101,6 +107,68 @@ class BackupModule(KitsuneModule):
                         await self.db.set(owner, key, value)
                 await self.db.force_save()
                 await prog.done(self.strings("restored"))
+            except Exception as exc:
+                await prog.done(f"❌ Ошибка: <code>{exc}</code>")
+
+
+    @command("backupmods", required=OWNER)
+    async def backupmods_cmd(self, event) -> None:
+        loader = getattr(self.client, "_kitsune_loader", None)
+        if not loader:
+            return
+        user_mods = {
+            name: mod for name, mod in loader.modules.items()
+            if not getattr(mod, "_is_builtin", True)
+        }
+        if not user_mods:
+            await event.reply(self.strings("mods_no_mods"), parse_mode="html")
+            return
+        async with ProgressMessage(event, self.strings("mods_creating"), total=3) as prog:
+            await prog.update(1)
+            dest = await self._ensure_backup_dest()
+            await prog.update(2)
+            payload = {
+                "kitsune_mods_backup": True,
+                "timestamp": int(time.time()),
+                "urls": self.db.get("kitsune.loader", "user_modules", []),
+                "names": list(user_mods.keys()),
+            }
+            import io as _io
+            buf = _io.BytesIO(json.dumps(payload, ensure_ascii=False).encode())
+            buf.name = f"kitsune_mods_{int(time.time())}.json"
+            buf.seek(0)
+            await self.client.send_file(
+                dest, buf,
+                caption=f"📦 <b>Kitsune Mods Backup</b>\n🕐 {time.strftime('%Y-%m-%d %H:%M:%S')}\n📁 Модулей: {len(user_mods)}",
+                parse_mode="html",
+            )
+            await prog.done(self.strings("mods_done"))
+
+    @command("restoremods", required=OWNER)
+    async def restoremods_cmd(self, event) -> None:
+        reply = await event.message.get_reply_message()
+        if not reply or not reply.file:
+            await event.reply("❌ Ответь на файл бэкапа модулей.", parse_mode="html")
+            return
+        async with ProgressMessage(event, self.strings("mods_restoring"), total=3) as prog:
+            try:
+                await prog.update(1)
+                raw = await reply.download_media(bytes)
+                payload = json.loads(raw.decode())
+                if not payload.get("kitsune_mods_backup"):
+                    await prog.done(self.strings("mods_bad_file"))
+                    return
+                await prog.update(2)
+                urls = payload.get("urls", [])
+                loader = getattr(self.client, "_kitsune_loader", None)
+                count = 0
+                for url in urls:
+                    try:
+                        await loader.load_from_url(url)
+                        count += 1
+                    except Exception as exc:
+                        logger.warning("restoremods: failed %s — %s", url, exc)
+                await prog.done(self.strings("mods_restored").format(count=count))
             except Exception as exc:
                 await prog.done(f"❌ Ошибка: <code>{exc}</code>")
 

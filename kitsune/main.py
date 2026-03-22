@@ -289,6 +289,8 @@ async def _startup(args: argparse.Namespace) -> None:
 
     _print_banner(me)
 
+    asyncio.ensure_future(_keepalive(client))
+
     stop_event = asyncio.Event()
 
     def _shutdown(*_: object) -> None:
@@ -311,6 +313,28 @@ async def _startup(args: argparse.Namespace) -> None:
         await db.force_save()
         encrypt_session_file()
         logger.info("main: goodbye 🦊")
+
+
+async def _keepalive(client: Any) -> None:
+    import contextlib
+    while True:
+        await asyncio.sleep(30)
+        try:
+            if not client.is_connected():
+                logger.warning("keepalive: disconnected — reconnecting")
+                await client.connect()
+                logger.info("keepalive: reconnected")
+            else:
+                await client.get_me()
+        except asyncio.CancelledError:
+            break
+        except Exception as exc:
+            logger.warning("keepalive: ping failed (%s) — reconnecting", exc)
+            with contextlib.suppress(Exception):
+                await client.disconnect()
+            await asyncio.sleep(5)
+            with contextlib.suppress(Exception):
+                await client.connect()
 
 def _print_banner(me: Any) -> None:
     from .version import __version_str__

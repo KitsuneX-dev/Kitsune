@@ -249,6 +249,15 @@ class LoaderModule(KitsuneModule):
             )
         await event.reply(text, parse_mode="html")
 
+
+    @command("dlm", required=OWNER)
+    async def dlm_cmd(self, event) -> None:
+        await self.dlmod_cmd(event)
+
+    @command("lm", required=OWNER)
+    async def lm_cmd(self, event) -> None:
+        await self.loadmod_cmd(event)
+
     def _start_watcher(self) -> None:
         self._stop_watcher()
         self._watch_mtimes = self._scan_mtimes()

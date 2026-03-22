@@ -89,6 +89,7 @@ class NotifierModule(KitsuneModule):
             ))
             self._check_task = asyncio.ensure_future(self._update_check_loop())
             asyncio.ensure_future(self._notify_update_done())
+            asyncio.ensure_future(self._polling_watchdog(str(token)))
         else:
             asyncio.ensure_future(self._auto_setup())
 
@@ -495,6 +496,15 @@ class NotifierModule(KitsuneModule):
             except Exception:
                 logger.exception("Notifier: update check failed")
             await asyncio.sleep(600)
+
+    async def _polling_watchdog(self, token: str) -> None:
+        import asyncio as _asyncio
+        while True:
+            await _asyncio.sleep(120)
+            if self._polling_task and self._polling_task.done():
+                exc = self._polling_task.exception() if not self._polling_task.cancelled() else None
+                logger.warning("Notifier: polling died (%s) — restarting", exc)
+                await self._start_polling(token, first_run=False)
 
     async def _check_for_updates(self) -> None:
         try:

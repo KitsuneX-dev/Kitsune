@@ -279,6 +279,7 @@ class Loader:
 
         instance: KitsuneModule = cls(self._client, self._db)
         instance.tg_id = getattr(self._client, "tg_id", 0)
+        instance._is_builtin = is_builtin
         await instance.on_load()
 
         for attr_name in dir(instance):
