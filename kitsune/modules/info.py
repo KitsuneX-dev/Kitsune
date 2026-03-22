@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 
-from ..core.loader import KitsuneModule, command
+from ..core.loader import KitsuneModule, command, ModuleConfig, ConfigValue
 from ..core.security import OWNER
 from ..utils import auto_delete
 
@@ -12,6 +12,17 @@ class InfoModule(KitsuneModule):
     name        = "info"
     description = "Информация об аккаунте и UserBot"
     author      = "Yushi"
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.config = ModuleConfig(
+            ConfigValue("custom_text",  default="🦊 <b>Kitsune Userbot</b>", doc="Текст заголовка в .info"),
+            ConfigValue("show_uid",     default=True,  doc="Показывать ID аккаунта"),
+            ConfigValue("show_version", default=True,  doc="Показывать версию"),
+            ConfigValue("show_uptime",  default=True,  doc="Показывать аптайм"),
+            ConfigValue("show_prefix",  default=True,  doc="Показывать префикс"),
+            ConfigValue("show_branch",  default=False, doc="Показывать ветку git"),
+        )
 
     strings_ru = {
         "info": (
@@ -48,7 +59,7 @@ class InfoModule(KitsuneModule):
         name = me.first_name + (f" {me.last_name}" if me.last_name else "")
         dispatcher = getattr(self.client, "_kitsune_dispatcher", None)
         prefix = dispatcher._prefix if dispatcher else "."
-        custom = self.db.get(_DB_OWNER, "custom_text", None) or self.strings("no_custom")
+        custom = self.config["custom_text"] if self.config else self.db.get(_DB_OWNER, "custom_text", None) or self.strings("no_custom")
 
         text = self.strings("info").format(
             custom=custom,
@@ -69,6 +80,8 @@ class InfoModule(KitsuneModule):
             await event.reply(self.strings("set_no_args"), parse_mode="html")
             return
         await self.db.set(_DB_OWNER, "custom_text", args)
+        if self.config:
+            self.config["custom_text"] = args
         m = await event.reply(self.strings("set_done"), parse_mode="html")
         await auto_delete(m)
 
