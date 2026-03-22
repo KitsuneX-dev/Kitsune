@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 import asyncio
@@ -9,6 +8,7 @@ import time
 
 from ..core.loader import KitsuneModule, command
 from ..core.security import OWNER
+from .. import crypto
 from ..utils import auto_delete, ProgressMessage
 
 logger = logging.getLogger(__name__)
@@ -17,6 +17,7 @@ _DB_OWNER = "kitsune.backup"
 
 _INTERVAL_OPTIONS = [2, 4, 6, 8, 12, 24, 48]
 
+
 class BackupModule(KitsuneModule):
     name        = "backup"
     description = "Резервное копирование базы данных"
@@ -24,12 +25,13 @@ class BackupModule(KitsuneModule):
 
     strings_ru = {
         "creating":       "⏳ Создаю резервную копию...",
-        "done":           "✅ Резервная копия отправлена.",
-        "done_auto":      "🗂 Авто-бэкап выполнен.",
+        "done":           "✅ Резервная копия отправлена (зашифрована 🔐).",
+        "done_auto":      "🗂 Авто-бэкап выполнен (зашифрован 🔐).",
         "no_backup":      "❌ Нет данных для резервирования.",
         "restoring":      "⏳ Восстанавливаю из резервной копии...",
         "restored":       "✅ База данных восстановлена. Перезапустите бота.",
         "bad_file":       "❌ Неверный формат файла резервной копии.",
+        "decrypt_fail":   "❌ Не удалось расшифровать бэкап. Проверь ключ (~/.kitsune/kitsune.key).",
         "no_dest":        "⚠️ Нет группы для бэкапа. Создаю...",
         "group_created":  "✅ Группа <b>KitsuneBackup</b> создана.",
         "setup_interval": (
@@ -39,7 +41,7 @@ class BackupModule(KitsuneModule):
         ),
         "interval_set":   "✅ Авто-бэкап каждые <b>{h} ч</b>. Следующий через {h} ч.",
         "interval_off":   "🔕 Авто-бэкап отключён.",
-        "backup_caption": "🦊 <b>Kitsune Backup</b>\n🕐 {ts}\n🔁 Интервал: каждые {h} ч",
+        "backup_caption": "🦊 <b>Kitsune Backup</b>\n🔐 Зашифрован\n🕐 {ts}\n🔁 Интервал: каждые {h} ч",
     }
 
     def __init__(self, *args, **kwargs) -> None:
@@ -61,7 +63,7 @@ class BackupModule(KitsuneModule):
             dest = await self._ensure_backup_dest()
             await prog.update(2)
             await self._send_backup(dest)
-            await prog.done("✅ Резервная копия отправлена.")
+            await prog.done(self.strings("done"))
         done_msg = await event.get_reply_message()
         await auto_delete(done_msg)
 
@@ -79,11 +81,20 @@ class BackupModule(KitsuneModule):
         async with ProgressMessage(event, "⏳ Восстанавливаю из резервной копии...", total=3) as prog:
             try:
                 await prog.update(1)
-                raw     = await reply.download_media(bytes)
+                raw = await reply.download_media(bytes)
+
+                if crypto.is_encrypted(raw):
+                    try:
+                        raw = crypto.decrypt(raw)
+                    except Exception:
+                        await prog.done(self.strings("decrypt_fail"))
+                        return
+
                 payload = json.loads(raw.decode())
                 if not payload.get("kitsune_backup"):
                     await prog.done(self.strings("bad_file"))
                     return
+
                 await prog.update(2)
                 for owner, sub in payload["data"].items():
                     for key, value in sub.items():
@@ -224,8 +235,11 @@ class BackupModule(KitsuneModule):
             "timestamp":      int(time.time()),
             "data":           raw,
         }
-        buf      = io.BytesIO(json.dumps(payload, indent=2, ensure_ascii=False).encode())
-        buf.name = f"kitsune_backup_{int(time.time())}.json"
+        plain     = json.dumps(payload, indent=2, ensure_ascii=False).encode()
+        encrypted = crypto.encrypt(plain)
+
+        buf      = io.BytesIO(encrypted)
+        buf.name = f"kitsune_backup_{int(time.time())}.kbak"
         buf.seek(0)
 
         caption = self.strings("backup_caption").format(

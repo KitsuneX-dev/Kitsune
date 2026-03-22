@@ -178,6 +178,9 @@ async def _startup(args: argparse.Namespace) -> None:
         else:
             logger.warning("main: non-MTProto proxy in config — ignored (use MTProto)")
 
+    from .session_enc import decrypt_session_file
+    decrypt_session_file()
+
     session_file = Path(str(session_path) + ".session")
     need_setup = (not api_id or not api_hash or not session_file.exists())
 
@@ -300,11 +303,13 @@ async def _startup(args: argparse.Namespace) -> None:
         await stop_event.wait()
     finally:
         logger.info("main: shutting down…")
+        from .session_enc import encrypt_session_file
         if client.hydrogram:
             with contextlib.suppress(Exception):
                 await client.hydrogram.stop()
         await client.disconnect()
         await db.force_save()
+        encrypt_session_file()
         logger.info("main: goodbye 🦊")
 
 def _print_banner(me: Any) -> None:
