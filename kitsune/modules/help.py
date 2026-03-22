@@ -4,13 +4,14 @@ from ..core.loader import KitsuneModule, command
 from ..core.security import OWNER
 
 _BUILTIN_NAMES = {
-    "backup", "eval", "health", "help", "info",
+    "backup", "config", "eval", "health", "help", "info",
     "loader", "notifier", "paste", "ping",
     "security", "settings", "updater",
 }
 
 _DISPLAY_NAMES: dict[str, str] = {
     "backup":   "Backup",
+    "config":   "Config",
     "eval":     "Evaluator",
     "health":   "Health",
     "help":     "Help",

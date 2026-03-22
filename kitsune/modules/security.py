@@ -56,6 +56,36 @@ class SecurityModule(KitsuneModule):
         if uid == self.client.tg_id:
             await event.reply(self.strings("no_self"), parse_mode="html")
             return
+
+        loader = getattr(self.client, "_kitsune_loader", None)
+        notifier = loader.modules.get("notifier") if loader else None
+        bot = getattr(notifier, "_bot", None) if notifier else None
+        owner_id = self.db.get("kitsune.notifier", "owner_id", None) if notifier else None
+
+        if bot and owner_id:
+            try:
+                from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+                await self.db.set(self._DB_KEY, f"pending_owner_{uid}", uid)
+                kb = InlineKeyboardMarkup(inline_keyboard=[[
+                    InlineKeyboardButton(text="✅ Подтвердить", callback_data=f"owneradd_yes:{uid}"),
+                    InlineKeyboardButton(text="❌ Отмена",      callback_data=f"owneradd_no:{uid}"),
+                ]])
+                await bot.send_message(
+                    chat_id=int(owner_id),
+                    text=(
+                        f"⚠️ <b>Запрос на добавление совладельца</b>\n\n"
+                        f"🆔 ID: <code>{uid}</code>\n\n"
+                        f"Этот пользователь сможет выполнять команды бота от твоего лица.\n"
+                        f"Подтвердить добавление?"
+                    ),
+                    reply_markup=kb,
+                    parse_mode="HTML",
+                )
+                await event.reply("📩 Подтверди добавление совладельца в боте.", parse_mode="html")
+                return
+            except Exception:
+                pass
+
         owners = self._get_co_owners()
         if uid not in owners:
             owners.append(uid)
