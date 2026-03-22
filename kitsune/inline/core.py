@@ -170,6 +170,11 @@ class InlineManager:
         chat_id  = getattr(message, "chat_id", None)
         reply_to = getattr(message, "reply_to_msg_id", None)
 
+        try:
+            entity = await self._client.get_entity(chat_id)
+        except Exception:
+            entity = chat_id
+
         await asyncio.sleep(0.5)
 
         for attempt in range(5):
@@ -178,7 +183,7 @@ class InlineManager:
                 if not results:
                     await asyncio.sleep(1)
                     continue
-                sent = await results[0].click(chat_id, reply_to=reply_to)
+                sent = await results[0].click(entity, reply_to=reply_to)
                 try:
                     await message.delete()
                 except Exception:
