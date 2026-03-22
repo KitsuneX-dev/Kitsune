@@ -47,7 +47,7 @@ class ConfigModule(KitsuneModule):
     @command("config", required=OWNER)
     async def config_cmd(self, event) -> None:
         inline = self._get_inline()
-        if not inline:
+        if not inline or not inline._bot:
             await event.reply("❌ Inline-менеджер недоступен.", parse_mode="html")
             return
 
@@ -56,8 +56,39 @@ class ConfigModule(KitsuneModule):
             await event.reply(self.strings("no_mods"), parse_mode="html")
             return
 
-        msg = await event.reply("⚙️ Загружаю...", parse_mode="html")
-        await self._show_mod_list(inline, msg, mods)
+        await self._show_mod_list_new(inline, event.chat_id, mods)
+
+
+    async def _show_mod_list_new(self, inline, chat_id: int, mods=None) -> None:
+        if mods is None:
+            mods = self._configurable_mods()
+
+        buttons = []
+        row = []
+        for name, mod in sorted(mods.items()):
+            display = (mod.name or name).capitalize()
+            row.append({
+                "text": f"⚙️ {display}",
+                "callback": self._cb_show_mod,
+                "args": (name,),
+            })
+            if len(row) == 2:
+                buttons.append(row)
+                row = []
+        if row:
+            buttons.append(row)
+        buttons.append([{"text": "✖️ Закрыть", "callback": self._cb_close}])
+
+        markup = inline.generate_markup(buttons)
+        try:
+            await inline._bot.send_message(
+                chat_id=chat_id,
+                text=self.strings("choose_mod"),
+                reply_markup=markup,
+                parse_mode="HTML",
+            )
+        except Exception as e:
+            logger.exception("config: failed to send menu")
 
     async def _show_mod_list(self, inline, msg, mods=None) -> None:
         if mods is None:

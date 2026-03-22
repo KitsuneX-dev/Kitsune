@@ -57,33 +57,39 @@ class SecurityModule(KitsuneModule):
             await event.reply(self.strings("no_self"), parse_mode="html")
             return
 
-        from telethon.tl.types import KeyboardButtonCallback, ReplyInlineMarkup, KeyboardButtonRow
-        buttons = ReplyInlineMarkup(rows=[
-            KeyboardButtonRow(buttons=[
-                KeyboardButtonCallback(text="✅ Подтвердить", data=f"owneradd_yes:{uid}".encode()),
-                KeyboardButtonCallback(text="❌ Отмена",      data=f"owneradd_no:{uid}".encode()),
-            ])
-        ])
+        from telethon import Button
         await event.reply(
             f"⚠️ <b>Добавление совладельца</b>\n\n"
             f"🆔 ID: <code>{uid}</code>\n\n"
             f"Он сможет выполнять команды бота от твоего лица.\n"
             f"Подтвердить?",
             parse_mode="html",
-            buttons=buttons,
+            buttons=[
+                [
+                    Button.inline("✅ Подтвердить", data=f"owneradd_yes:{uid}"),
+                    Button.inline("❌ Отмена",      data=f"owneradd_no:{uid}"),
+                ]
+            ],
         )
 
-    from ..core.loader import watcher as _watcher
+    async def on_load(self) -> None:
+        from telethon import events
+        self.client.add_event_handler(
+            self._owneradd_callback,
+            events.CallbackQuery(pattern=b"owneradd_")
+        )
 
-    @_watcher()
-    async def _owneradd_watcher(self, event) -> None:
-        if not hasattr(event, "data"):
-            return
+    async def on_unload(self) -> None:
+        from telethon import events
+        self.client.remove_event_handler(
+            self._owneradd_callback,
+            events.CallbackQuery(pattern=b"owneradd_")
+        )
+
+    async def _owneradd_callback(self, event) -> None:
         try:
             data = event.data.decode()
         except Exception:
-            return
-        if not data.startswith(("owneradd_yes:", "owneradd_no:")):
             return
         if event.query.user_id != self.client.tg_id:
             await event.answer("🔒 Нет доступа.", alert=True)
