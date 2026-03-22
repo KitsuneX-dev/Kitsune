@@ -702,14 +702,27 @@ class NotifierModule(KitsuneModule):
         self._polling_task = None
 
     async def _start_inline_manager(self, token: str) -> None:
+        import asyncio as _aio
+        for _ in range(20):
+            if self._bot is not None:
+                break
+            await _aio.sleep(0.5)
         try:
             from ..inline.core import InlineManager
             inline = InlineManager(self.client, self.db, token)
-            await inline.start()
+            inline._bot     = self._bot
+            inline._dp      = self._dp
+            inline._started = True
+
+            from aiogram import Router as _Router
+            inline_router = _Router()
+            inline_router.callback_query.register(inline._on_callback)
+            self._dp.include_router(inline_router)
+
             self.client._kitsune_inline = inline
-            logger.info("Notifier: InlineManager started")
+            logger.info("Notifier: InlineManager attached to existing bot")
         except Exception:
-            logger.exception("Notifier: failed to start InlineManager")
+            logger.exception("Notifier: failed to attach InlineManager")
 
     async def _update_check_loop(self) -> None:
         await asyncio.sleep(300)
