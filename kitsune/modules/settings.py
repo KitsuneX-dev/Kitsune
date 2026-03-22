@@ -105,8 +105,8 @@ class SettingsModule(KitsuneModule):
             parse_mode="html",
         )
 
-    @command("info", required=OWNER)
-    async def info_cmd(self, event) -> None:
+    @command("sysinfo", required=OWNER)
+    async def sysinfo_cmd(self, event) -> None:
         import platform, sys, psutil
         from ..version import __version_str__
         from ..utils import IS_TERMUX, IS_DOCKER

@@ -31,9 +31,9 @@ class HelpModule(KitsuneModule):
 
     strings_ru = {
         "header":     "🦊 <b>Kitsune Userbot</b> — {count} модулей загружено:\n\n",
-        "sys_header": "◼️ <b>Системные модули:</b>\n",
+        "sys_header": "▪ <b>Системные модули:</b>\n",
         "usr_header": "\n▫️ <b>Пользовательские модули:</b>\n",
-        "module_sys": "◼️ <b>{name}:</b> ( {cmds} )\n",
+        "module_sys": "▪ <b>{name}:</b> ( {cmds} )\n",
         "module_usr": "▫️ <b>{name}:</b> ( {cmds} )\n",
         "no_modules": "Модули не загружены.",
     }
