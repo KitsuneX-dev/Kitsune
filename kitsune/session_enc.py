@@ -35,7 +35,7 @@ def decrypt_session_file() -> bool:
     try:
         raw = decrypt(ENC_PATH.read_bytes())
         SESSION_PATH.write_bytes(raw)
-        SESSION_PATH.chmod(0o600)
+        SESSION_PATH.chmod(0o644)
         logger.info("session_enc: session decrypted → %s", SESSION_PATH)
         return True
     except Exception:
