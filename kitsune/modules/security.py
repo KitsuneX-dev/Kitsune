@@ -57,40 +57,52 @@ class SecurityModule(KitsuneModule):
             await event.reply(self.strings("no_self"), parse_mode="html")
             return
 
-        loader = getattr(self.client, "_kitsune_loader", None)
-        notifier = loader.modules.get("notifier") if loader else None
-        bot = getattr(notifier, "_bot", None) if notifier else None
-        owner_id = self.db.get("kitsune.notifier", "owner_id", None) if notifier else None
+        from telethon.tl.types import KeyboardButtonCallback, ReplyInlineMarkup, KeyboardButtonRow
+        buttons = ReplyInlineMarkup(rows=[
+            KeyboardButtonRow(buttons=[
+                KeyboardButtonCallback(text="✅ Подтвердить", data=f"owneradd_yes:{uid}".encode()),
+                KeyboardButtonCallback(text="❌ Отмена",      data=f"owneradd_no:{uid}".encode()),
+            ])
+        ])
+        await event.reply(
+            f"⚠️ <b>Добавление совладельца</b>\n\n"
+            f"🆔 ID: <code>{uid}</code>\n\n"
+            f"Он сможет выполнять команды бота от твоего лица.\n"
+            f"Подтвердить?",
+            parse_mode="html",
+            buttons=buttons,
+        )
 
-        if bot and owner_id:
-            try:
-                from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-                await self.db.set(self._DB_KEY, f"pending_owner_{uid}", uid)
-                kb = InlineKeyboardMarkup(inline_keyboard=[[
-                    InlineKeyboardButton(text="✅ Подтвердить", callback_data=f"owneradd_yes:{uid}"),
-                    InlineKeyboardButton(text="❌ Отмена",      callback_data=f"owneradd_no:{uid}"),
-                ]])
-                await bot.send_message(
-                    chat_id=int(owner_id),
-                    text=(
-                        f"⚠️ <b>Запрос на добавление совладельца</b>\n\n"
-                        f"🆔 ID: <code>{uid}</code>\n\n"
-                        f"Этот пользователь сможет выполнять команды бота от твоего лица.\n"
-                        f"Подтвердить добавление?"
-                    ),
-                    reply_markup=kb,
-                    parse_mode="HTML",
-                )
-                await event.reply("📩 Подтверди добавление совладельца в боте.", parse_mode="html")
-                return
-            except Exception:
-                pass
+    from ..core.loader import watcher as _watcher
+
+    @_watcher()
+    async def _owneradd_watcher(self, event) -> None:
+        if not hasattr(event, "data"):
+            return
+        try:
+            data = event.data.decode()
+        except Exception:
+            return
+        if not data.startswith(("owneradd_yes:", "owneradd_no:")):
+            return
+        if event.query.user_id != self.client.tg_id:
+            await event.answer("🔒 Нет доступа.", alert=True)
+            return
+
+        action, uid_str = data.split(":", 1)
+        uid = int(uid_str)
+        await event.answer()
+
+        if action == "owneradd_no":
+            await event.edit("❌ Добавление совладельца отменено.")
+            return
 
         owners = self._get_co_owners()
         if uid not in owners:
             owners.append(uid)
             await self._set_co_owners(owners)
-        await event.reply(self.strings("owner_added").format(uid=uid), parse_mode="html")
+        await event.edit(self.strings("owner_added").format(uid=uid))
+
 
     @command("ownerrm", required=OWNER)
     async def ownerrm_cmd(self, event) -> None:

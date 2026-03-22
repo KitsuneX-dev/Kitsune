@@ -1,5 +1,5 @@
 
-from ..core.loader import KitsuneModule, command
+from ..core.loader import KitsuneModule, command, ModuleConfig, ConfigValue
 from ..core.security import OWNER
 
 _DB_OWNER = "kitsune.core"
@@ -8,6 +8,14 @@ class SettingsModule(KitsuneModule):
     name        = "settings"
     description = "Настройки Kitsune"
     author      = "Yushi"
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.config = ModuleConfig(
+            ConfigValue("prefix",   default=".",  doc="Префикс команд"),
+            ConfigValue("lang",     default="ru", doc="Язык интерфейса (ru/en/de)"),
+            ConfigValue("autodel",  default=True, doc="Авто-удаление сервисных сообщений"),
+        )
 
     strings_ru = {
         "prefix_set":    "✅ Префикс изменён на <code>{p}</code>",

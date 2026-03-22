@@ -411,32 +411,6 @@ class NotifierModule(KitsuneModule):
                 except Exception as e:
                     logger.warning("Notifier: on_start answer failed — %s", e)
 
-            @router.callback_query(lambda c: c.data and c.data.startswith(("owneradd_yes:", "owneradd_no:")))
-            async def on_owneradd_cb(call: CallbackQuery) -> None:
-                owner_id = ref.db.get(_DB_OWNER, "owner_id", None)
-                if call.from_user.id != owner_id:
-                    await call.answer("🔒 Нет доступа.", show_alert=True)
-                    return
-                action, uid_str = call.data.split(":", 1)
-                uid = int(uid_str)
-                await call.answer()
-                if action == "owneradd_no":
-                    await ref.db.delete("kitsune.security", f"pending_owner_{uid}")
-                    await call.message.edit_text("❌ Добавление совладельца отменено.")
-                    return
-                loader = getattr(ref.client, "_kitsune_loader", None)
-                sec_mod = loader.modules.get("security") if loader else None
-                if sec_mod:
-                    owners = sec_mod._get_co_owners()
-                    if uid not in owners:
-                        owners.append(uid)
-                        await sec_mod._set_co_owners(owners)
-                await ref.db.delete("kitsune.security", f"pending_owner_{uid}")
-                await call.message.edit_text(
-                    f"✅ <b>Совладелец добавлен</b>\n🆔 <code>{uid}</code>\n⚠️ Он сможет выполнять команды бота от твоего лица.",
-                    parse_mode="HTML",
-                )
-
             @router.callback_query(lambda c: c.data in ("update_yes", "update_no", "do_update"))
             async def on_update_cb(call: CallbackQuery) -> None:
                 owner_id = ref.db.get(_DB_OWNER, "owner_id", None)
