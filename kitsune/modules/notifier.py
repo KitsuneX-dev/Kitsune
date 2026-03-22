@@ -107,6 +107,27 @@ class NotifierModule(KitsuneModule):
         await self._stop_polling()
         await event.reply(self.strings("reset_done"), parse_mode="html")
 
+    @command("fixbot", required=OWNER)
+    async def fixbot_cmd(self, event) -> None:
+        username = self.db.get(_DB_OWNER, "bot_username", None)
+        if not username:
+            await event.reply("❌ Бот не найден. Запусти <code>.resetbot</code>", parse_mode="html")
+            return
+        m = await event.reply(f"⚙️ Включаю Inline Mode для @{username}...", parse_mode="html")
+        await self._enable_inline_mode(username)
+        await m.edit(f"✅ Inline Mode включён для @{username}\n\nТеперь в любом чате можно писать <code>@{username} запрос</code>", parse_mode="html")
+
+
+    @command("setinline", required=OWNER)
+    async def setinline_cmd(self, event) -> None:
+        username = self.db.get(_DB_OWNER, "bot_username", None)
+        if not username:
+            await event.reply("❌ Бот не найден. Сначала запусти <code>.setbot</code>", parse_mode="html")
+            return
+        m = await event.reply("⏳ Включаю inline mode...", parse_mode="html")
+        await self._enable_inline_mode(username)
+        await m.edit("✅ Inline mode включён. Теперь кнопки работают в чатах!", parse_mode="html")
+
     @command("mybots", required=OWNER)
     async def mybots_cmd(self, event) -> None:
         m = await event.reply("🔍 Ищу ботов...", parse_mode="html")
@@ -316,10 +337,37 @@ class NotifierModule(KitsuneModule):
                         continue
                     break
 
+                if token and username:
+                    await self._enable_inline_mode(username)
+
             return token, username
         except Exception as exc:
             logger.error("Notifier: _create_bot failed — %s", exc)
             return None, None
+
+
+    async def _enable_inline_mode(self, username: str) -> None:
+        import asyncio as _aio
+        try:
+            async with self.client.conversation("@BotFather", timeout=30) as conv:
+                await conv.send_message("/setinline")
+                await conv.get_response()
+                await conv.send_message(f"@{username}")
+                await conv.get_response()
+                await conv.send_message("kitsune")
+                await conv.get_response()
+            logger.info("Notifier: inline mode enabled for @%s", username)
+            await _aio.sleep(1)
+            async with self.client.conversation("@BotFather", timeout=30) as conv:
+                await conv.send_message("/setinlinefeedback")
+                await conv.get_response()
+                await conv.send_message(f"@{username}")
+                await conv.get_response()
+                await conv.send_message("Enabled")
+                await conv.get_response()
+            logger.info("Notifier: inline feedback enabled for @%s", username)
+        except Exception as exc:
+            logger.warning("Notifier: could not enable inline mode — %s", exc)
 
     def _load_token_from_config(self) -> str | None:
         try:
