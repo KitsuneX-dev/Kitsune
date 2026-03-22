@@ -48,7 +48,7 @@ class ConfigModule(KitsuneModule):
     async def config_cmd(self, event) -> None:
         inline = self._get_inline()
         if not inline or not inline._bot:
-            await event.reply("❌ Inline-менеджер недоступен.", parse_mode="html")
+            await event.reply("❌ Inline-менеджер недоступен. Настрой бота через <code>.setbot</code>", parse_mode="html")
             return
 
         mods = self._configurable_mods()
@@ -56,40 +56,9 @@ class ConfigModule(KitsuneModule):
             await event.reply(self.strings("no_mods"), parse_mode="html")
             return
 
-        await self._show_mod_list_new(inline, event.chat_id, mods)
+        await self._show_mod_list(inline, event.message, mods)
 
 
-    async def _show_mod_list_new(self, inline, chat_id: int, mods=None) -> None:
-        if mods is None:
-            mods = self._configurable_mods()
-
-        buttons = []
-        row = []
-        for name, mod in sorted(mods.items()):
-            display = (mod.name or name).capitalize()
-            row.append({
-                "text": f"⚙️ {display}",
-                "callback": self._cb_show_mod,
-                "args": (name,),
-            })
-            if len(row) == 2:
-                buttons.append(row)
-                row = []
-        if row:
-            buttons.append(row)
-        buttons.append([{"text": "✖️ Закрыть", "callback": self._cb_close}])
-
-        markup = inline.generate_markup(buttons)
-        owner_id = self.db.get("kitsune.notifier", "owner_id", None) or chat_id
-        try:
-            await inline._bot.send_message(
-                chat_id=int(owner_id),
-                text=self.strings("choose_mod"),
-                reply_markup=markup,
-                parse_mode="HTML",
-            )
-        except Exception as e:
-            logger.exception("config: failed to send menu")
 
     async def _show_mod_list(self, inline, msg, mods=None) -> None:
         if mods is None:
@@ -109,10 +78,9 @@ class ConfigModule(KitsuneModule):
                 row = []
         if row:
             buttons.append(row)
-
         buttons.append([{"text": "✖️ Закрыть", "callback": self._cb_close}])
 
-        await inline.edit(msg, self.strings("choose_mod"), buttons)
+        await inline.form(self.strings("choose_mod"), msg, buttons)
 
     async def _cb_show_mod(self, call, mod_name: str) -> None:
         inline = self._get_inline()
