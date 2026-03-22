@@ -559,9 +559,18 @@ class NotifierModule(KitsuneModule):
             changes += f"\n<i>...и ещё {count - 10} коммитов</i>"
 
         from ..version import __version_str__
+
+        try:
+            remote_version = repo.git.show(f"origin/{branch}:kitsune/version.py")
+            import re as _re
+            m = _re.search(r"__version__\s*=\s*\((\d+),\s*(\d+),\s*(\d+)\)", remote_version)
+            new_ver = f"{m.group(1)}.{m.group(2)}.{m.group(3)}" if m else f"{__version_str__}+{count}"
+        except Exception:
+            new_ver = f"{__version_str__}+{count}"
+
         await self.notify_update(
             current=__version_str__,
-            new=f"{__version_str__}+{count}",
+            new=new_ver,
             changes=changes,
         )
 
