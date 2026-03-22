@@ -166,21 +166,33 @@ class InlineManager:
             except Exception:
                 return None
 
-        try:
-            results = await self._client.inline_query(self._bot_username, unit_id)
-            if not results:
-                return None
-            chat_id = getattr(message, "chat_id", None) or getattr(message, "chat", {})
-            reply_to = getattr(message, "reply_to_msg_id", None)
-            sent = await results[0].click(chat_id, reply_to=reply_to)
+        chat_id  = getattr(message, "chat_id", None)
+        reply_to = getattr(message, "reply_to_msg_id", None)
+
+        await asyncio.sleep(0.5)
+
+        for attempt in range(5):
             try:
-                await message.delete()
-            except Exception:
-                pass
-            return sent
-        except Exception:
-            logger.exception("InlineManager._invoke_unit failed")
-            return None
+                results = await self._client.inline_query(self._bot_username, unit_id)
+                if not results:
+                    await asyncio.sleep(1)
+                    continue
+                sent = await results[0].click(chat_id, reply_to=reply_to)
+                try:
+                    await message.delete()
+                except Exception:
+                    pass
+                return sent
+            except Exception as exc:
+                err = str(exc)
+                if "BotResponseTimeout" in err or "timeout" in err.lower():
+                    logger.warning("InlineManager._invoke_unit: timeout attempt %d/3", attempt + 1)
+                    await asyncio.sleep(2)
+                    continue
+                logger.exception("InlineManager._invoke_unit failed")
+                return None
+        logger.error("InlineManager._invoke_unit: all attempts failed for unit %s", unit_id)
+        return None
 
     async def _on_inline_query(self, query: "InlineQuery") -> None:
         unit_id = query.query.strip()
