@@ -1,4 +1,3 @@
-# ── Python ──────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]
 *.pyo
@@ -10,30 +9,29 @@ dist/
 build/
 .eggs/
 
-# ── Virtual environments ─────────────────────────────────────────
 venv/
 .venv/
 env/
 ENV/
 
-# ── Kitsune runtime data ─────────────────────────────────────────
 *.session
 *.session-journal
+*.session.enc
 *.db
 *.db-wal
 *.db-shm
 kitsune-*.json
-config.toml          # contains secrets — never commit!
+config.toml
 *.log
+*.kbak
+kitsune.key
 
-# ── IDE ──────────────────────────────────────────────────────────
 .idea/
 .vscode/
 *.swp
 *.swo
 .DS_Store
 
-# ── Type checking / linting ──────────────────────────────────────
 .mypy_cache/
 .ruff_cache/
 .pytest_cache/

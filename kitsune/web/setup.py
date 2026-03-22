@@ -370,6 +370,12 @@ class SetupServer:
         self._client.tg_id = me.id
         self._client.tg_me = me
 
+        try:
+            from ..session_enc import encrypt_session_file
+            encrypt_session_file()
+        except Exception:
+            logger.exception("setup: failed to encrypt session after save")
+
     @staticmethod
     def _err(msg: str) -> web.Response:
         return web.json_response({"ok": False, "error": msg})

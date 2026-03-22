@@ -4,7 +4,7 @@ from __future__ import annotations
 import contextlib
 import os
 
-__version__ = (1, 2, 0)
+__version__ = (1, 2, 1)
 __version_str__ = ".".join(map(str, __version__))
 
 branch: str = "main"
