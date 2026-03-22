@@ -90,6 +90,7 @@ class NotifierModule(KitsuneModule):
             self._check_task = asyncio.ensure_future(self._update_check_loop())
             asyncio.ensure_future(self._notify_update_done())
             asyncio.ensure_future(self._polling_watchdog(str(token)))
+            asyncio.ensure_future(self._start_inline_manager(str(token)))
         else:
             asyncio.ensure_future(self._auto_setup())
 
@@ -410,6 +411,32 @@ class NotifierModule(KitsuneModule):
                 except Exception as e:
                     logger.warning("Notifier: on_start answer failed — %s", e)
 
+            @router.callback_query(lambda c: c.data and c.data.startswith(("owneradd_yes:", "owneradd_no:")))
+            async def on_owneradd_cb(call: CallbackQuery) -> None:
+                owner_id = ref.db.get(_DB_OWNER, "owner_id", None)
+                if call.from_user.id != owner_id:
+                    await call.answer("🔒 Нет доступа.", show_alert=True)
+                    return
+                action, uid_str = call.data.split(":", 1)
+                uid = int(uid_str)
+                await call.answer()
+                if action == "owneradd_no":
+                    await ref.db.delete("kitsune.security", f"pending_owner_{uid}")
+                    await call.message.edit_text("❌ Добавление совладельца отменено.")
+                    return
+                loader = getattr(ref.client, "_kitsune_loader", None)
+                sec_mod = loader.modules.get("security") if loader else None
+                if sec_mod:
+                    owners = sec_mod._get_co_owners()
+                    if uid not in owners:
+                        owners.append(uid)
+                        await sec_mod._set_co_owners(owners)
+                await ref.db.delete("kitsune.security", f"pending_owner_{uid}")
+                await call.message.edit_text(
+                    f"✅ <b>Совладелец добавлен</b>\n🆔 <code>{uid}</code>\n⚠️ Он сможет выполнять команды бота от твоего лица.",
+                    parse_mode="HTML",
+                )
+
             @router.callback_query(lambda c: c.data in ("update_yes", "update_no", "do_update"))
             async def on_update_cb(call: CallbackQuery) -> None:
                 owner_id = ref.db.get(_DB_OWNER, "owner_id", None)
@@ -439,6 +466,204 @@ class NotifierModule(KitsuneModule):
                     await backup.handle_interval_callback(call)
                 else:
                     await call.answer("Модуль backup не загружен.", show_alert=True)
+
+
+            @router.callback_query(lambda c: c.data and c.data.startswith("cfg_"))
+            async def on_config_cb(call: CallbackQuery) -> None:
+                owner_id = ref.db.get(_DB_OWNER, "owner_id", None)
+                if call.from_user.id != owner_id:
+                    await call.answer("🔒 Нет доступа.", show_alert=True)
+                    return
+                await call.answer()
+
+                from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+                from ..modules.config import _get_configurable, _mod_text, _list_text
+
+                data = call.data
+
+                if data == "cfg_close":
+                    await call.message.delete()
+                    return
+
+                if data == "cfg_back":
+                    configurable = _get_configurable(ref.client)
+                    buttons = []
+                    row = []
+                    for name in sorted(configurable.keys()):
+                        mod = configurable[name]
+                        row.append(InlineKeyboardButton(
+                            text=mod.name,
+                            callback_data=f"cfg_mod:{name}",
+                        ))
+                        if len(row) == 3:
+                            buttons.append(row)
+                            row = []
+                    if row:
+                        buttons.append(row)
+                    buttons.append([
+                        InlineKeyboardButton(text="❌ Закрыть", callback_data="cfg_close"),
+                    ])
+                    await call.message.edit_text(
+                        _list_text(configurable),
+                        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
+                        parse_mode="HTML",
+                    )
+                    return
+
+                if data.startswith("cfg_mod:"):
+                    mod_name = data.split(":", 1)[1]
+                    configurable = _get_configurable(ref.client)
+                    mod = configurable.get(mod_name)
+                    if not mod:
+                        await call.message.edit_text("❌ Модуль не найден.")
+                        return
+                    buttons = []
+                    for k in mod.config.keys():
+                        buttons.append([InlineKeyboardButton(
+                            text=f"✏️ {k}",
+                            callback_data=f"cfg_key:{mod_name}:{k}",
+                        )])
+                    buttons.append([
+                        InlineKeyboardButton(text="◀️ Назад", callback_data="cfg_back"),
+                        InlineKeyboardButton(text="❌ Закрыть", callback_data="cfg_close"),
+                    ])
+                    await call.message.edit_text(
+                        _mod_text(mod_name, mod),
+                        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
+                        parse_mode="HTML",
+                    )
+                    return
+
+                if data.startswith("cfg_key:"):
+                    _, mod_name, key = data.split(":", 2)
+                    configurable = _get_configurable(ref.client)
+                    mod = configurable.get(mod_name)
+                    if not mod or key not in mod.config:
+                        await call.message.edit_text("❌ Параметр не найден.")
+                        return
+                    val     = mod.config[key]
+                    default = mod.config.get_default(key)
+                    doc     = mod.config.get_doc(key) or "—"
+                    text = (
+                        f"⚙️ <b>{mod.name}</b> → <code>{key}</code>\n\n"
+                        f"📄 <i>{doc}</i>\n\n"
+                        f"🔹 Текущее: <b>{val}</b>\n"
+                        f"🔸 По умолчанию: <b>{default}</b>\n\n"
+                        f"Отправь новое значение в ответ на это сообщение."
+                    )
+                    buttons = []
+                    if isinstance(val, bool):
+                        buttons.append([
+                            InlineKeyboardButton(
+                                text="✅ True" if not val else "☑️ True (текущее)",
+                                callback_data=f"cfg_set:{mod_name}:{key}:true",
+                            ),
+                            InlineKeyboardButton(
+                                text="❌ False" if val else "☑️ False (текущее)",
+                                callback_data=f"cfg_set:{mod_name}:{key}:false",
+                            ),
+                        ])
+                    if val != default:
+                        buttons.append([InlineKeyboardButton(
+                            text="🔄 Сбросить до дефолта",
+                            callback_data=f"cfg_reset:{mod_name}:{key}",
+                        )])
+                    buttons.append([
+                        InlineKeyboardButton(text="◀️ Назад", callback_data=f"cfg_mod:{mod_name}"),
+                        InlineKeyboardButton(text="❌ Закрыть", callback_data="cfg_close"),
+                    ])
+                    await ref.db.set("kitsune.config", "pending_input", {
+                        "mod": mod_name, "key": key,
+                        "msg_id": call.message.message_id,
+                        "chat_id": call.message.chat.id,
+                    })
+                    await call.message.edit_text(
+                        text,
+                        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
+                        parse_mode="HTML",
+                    )
+                    return
+
+                if data.startswith("cfg_set:"):
+                    parts = data.split(":", 3)
+                    mod_name, key, raw_val = parts[1], parts[2], parts[3]
+                    configurable = _get_configurable(ref.client)
+                    mod = configurable.get(mod_name)
+                    if mod and key in mod.config:
+                        mod.config[key] = raw_val.lower() == "true"
+                        await ref.db.set(f"kitsune.config.{mod_name}", "values",
+                            {k: mod.config[k] for k in mod.config.keys()})
+                        await call.message.edit_text(
+                            f"✅ <b>{mod.name}</b> → <code>{key}</code> = <b>{mod.config[key]}</b>",
+                            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                                InlineKeyboardButton(text="◀️ Назад", callback_data=f"cfg_mod:{mod_name}"),
+                            ]]),
+                            parse_mode="HTML",
+                        )
+                    return
+
+                if data.startswith("cfg_reset:"):
+                    _, mod_name, key = data.split(":", 2)
+                    configurable = _get_configurable(ref.client)
+                    mod = configurable.get(mod_name)
+                    if mod and key in mod.config:
+                        mod.config[key] = mod.config.get_default(key)
+                        await ref.db.set(f"kitsune.config.{mod_name}", "values",
+                            {k: mod.config[k] for k in mod.config.keys()})
+                        await call.message.edit_text(
+                            f"✅ <b>{mod.name}</b> → <code>{key}</code> сброшен до <b>{mod.config[key]}</b>",
+                            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                                InlineKeyboardButton(text="◀️ Назад", callback_data=f"cfg_mod:{mod_name}"),
+                            ]]),
+                            parse_mode="HTML",
+                        )
+                    return
+
+            @router.message(lambda m: True)
+            async def on_text_input(msg: Message) -> None:
+                owner_id = ref.db.get(_DB_OWNER, "owner_id", None)
+                if msg.from_user.id != owner_id:
+                    return
+                pending = ref.db.get("kitsune.config", "pending_input", None)
+                if not pending:
+                    return
+                await ref.db.delete("kitsune.config", "pending_input")
+                mod_name = pending["mod"]
+                key      = pending["key"]
+                value    = msg.text or ""
+                from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+                from ..modules.config import _get_configurable
+                configurable = _get_configurable(ref.client)
+                mod = configurable.get(mod_name)
+                if not mod or key not in mod.config:
+                    return
+                orig = mod.config.get_default(key)
+                try:
+                    if isinstance(orig, int):
+                        value = int(value)
+                    elif isinstance(orig, float):
+                        value = float(value)
+                except (ValueError, TypeError):
+                    pass
+                mod.config[key] = value
+                await ref.db.set(f"kitsune.config.{mod_name}", "values",
+                    {k: mod.config[k] for k in mod.config.keys()})
+                try:
+                    await ref._bot.edit_message_text(
+                        chat_id=pending["chat_id"],
+                        message_id=pending["msg_id"],
+                        text=f"✅ <b>{mod.name}</b> → <code>{key}</code> = <b>{value}</b>",
+                        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                            InlineKeyboardButton(text="◀️ Назад", callback_data=f"cfg_mod:{mod_name}"),
+                        ]]),
+                        parse_mode="HTML",
+                    )
+                except Exception:
+                    pass
+                try:
+                    await msg.delete()
+                except Exception:
+                    pass
 
             self._polling_task = asyncio.ensure_future(
                 self._dp.start_polling(self._bot, handle_signals=False)
@@ -475,6 +700,16 @@ class NotifierModule(KitsuneModule):
         self._bot          = None
         self._dp           = None
         self._polling_task = None
+
+    async def _start_inline_manager(self, token: str) -> None:
+        try:
+            from ..inline.core import InlineManager
+            inline = InlineManager(self.client, self.db, token)
+            await inline.start()
+            self.client._kitsune_inline = inline
+            logger.info("Notifier: InlineManager started")
+        except Exception:
+            logger.exception("Notifier: failed to start InlineManager")
 
     async def _update_check_loop(self) -> None:
         await asyncio.sleep(300)

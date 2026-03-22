@@ -30,6 +30,42 @@ class ModuleLoadError(Exception):
 class ASTSecurityError(ModuleLoadError):
     pass
 
+
+class ConfigValue:
+    def __init__(self, key: str, default: typing.Any = None, doc: str = "") -> None:
+        self.key     = key
+        self.default = default
+        self.doc     = doc
+        self.value   = default
+
+class ModuleConfig:
+    def __init__(self, *values: ConfigValue) -> None:
+        self._config: dict[str, ConfigValue] = {v.key: v for v in values}
+
+    def __getitem__(self, key: str) -> typing.Any:
+        return self._config[key].value
+
+    def __setitem__(self, key: str, value: typing.Any) -> None:
+        self._config[key].value = value
+
+    def __contains__(self, key: object) -> bool:
+        return key in self._config
+
+    def __iter__(self):
+        return iter(self._config)
+
+    def keys(self):
+        return self._config.keys()
+
+    def items(self):
+        return {k: v.value for k, v in self._config.items()}.items()
+
+    def get_default(self, key: str) -> typing.Any:
+        return self._config[key].default
+
+    def get_doc(self, key: str) -> str:
+        return self._config[key].doc
+
 class KitsuneModule:
 
     name: str = ""
@@ -48,6 +84,8 @@ class KitsuneModule:
         self.db      = db
         self.tg_id: int = 0
         self.inline: typing.Any = None
+        if not hasattr(self, 'config'):
+            self.config: ModuleConfig | None = None
 
     async def on_load(self) -> None:
         pass
@@ -280,6 +318,11 @@ class Loader:
         instance: KitsuneModule = cls(self._client, self._db)
         instance.tg_id = getattr(self._client, "tg_id", 0)
         instance._is_builtin = is_builtin
+        if isinstance(getattr(instance, "config", None), ModuleConfig):
+            saved = self._db.get(f"kitsune.config.{module_name}", "values", {})
+            for k in instance.config.keys():
+                if k in saved:
+                    instance.config[k] = saved[k]
         await instance.on_load()
 
         for attr_name in dir(instance):

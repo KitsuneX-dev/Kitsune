@@ -10,6 +10,7 @@ from pathlib import Path
 from ..core.loader import KitsuneModule, command, ModuleLoadError, ASTSecurityError  # noqa: F401
 from ..core.security import OWNER
 from ..utils import auto_delete, ProgressMessage
+from ..hydro_media import download_media as hydro_download
 
 logger = logging.getLogger(__name__)
 
@@ -144,7 +145,7 @@ class LoaderModule(KitsuneModule):
             return
 
         try:
-            raw: bytes = await reply.download_media(bytes)
+            raw: bytes = await hydro_download(self.client, reply)
             source = raw.decode("utf-8")
 
             _USER_MODULES_DIR.mkdir(parents=True, exist_ok=True)

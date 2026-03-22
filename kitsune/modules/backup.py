@@ -9,6 +9,7 @@ import time
 from ..core.loader import KitsuneModule, command
 from ..core.security import OWNER
 from .. import crypto
+from ..hydro_media import send_file as hydro_send_file, download_media as hydro_download
 from ..utils import auto_delete, ProgressMessage
 
 logger = logging.getLogger(__name__)
@@ -87,7 +88,7 @@ class BackupModule(KitsuneModule):
         async with ProgressMessage(event, "⏳ Восстанавливаю из резервной копии...", total=3) as prog:
             try:
                 await prog.update(1)
-                raw = await reply.download_media(bytes)
+                raw = await hydro_download(self.client, reply)
 
                 if crypto.is_encrypted(raw):
                     try:
@@ -137,8 +138,8 @@ class BackupModule(KitsuneModule):
             buf = _io.BytesIO(json.dumps(payload, ensure_ascii=False).encode())
             buf.name = f"kitsune_mods_{int(time.time())}.json"
             buf.seek(0)
-            await self.client.send_file(
-                dest, buf,
+            await hydro_send_file(
+                self.client, dest, buf,
                 caption=f"📦 <b>Kitsune Mods Backup</b>\n🕐 {time.strftime('%Y-%m-%d %H:%M:%S')}\n📁 Модулей: {len(user_mods)}",
                 parse_mode="html",
             )
@@ -153,7 +154,7 @@ class BackupModule(KitsuneModule):
         async with ProgressMessage(event, self.strings("mods_restoring"), total=3) as prog:
             try:
                 await prog.update(1)
-                raw = await reply.download_media(bytes)
+                raw = await hydro_download(self.client, reply)
                 payload = json.loads(raw.decode())
                 if not payload.get("kitsune_mods_backup"):
                     await prog.done(self.strings("mods_bad_file"))
@@ -314,4 +315,4 @@ class BackupModule(KitsuneModule):
             ts=time.strftime("%Y-%m-%d %H:%M:%S"),
             h=h_str,
         )
-        await self.client.send_file(dest, buf, caption=caption, parse_mode="html")
+        await hydro_send_file(self.client, dest, buf, caption=caption, parse_mode="html")
