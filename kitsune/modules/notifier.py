@@ -423,19 +423,9 @@ class NotifierModule(KitsuneModule):
                     await call.message.edit_text("❌ Обновление отменено.")
                     return
 
-                pending = ref.db.get("kitsune.updater", "pending_update", None)
-                if not pending:
-                    await call.message.edit_text("❌ Данные устарели. Запусти .update снова.")
-                    return
-                await ref.db.delete("kitsune.updater", "pending_update")
                 await call.message.edit_text(ref.strings("update_step1"), parse_mode="HTML")
-                try:
-                    await ref._do_update(call.message)
-                except Exception as exc:
-                    await call.message.edit_text(
-                        ref.strings("update_err").format(err=str(exc)),
-                        parse_mode="HTML"
-                    )
+                import asyncio as _asyncio
+                _asyncio.ensure_future(ref._safe_update_run(call.message))
 
             @router.callback_query(lambda c: c.data and c.data.startswith("backup_interval:"))
             async def on_backup_interval(call: CallbackQuery) -> None:
@@ -606,6 +596,32 @@ class NotifierModule(KitsuneModule):
         except Exception:
             logger.exception("Notifier: failed to send restart report")
 
+    async def _safe_update_run(self, msg) -> None:
+        import asyncio as _asyncio
+
+        async def edit(text: str) -> None:
+            try:
+                await msg.edit_text(text, parse_mode="HTML")
+            except Exception:
+                pass
+
+        for attempt in range(1, 4):
+            try:
+                await self._do_update(msg)
+                return
+            except Exception as exc:
+                err = str(exc)
+                if "unable to access" in err or "Couldn't connect" in err or "timed out" in err.lower():
+                    if attempt < 3:
+                        await edit(
+                            f"⚠️ Нет соединения, повтор {attempt}/3...\n"
+                            f"No connection, retry {attempt}/3..."
+                        )
+                        await _asyncio.sleep(15)
+                        continue
+                await edit(self.strings("update_err").format(err=err))
+                return
+
     async def notify_update(self, current: str, new: str, changes: str = "") -> None:
         token    = self.db.get(_DB_OWNER, "bot_token", None)
         owner_id = self.db.get(_DB_OWNER, "owner_id",  None)
@@ -689,7 +705,15 @@ class NotifierModule(KitsuneModule):
             import git
             repo   = git.Repo(repo_path)
             origin = repo.remote("origin")
-            origin.fetch()
+            for _attempt in range(3):
+                try:
+                    origin.fetch()
+                    break
+                except Exception as _fe:
+                    if _attempt == 2:
+                        raise
+                    import asyncio as _aio
+                    await _aio.sleep(10)
             try:
                 branch = repo.active_branch.name
             except TypeError:
