@@ -80,9 +80,10 @@ class ConfigModule(KitsuneModule):
         buttons.append([{"text": "✖️ Закрыть", "callback": self._cb_close}])
 
         markup = inline.generate_markup(buttons)
+        owner_id = self.db.get("kitsune.notifier", "owner_id", None) or chat_id
         try:
             await inline._bot.send_message(
-                chat_id=chat_id,
+                chat_id=int(owner_id),
                 text=self.strings("choose_mod"),
                 reply_markup=markup,
                 parse_mode="HTML",
