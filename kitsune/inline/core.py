@@ -138,15 +138,16 @@ class InlineManager:
             return
         markup = self.generate_markup(reply_markup or [])
         try:
-            if hasattr(call_or_msg, "_edit"):
-                await call_or_msg._edit(text, reply_markup=markup, parse_mode="HTML")
-            elif hasattr(call_or_msg, "inline_message_id") and call_or_msg.inline_message_id:
+            iid = getattr(call_or_msg, "inline_message_id", None)
+            if iid:
                 await self._bot.edit_message_text(
-                    inline_message_id=call_or_msg.inline_message_id,
+                    inline_message_id=iid,
                     text=text,
                     reply_markup=markup,
                     parse_mode="HTML",
                 )
+            elif hasattr(call_or_msg, "_edit") and callable(call_or_msg._edit):
+                await call_or_msg._edit(text, reply_markup=markup, parse_mode="HTML")
             elif hasattr(call_or_msg, "chat_id") and hasattr(call_or_msg, "message_id"):
                 await self._bot.edit_message_text(
                     chat_id=call_or_msg.chat_id,
@@ -241,7 +242,7 @@ class InlineManager:
             _answer=call.answer,
             _edit=call.message.edit_text if call.message else None,
         )
-        wrapped.inline_message_id = call.inline_message_id
+        wrapped.inline_message_id = call.inline_message_id or ""
 
         try:
             await handler(wrapped, *args)
