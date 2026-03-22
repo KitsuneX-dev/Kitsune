@@ -17,67 +17,169 @@ _HTML = """<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Kitsune Setup</title>
 <style>
-  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-  body {
-    font-family: 'Segoe UI', system-ui, sans-serif;
-    background:
-    color:
-    min-height: 100vh;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 20px;
-  }
-  .card {
-    width: 100%;
-    max-width: 460px;
-    background:
-    border: 1px solid
-    border-radius: 20px;
-    padding: 44px 40px;
-    box-shadow: 0 0 60px
-  }
-  .logo { text-align: center; font-size: 3rem; margin-bottom: 6px; }
-  h1 { text-align: center; font-size: 1.45rem; color:
-  .sub { text-align: center; font-size: 0.82rem; color:
-  .step { display: none; animation: fadeIn .25s ease; }
-  .step.active { display: block; }
-  @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
-  .step-title { font-size: 1rem; font-weight: 600; color:
-  label { display: block; font-size: 0.8rem; color:
-  input {
-    width: 100%; padding: 11px 14px;
-    background:
-    border-radius: 9px; color:
-    outline: none; transition: border .2s;
-  }
-  input:focus { border-color:
-  .hint { font-size: 0.77rem; color:
-  .hint a { color:
-  button {
-    width: 100%; margin-top: 22px; padding: 13px;
-    background: linear-gradient(135deg,
-    border: none; border-radius: 10px; color:
-    font-size: 0.97rem; font-weight: 600; cursor: pointer;
-    transition: opacity .2s, transform .1s;
-  }
-  button:hover { opacity: .88; }
-  button:active { transform: scale(.98); }
-  button:disabled { opacity: .35; cursor: not-allowed; }
-  .error {
-    display: none; margin-top: 14px; padding: 10px 14px;
-    background:
-    border-radius: 8px; font-size: 0.82rem; color:
-  }
-  .steps-bar { display: flex; gap: 6px; margin-bottom: 28px; justify-content: center; }
-  .dot { width: 8px; height: 8px; border-radius: 50%; background:
-  .dot.active { background:
-  .dot.done { background:
-  .done-wrap { text-align: center; padding: 10px 0; }
-  .done-icon { font-size: 3.5rem; margin-bottom: 12px; }
-  .done-title { font-size: 1.2rem; font-weight: 700; color:
-  .done-sub { font-size: 0.85rem; color:
-  .done-info { margin-top: 20px; padding: 12px 16px; background:
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  background: #0a0a12;
+  color: #c8b8f0;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background-image:
+    linear-gradient(rgba(120,80,255,0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(120,80,255,0.03) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+.card {
+  width: 100%;
+  max-width: 440px;
+  background: #12121e;
+  border: 1px solid rgba(140,90,255,0.2);
+  border-radius: 20px;
+  padding: 40px 36px;
+  box-shadow: 0 0 60px rgba(120,60,255,0.12), 0 0 120px rgba(120,60,255,0.05);
+}
+
+.logo { text-align: center; font-size: 3rem; margin-bottom: 8px; }
+
+h1 {
+  text-align: center;
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: #e0d0ff;
+  margin-bottom: 4px;
+  letter-spacing: 0.5px;
+}
+
+.sub {
+  text-align: center;
+  font-size: 0.8rem;
+  color: #6a5a8a;
+  margin-bottom: 28px;
+}
+
+.steps-bar {
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+  margin-bottom: 28px;
+}
+
+.dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: #2a2040;
+  transition: all .3s;
+}
+.dot.active { background: #a060ff; box-shadow: 0 0 8px #a060ff; }
+.dot.done   { background: #6030cc; }
+
+.step { display: none; animation: fadeIn .25s ease; }
+.step.active { display: block; }
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.step-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #d0b8ff;
+  margin-bottom: 20px;
+}
+
+label {
+  display: block;
+  font-size: 0.78rem;
+  color: #8070a8;
+  margin-bottom: 5px;
+  margin-top: 14px;
+}
+
+input {
+  width: 100%;
+  padding: 11px 14px;
+  background: #1c1830;
+  border: 1px solid rgba(140,90,255,0.2);
+  border-radius: 9px;
+  color: #e0d0ff;
+  font-size: 0.9rem;
+  outline: none;
+  transition: border .2s, box-shadow .2s;
+}
+
+input:focus {
+  border-color: #8050e0;
+  box-shadow: 0 0 0 3px rgba(128,80,224,0.15);
+}
+
+input::placeholder { color: #3d3060; }
+
+.hint {
+  font-size: 0.75rem;
+  color: #5a4880;
+  margin-top: 6px;
+}
+.hint a { color: #9060e0; text-decoration: none; }
+.hint a:hover { text-decoration: underline; }
+
+button {
+  width: 100%;
+  margin-top: 22px;
+  padding: 13px;
+  background: linear-gradient(135deg, #7030d0, #a050f0);
+  border: none;
+  border-radius: 10px;
+  color: #fff;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  letter-spacing: 0.3px;
+  transition: opacity .2s, transform .1s, box-shadow .2s;
+  box-shadow: 0 4px 20px rgba(120,60,255,0.3);
+}
+
+button:hover { opacity: .9; box-shadow: 0 4px 28px rgba(120,60,255,0.5); }
+button:active { transform: scale(.98); }
+button:disabled { opacity: .35; cursor: not-allowed; box-shadow: none; }
+
+.error {
+  display: none;
+  margin-top: 14px;
+  padding: 10px 14px;
+  background: rgba(200,50,80,0.1);
+  border: 1px solid rgba(200,50,80,0.25);
+  border-radius: 8px;
+  font-size: 0.82rem;
+  color: #e07090;
+}
+
+.done-wrap { text-align: center; padding: 10px 0; }
+.done-icon { font-size: 3.5rem; margin-bottom: 14px; }
+.done-title {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #d0b8ff;
+  margin-bottom: 8px;
+}
+.done-sub {
+  font-size: 0.85rem;
+  color: #6a5a8a;
+}
+.done-info {
+  margin-top: 18px;
+  padding: 12px 16px;
+  background: rgba(120,60,255,0.08);
+  border: 1px solid rgba(120,60,255,0.2);
+  border-radius: 10px;
+  font-size: 0.85rem;
+  color: #b090e8;
+}
 </style>
 </head>
 <body>
@@ -85,13 +187,13 @@ _HTML = """<!DOCTYPE html>
   <div class="logo">🦊</div>
   <h1>Kitsune Userbot</h1>
   <p class="sub">by Yushi · первоначальная настройка</p>
+
   <div class="steps-bar">
     <div class="dot active" id="d1"></div>
     <div class="dot" id="d2"></div>
     <div class="dot" id="d3"></div>
   </div>
 
-  <!-- Step 1: API + Phone -->
   <div class="step active" id="step1">
     <div class="step-title">🔑 API-данные Telegram</div>
     <label>API ID</label>
@@ -106,7 +208,6 @@ _HTML = """<!DOCTYPE html>
     <button id="btn1" onclick="sendCode()">Получить код →</button>
   </div>
 
-  <!-- Step 2: Code -->
   <div class="step" id="step2">
     <div class="step-title">📱 Код подтверждения</div>
     <label>Код из Telegram</label>
@@ -116,7 +217,6 @@ _HTML = """<!DOCTYPE html>
     <button id="btn2" onclick="signIn()">Войти →</button>
   </div>
 
-  <!-- Step 3: 2FA -->
   <div class="step" id="step3">
     <div class="step-title">🔐 Двухфакторная аутентификация</div>
     <label>Облачный пароль Telegram</label>
@@ -125,7 +225,6 @@ _HTML = """<!DOCTYPE html>
     <button id="btn3" onclick="check2fa()">Подтвердить →</button>
   </div>
 
-  <!-- Step 4: Done -->
   <div class="step" id="step4">
     <div class="done-wrap">
       <div class="done-icon">🎉</div>
@@ -140,9 +239,9 @@ _HTML = """<!DOCTYPE html>
 function setDots(active) {
   for (let i = 1; i <= 3; i++) {
     const d = document.getElementById('d' + i);
-    if (i < active) d.className = 'dot done';
+    if (i < active)      d.className = 'dot done';
     else if (i === active) d.className = 'dot active';
-    else d.className = 'dot';
+    else                   d.className = 'dot';
   }
 }
 function show(n) {
@@ -168,11 +267,10 @@ async function post(url, data) {
   });
   return r.json();
 }
-
 async function sendCode() {
-  const api_id = document.getElementById('api_id').value.trim();
+  const api_id   = document.getElementById('api_id').value.trim();
   const api_hash = document.getElementById('api_hash').value.trim();
-  const phone = document.getElementById('phone').value.trim();
+  const phone    = document.getElementById('phone').value.trim();
   if (!api_id || !api_hash) { showErr(1, 'Заполни API ID и API Hash'); return; }
   if (!phone) { showErr(1, 'Введи номер телефона'); return; }
   setBtn('btn1', 'Отправляем код…', true);
@@ -181,7 +279,6 @@ async function sendCode() {
   if (res.ok) { showErr(1, ''); show(2); }
   else showErr(1, res.error || 'Ошибка');
 }
-
 async function signIn() {
   const code = document.getElementById('code').value.trim();
   if (!code) { showErr(2, 'Введи код'); return; }
@@ -192,7 +289,6 @@ async function signIn() {
   else if (res.need_2fa) { showErr(2, ''); show(3); }
   else showErr(2, res.error || 'Неверный код');
 }
-
 async function check2fa() {
   const pwd = document.getElementById('password').value;
   if (!pwd) { showErr(3, 'Введи пароль'); return; }
