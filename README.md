@@ -121,24 +121,6 @@ secret = "00000000000000000000000000000000"
 
 ---
 
-## Структура проекта
-
-```
-Kitsune/
-├── kitsune/
-│   ├── core/           диспетчер, загрузчик, security, rate limiter
-│   ├── database/       SQLite и Redis backends
-│   ├── modules/        встроенные модули
-│   ├── web/            веб-интерфейс настройки
-│   ├── inline/         inline-бот
-│   ├── main.py         точка входа
-│   └── utils.py        вспомогательные функции
-├── requirements.txt
-└── install.sh
-```
-
----
-
 ## Лицензия
 
 AGPLv3 © Yushi ([@Mikasu32](https://t.me/Mikasu32)), 2024–2026
