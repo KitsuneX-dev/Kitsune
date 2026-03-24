@@ -104,6 +104,8 @@ class NotifierModule(KitsuneModule):
         await self.db.delete(_DB_OWNER, "bot_token")
         await self.db.delete(_DB_OWNER, "bot_name")
         await self.db.delete(_DB_OWNER, "bot_username")
+        # Сбрасываем флаг, чтобы /start снова показал настройку авто-бэкапа
+        await self.db.delete(_DB_OWNER, "backup_interval_asked")
         await self._stop_polling()
         await event.reply(self.strings("reset_done"), parse_mode="html")
 
@@ -207,6 +209,10 @@ class NotifierModule(KitsuneModule):
             await self.db.set(_DB_OWNER, "bot_username", bot_username or "")
             await self.db.set(_DB_OWNER, "owner_id",     me.id)
             self._save_token_to_config(token)
+
+            # Включаем inline mode всегда — как для нового бота, так и для старого
+            if bot_username:
+                asyncio.ensure_future(self._enable_inline_mode(bot_username))
 
             key = "reused" if reused else "done"
             await self.client.send_message(
@@ -424,24 +430,30 @@ class NotifierModule(KitsuneModule):
             @router.message(Command("start"))
             async def on_start(msg: Message) -> None:
                 owner_id = ref.db.get(_DB_OWNER, "owner_id", None)
-                if msg.from_user.id != owner_id:
+                # Защищаем от ситуации когда owner_id ещё не сохранён
+                # или пришёл как другой тип из JSON
+                if owner_id is None or msg.from_user.id != int(owner_id):
                     try:
                         await msg.answer("🔒 Нет доступа.")
                     except Exception:
                         pass
                     return
                 try:
-                    backup_asked = ref.db.get(_DB_OWNER, "backup_interval_asked", False)
-                    loader = getattr(ref.client, "_kitsune_loader", None)
-                    backup = loader.modules.get("backup") if loader else None
+                    backup_asked    = ref.db.get(_DB_OWNER, "backup_interval_asked", False)
+                    interval_set    = ref.db.get("kitsune.backup", "interval_h", None)
+                    loader          = getattr(ref.client, "_kitsune_loader", None)
+                    backup          = loader.modules.get("backup") if loader else None
 
-                    if not backup_asked and backup:
+                    # Показываем настройку если: (a) ещё не спрашивали, или
+                    # (b) флаг стоит но интервал до сих пор не выбран
+                    needs_setup = (not backup_asked) or (not interval_set)
+
+                    if needs_setup and backup:
                         await backup.show_interval_setup(ref._bot, msg.from_user.id)
                         await ref.db.set(_DB_OWNER, "backup_interval_asked", True)
                     else:
-                        interval_h = ref.db.get("kitsune.backup", "interval_h", None)
                         backup_status = (
-                            f"каждые <b>{interval_h} ч</b>" if interval_h
+                            f"каждые <b>{interval_set} ч</b>" if interval_set
                             else "не настроен"
                         )
                         bot_ver = ref.version
