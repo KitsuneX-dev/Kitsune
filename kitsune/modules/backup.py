@@ -173,6 +173,16 @@ class BackupModule(KitsuneModule):
             except Exception as exc:
                 await prog.done(f"❌ Ошибка: <code>{exc}</code>")
 
+    async def _initial_backup_after_setup(self) -> None:
+        """Создаёт группу KitsuneBackup и делает первый бэкап сразу после настройки."""
+        try:
+            await asyncio.sleep(2)  # небольшая задержка чтобы callback успел обработаться
+            dest = await self._ensure_backup_dest()
+            await self._send_backup(dest, auto=False)
+            logger.info("Backup: initial backup created after interval setup")
+        except Exception:
+            logger.exception("Backup: initial backup after setup failed")
+
     def _start_auto(self, interval_h: int) -> None:
         self._stop_auto()
         self._auto_task = asyncio.ensure_future(self._auto_loop(interval_h))
@@ -244,6 +254,9 @@ class BackupModule(KitsuneModule):
             self.strings("interval_set").format(h=h),
             parse_mode="HTML",
         )
+
+        # Создаём группу и делаем первый бэкап сразу после выбора интервала
+        asyncio.ensure_future(self._initial_backup_after_setup())
 
     async def _ensure_backup_dest(self) -> int:
         chat_id = self.db.get(_DB_OWNER, "group_id", None)
