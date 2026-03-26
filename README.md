@@ -2,34 +2,37 @@
 
 <img src="banner.png" alt="Kitsune Userbot" width="860"/>
 
+<br/>
+
 [![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
 [![License](https://img.shields.io/badge/License-AGPLv3-blue?style=flat-square)](LICENSE)
-[![Telegram](https://img.shields.io/badge/Developer-@Mikasu32-2CA5E0?style=flat-square&logo=telegram)](https://t.me/Mikasu32)
+[![Telegram](https://img.shields.io/badge/Автор-@Mikasu32-2CA5E0?style=flat-square&logo=telegram)](https://t.me/Mikasu32)
+
+**Мощный userbot для Telegram — быстрый, безопасный, расширяемый.**
 
 </div>
 
 ---
 
-## Что такое Kitsune?
+## О проекте
 
-Kitsune — это userbot для Telegram, написанный на Python. Он запускается локально на твоём устройстве и значительно расширяет возможности Telegram: автоматизация, утилиты, управление группами, резервные копии и многое другое — всё через простые команды с префиксом.
+Kitsune запускается локально на твоём устройстве и расширяет Telegram через простые команды с префиксом. Двойной клиентский стек (Telethon + Hydrogram), AST-сканер модулей, зашифрованные бэкапы и интерактивный конфигуратор — всё из коробки.
 
 ---
 
 ## Возможности
 
-| Функция | Описание |
-|---|---|
-| Двойной стек | Telethon (основной) + Hydrogram (вторичный) |
-| AST-сканер | Безопасная загрузка модулей — блокирует опасный код до `exec()` |
-| Rate Limiter | Token-bucket алгоритм — защита от флуд-бана |
-| Async SQLite WAL | Не теряет данные при крэше, WAL journal mode |
-| aiogram 3.x | Встроенный бот для уведомлений и бэкапов |
-| Авто-бэкап | Зашифрованные резервные копии БД в группу KitsuneBackup |
-| Авто-удаление | Сервисные сообщения удаляются через заданное время |
-| Прогресс-бар | Визуальный прогресс для длинных операций |
-| TOML конфиг | Читаемый конфиг с кэшированием |
-| Termux + Ubuntu | Один установщик для обоих окружений |
+| | Функция | Описание |
+|---|---|---|
+| ⚡ | Двойной стек | Telethon (основной) + Hydrogram (вторичный) |
+| 🔒 | AST-сканер | Блокирует опасный код модулей до `exec()` |
+| 🛡️ | Rate Limiter | Token-bucket алгоритм — защита от флуд-бана |
+| 💾 | Async SQLite WAL | Не теряет данные при крэше |
+| 🤖 | aiogram 3.x | Встроенный бот для уведомлений и бэкапов |
+| 📦 | Авто-бэкап | Зашифрованные резервные копии БД по расписанию |
+| ⚙️ | Конфигуратор | Интерактивная настройка модулей через кнопки |
+| 📋 | TOML конфиг | Читаемый конфиг с поддержкой MTProto прокси |
+| 📱 | Termux + Ubuntu | Один установщик для обоих окружений |
 
 ---
 
@@ -37,16 +40,17 @@ Kitsune — это userbot для Telegram, написанный на Python. О
 
 | Модуль | Команды | Описание |
 |---|---|---|
-| Backup | `.backup` `.restore` | Зашифрованные резервные копии БД, авто-бэкап по расписанию |
-| Evaluator | `.e` `.ex` `.sh` | Выполнение Python / Shell кода |
+| Backup | `.backup` `.restore` | Бэкап и восстановление БД |
+| Config | `.config` `.fconfig` | Интерактивная настройка модулей |
+| Evaluator | `.e` `.ex` `.sh` | Python / Shell код |
 | Health | `.health` `.monitor` | Мониторинг системы |
-| Help | `.help` | Список команд и модулей |
+| Help | `.help` | Список команд |
 | Loader | `.dlmod` `.loadmod` `.mods` | Управление модулями |
 | Notifier | `.resetbot` `.mybots` `.setbot` | Бот-нотификатор |
 | Pastebin | `.paste` | Загрузка текста на pastebin |
 | Ping | `.ping` `.me` `.id` | Пинг, аптайм, информация |
-| Security | `.addsudo` `.delsudo` | Управление правами доступа |
-| Settings | `.prefix` `.lang` `.autodel` `.info` | Настройки юзербота |
+| Security | `.addsudo` `.delsudo` | Права доступа |
+| Settings | `.prefix` `.lang` `.autodel` `.info` | Настройки |
 | Updater | `.update` `.restart` | Обновление и перезапуск |
 
 ---
@@ -63,14 +67,6 @@ curl -s https://raw.githubusercontent.com/KitsuneX-dev/Kitsune/main/termux.sh | 
 curl -s https://raw.githubusercontent.com/KitsuneX-dev/Kitsune/main/install.sh | bash
 ```
 
-### Docker
-```bash
-git clone https://github.com/KitsuneX-dev/Kitsune
-cd Kitsune
-docker build -t kitsune .
-docker run -d --name kitsune -v $(pwd)/data:/data kitsune
-```
-
 ### Вручную
 ```bash
 git clone https://github.com/KitsuneX-dev/Kitsune
@@ -80,56 +76,48 @@ pip install -r requirements.txt
 python -m kitsune
 ```
 
-После запуска открой `http://localhost:8080` в браузере, введи `api_id` и `api_hash` — и готово.
+После запуска открой `http://localhost:8080` в браузере и введи `api_id` / `api_hash` с [my.telegram.org](https://my.telegram.org).
 
 ---
 
 ## Запуск
 
-### Termux (Android)
-В Termux виртуальное окружение не нужно — просто:
+### Termux
 ```bash
 python -m kitsune
 ```
 
 ### Ubuntu / Debian — без виртуального окружения
-Если зависимости установлены глобально:
 ```bash
 python3 -m kitsune
 ```
 
-### Ubuntu / Debian — через виртуальное окружение (рекомендуется)
-Виртуальное окружение изолирует зависимости и предотвращает конфликты пакетов:
+### Ubuntu / Debian — через виртуальное окружение *(рекомендуется)*
 ```bash
-# Активировать окружение и запустить
+# Вариант 1 — активировать и запустить
 source venv/bin/activate
 python -m kitsune
 
-# Или без активации — напрямую через venv
+# Вариант 2 — напрямую без активации
 venv/bin/python -m kitsune
 ```
 
-> **Если порт 8080 уже занят** — укажи другой в `config.toml`:
-> ```toml
-> web_port = 8081
-> ```
-> Затем открой `http://localhost:8081` вместо 8080.
+> **Порт 8080 занят?**
+> Укажи другой в `config.toml` → `web_port = 8081`, затем открой `http://localhost:8081`.
 
 ---
 
-## ⚠️ Важно: блокировки РКН (Россия и СНГ)
+## ⚠️ Блокировки РКН
 
-Telegram заблокирован на территории России и ряда стран СНГ на уровне провайдера. Если при запуске в консоли **тишина** (нет ошибок, но бот не загружается) — это означает что соединение с серверами Telegram блокируется.
+Если после запуска в консоли **тишина** (нет ошибок, но бот не загружается) — соединение с Telegram блокируется провайдером.
 
-**Решение 1 — VPN (простой способ)**
-Включи любой VPN перед запуском. Бот подключится через него автоматически.
+**Вариант 1 — VPN**
+Включи любой VPN перед запуском.
 
-**Решение 2 — MTProto прокси в config.toml (без VPN)**
-Создай файл `config.toml` в папке проекта (`~/Kitsune/config.toml`) и пропиши MTProto прокси:
+**Вариант 2 — MTProto прокси** *(без VPN)*
 
+Создай `config.toml` в папке проекта:
 ```toml
-web_port = 8081
-
 [proxy]
 type   = "MTPROTO"
 host   = "АДРЕС_ПРОКСИ"
@@ -137,20 +125,14 @@ port   = 443
 secret = "СЕКРЕТ_ПРОКСИ"
 ```
 
-Бесплатные рабочие MTProto прокси можно найти в Telegram:
-- [@MTProxyT](https://t.me/MTProxyT)
-- [@proxyme](https://t.me/proxyme)
-
-Из ссылки вида `tg://proxy?server=...&port=...&secret=...` берёшь:
-- `server` → `host`
-- `port` → `port`
-- `secret` → `secret`
-
-> Без VPN или настроенного прокси бот **не запустится** в заблокированных регионах — это не баг, а блокировка на уровне провайдера.
+Рабочие MTProto прокси: [@MTProxyT](https://t.me/MTProxyT), [@proxyme](https://t.me/proxyme).
+Из ссылки `tg://proxy?server=...&port=...&secret=...` берёшь `server` → `host`, остальное по названию.
 
 ---
 
 ## Конфигурация
+
+Файл `config.toml` создаётся в папке проекта (`~/Kitsune/config.toml`):
 
 ```toml
 api_id   = 123456
@@ -166,24 +148,31 @@ port   = 443
 secret = "00000000000000000000000000000000"
 ```
 
-`api_id` и `api_hash` получи на [my.telegram.org](https://my.telegram.org). Блок `[proxy]` опционален.
+`api_id` и `api_hash` — на [my.telegram.org](https://my.telegram.org). Блок `[proxy]` опционален.
 
 ---
 
-## Загрузка модулей
+## Модули
 
+### Загрузка
 ```
 .dlmod https://raw.githubusercontent.com/someone/repo/main/mymodule.py
 ```
+Все модули проходят AST-сканирование перед выполнением и восстанавливаются после перезапуска.
 
-Все загружаемые модули проходят AST-сканирование перед выполнением. Загружённые модули восстанавливаются автоматически после перезапуска.
+### Настройка через .config
+```
+.config                                    — конфигуратор с выбором модуля через кнопки
+.config <модуль>                           — сразу к настройкам конкретного модуля
+.fconfig <модуль> <параметр> <значение>   — быстрая установка без UI
+```
 
 ---
 
-## Резервные копии
+## Бэкапы
 
-При первом запуске бот предложит выбрать интервал авто-бэкапа (2ч / 4ч / 6ч / 12ч / 24ч). Бэкапы отправляются в группу **KitsuneBackup**.
-
+При первом запуске бот предложит выбрать интервал авто-бэкапа: **2ч / 4ч / 6ч / 12ч / 24ч**.
+Бэкапы отправляются в группу **KitsuneBackup**.
 Восстановление — ответь на файл бэкапа командой `.restore`.
 
 ---
