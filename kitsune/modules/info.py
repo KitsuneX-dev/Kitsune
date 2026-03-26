@@ -214,6 +214,15 @@ class InfoModule(KitsuneModule):
         if inline and inline._bot:
             markup = [[mark]] if mark else []
             await inline.form(text, event.message, markup)
+        elif banner:
+            # Удаляем команду и отправляем видео/гифку с текстом как caption
+            await event.delete()
+            await self.client.send_file(
+                event.chat_id,
+                banner,
+                caption=text,
+                parse_mode="html",
+            )
         else:
             await event.edit(text, parse_mode="html")
 
