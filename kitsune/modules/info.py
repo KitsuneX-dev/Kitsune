@@ -144,8 +144,10 @@ class InfoModule(KitsuneModule):
             return ""
 
     def _render_info(self, me) -> str:
-        from hikkatl.utils import get_display_name
-        name = get_display_name(me) if hasattr(me, "first_name") else str(me)
+        if hasattr(me, "first_name"):
+            name = " ".join(filter(None, [me.first_name, getattr(me, "last_name", None)]))
+        else:
+            name = str(me)
         me_link = f'<b><a href="tg://user?id={me.id}">{_esc(name)}</a></b>'
 
         version  = self._get_version()
