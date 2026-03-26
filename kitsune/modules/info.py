@@ -118,40 +118,26 @@ class InfoModule(KitsuneModule):
         except Exception:
             return "?.?.?"
 
-    def _get_build(self) -> str:
-        try:
-            import git
-            repo = git.Repo(search_parent_directories=True)
-            return f'<a href="https://github.com/commit/{repo.head.commit.hexsha}">{repo.head.commit.hexsha[:7]}</a>'
-        except Exception:
-            return ""
-
-    def _get_branch(self) -> str:
-        try:
-            from ..version import branch
-            return branch
-        except Exception:
-            try:
-                import git
-                repo = git.Repo(search_parent_directories=True)
-                return repo.active_branch.name
-            except Exception:
-                return "unknown"
-
-    def _get_upd(self) -> str:
-        # Только локальное сравнение, без git fetch (он блокирует event loop)
+    def _get_git_info(self) -> tuple:
+        """Открываем repo ОДИН раз и возвращаем (build, branch, upd)."""
         try:
             import git
             from ..version import branch as vbranch
-            repo = git.Repo(search_parent_directories=True)
-            local = repo.head.commit.hexsha
+            repo   = git.Repo(search_parent_directories=True)
+            hexsha = repo.head.commit.hexsha
+            build  = f'<a href="https://github.com/KitsuneX-dev/Kitsune/commit/{hexsha}">{hexsha[:7]}</a>'
+            try:
+                branch = repo.active_branch.name
+            except Exception:
+                branch = vbranch
             try:
                 remote = repo.commit(f"origin/{vbranch}").hexsha
+                upd = self.strings("update_required") if hexsha != remote else self.strings("up-to-date")
             except Exception:
-                return ""
-            return self.strings("update_required") if local != remote else self.strings("up-to-date")
+                upd = ""
+            return build, branch, upd
         except Exception:
-            return ""
+            return "", "unknown", ""
 
     def _render_info(self, me) -> str:
         if hasattr(me, "first_name"):
@@ -160,15 +146,13 @@ class InfoModule(KitsuneModule):
             name = str(me)
         me_link = f'<b><a href="tg://user?id={me.id}">{_esc(name)}</a></b>'
 
-        version  = self._get_version()
-        build    = self._get_build()
-        prefix   = self.db.get("kitsune.core", "prefix", getattr(getattr(self.client, "_kitsune_dispatcher", None), "_prefix", "."))
+        version        = self._get_version()
+        build, branch, upd = getattr(self, '_cached_git_info', None) or self._get_git_info()
+        prefix   = self.db.get("kitsune.dispatcher", "prefix", ".")
         platform = self._get_platform()
         uptime   = self._fmt_uptime()
         cpu      = self._get_cpu_usage()
         ram      = self._get_ram_usage()
-        branch   = self._get_branch()
-        upd      = self._get_upd()
 
         custom_msg = self.config["custom_message"]
 
@@ -210,7 +194,14 @@ class InfoModule(KitsuneModule):
     @command("info", required=OWNER)
     async def info_cmd(self, event) -> None:
         """.info — показать информацию о UserBot."""
-        me     = await self.client.get_me()
+        import asyncio as _asyncio
+        loop = _asyncio.get_event_loop()
+        # get_me() и git.Repo (блокирующий) запускаем параллельно
+        me, git_info = await _asyncio.gather(
+            self.client.get_me(),
+            loop.run_in_executor(None, self._get_git_info),
+        )
+        self._cached_git_info = git_info  # кэшируем чтобы _render_info не считал повторно
         text   = self._render_info(me)
         banner = self.config["banner_url"]
 
