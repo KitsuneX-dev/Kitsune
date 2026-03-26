@@ -215,14 +215,23 @@ class InfoModule(KitsuneModule):
             markup = [[mark]] if mark else []
             await inline.form(text, event.message, markup)
         elif banner:
-            # Удаляем команду и отправляем видео/гифку с текстом как caption
-            await event.delete()
-            await self.client.send_file(
-                event.chat_id,
-                banner,
-                caption=text,
-                parse_mode="html",
-            )
+            # Скачиваем баннер и редактируем сообщение (заменяем на медиа + caption)
+            try:
+                import aiohttp, io
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(banner) as resp:
+                        data = await resp.read()
+                        fname = banner.split("/")[-1] or "banner.mp4"
+                        file_obj = io.BytesIO(data)
+                        file_obj.name = fname
+                await event.edit(
+                    text,
+                    file=file_obj,
+                    parse_mode="html",
+                )
+            except Exception:
+                # Если скачать не удалось — просто текст
+                await event.edit(text, parse_mode="html")
         else:
             await event.edit(text, parse_mode="html")
 
