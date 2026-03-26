@@ -368,27 +368,10 @@ class ConfigModule(KitsuneModule):
             await event.message.edit(self.strings("no_inline"), parse_mode="html")
             return
 
-        args  = self.get_args(event).strip()
-        loader = getattr(self.client, "_kitsune_loader", None)
+        args   = self.get_args(event).strip()
 
-        if args and loader:
-            mod = loader.modules.get(args)
-            if mod and isinstance(getattr(mod, "config", None), ModuleConfig):
-                is_builtin = getattr(mod, "_builtin", False)
-
-                class _FakeCall:
-                    inline_message_id = None
-                    chat_id = None
-                    message_id = None
-                    async def answer(self, *a, **kw): pass
-                    async def _edit(self, *a, **kw): pass
-
-                await inline.form("⚙️", event.message, [])
-                # Показываем сразу параметры модуля
-                # Нужен реальный call — открываем через choose_category
-                await self._screen_choose_category(event.message)
-                return
-
+        # Редактируем сообщение-команду сразу, чтобы не удалялось
+        await event.message.edit("⚙️ <b>Загрузка...</b>", parse_mode="html")
         await self._screen_choose_category(event.message)
 
     @command("fconfig")
