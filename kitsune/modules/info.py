@@ -3,7 +3,10 @@
 
 from __future__ import annotations
 
+import logging
 import time
+
+logger = logging.getLogger(__name__)
 
 from ..core.loader import KitsuneModule, command, ModuleConfig, ConfigValue
 from ..core.security import OWNER
@@ -205,32 +208,26 @@ class InfoModule(KitsuneModule):
     @command("info", required=OWNER)
     async def info_cmd(self, event) -> None:
         """.info — показать информацию о UserBot."""
-        inline = getattr(self.client, "_kitsune_inline", None)
         me     = await self.client.get_me()
         text   = self._render_info(me)
-        mark   = self._get_mark()
         banner = self.config["banner_url"]
 
-        if inline and inline._bot:
-            markup = [[mark]] if mark else []
-            await inline.form(text, event.message, markup)
-        elif banner:
-            # Скачиваем баннер и редактируем сообщение (заменяем на медиа + caption)
+        if banner:
             try:
                 import aiohttp, io
                 async with aiohttp.ClientSession() as session:
                     async with session.get(banner) as resp:
                         data = await resp.read()
-                        fname = banner.split("/")[-1] or "banner.mp4"
-                        file_obj = io.BytesIO(data)
-                        file_obj.name = fname
+                fname = banner.split("/")[-1] or "banner.mp4"
+                file_obj = io.BytesIO(data)
+                file_obj.name = fname
                 await event.edit(
                     text,
                     file=file_obj,
                     parse_mode="html",
                 )
             except Exception:
-                # Если скачать не удалось — просто текст
+                logger.exception("info_cmd: failed to load banner, falling back to text")
                 await event.edit(text, parse_mode="html")
         else:
             await event.edit(text, parse_mode="html")
