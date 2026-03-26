@@ -1,25 +1,32 @@
 # meta developer: @Mikasu32
-# Kitsune — конфигуратор модулей (вдохновлён Hikka)
+# Kitsune — конфигуратор модулей (портирован с Hikka)
 
 from __future__ import annotations
 
+import ast
 import logging
+import typing
 
-from ..core.loader import KitsuneModule, command, watcher, ModuleConfig
+from ..core.loader import KitsuneModule, command, ModuleConfig
 
 logger = logging.getLogger(__name__)
 
-_DB_PREFIX  = "kitsune.config"
-_AWAIT_KEY  = "awaiting_input"
-ROW_SIZE    = 2
+ROW_SIZE = 3
+NUM_ROWS = 5
+
+_DB_PREFIX = "kitsune.config"
+
+
+def _esc(s: str) -> str:
+    return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
 def _fmt_value(value) -> str:
-    """Красиво форматирует значение для HTML-вывода."""
+    """Форматирует значение для HTML."""
     if value is None or value == "":
-        return "<code>—</code>"
+        return "<code>None</code>"
     if isinstance(value, bool):
-        return "✅ <code>True</code>" if value else "❌ <code>False</code>"
+        return "<code>True</code>" if value else "<code>False</code>"
     if isinstance(value, list):
         if not value:
             return "<code>[]</code>"
@@ -28,8 +35,8 @@ def _fmt_value(value) -> str:
     return f"<code>{_esc(str(value))}</code>"
 
 
-def _esc(s: str) -> str:
-    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+def _chunks(lst: list, n: int) -> list:
+    return [lst[i:i + n] for i in range(0, len(lst), n)]
 
 
 class ConfigModule(KitsuneModule):
@@ -38,352 +45,365 @@ class ConfigModule(KitsuneModule):
     name        = "Config"
     description = "Интерактивная настройка параметров модулей"
     author      = "@Mikasu32"
-    version     = "2.0-kitsune"
+    version     = "3.0-kitsune"
 
     strings_ru = {
-        "no_inline":   "❌ <b>Inline-менеджер недоступен.</b>\nНастрой бота через <code>.setbot</code>",
-        "no_mods":     "⚙️ <b>Нет модулей с настройками.</b>",
-        "choose_mod":  "⚙️ <b>Конфигуратор</b>\n\nВыбери модуль для настройки:",
-        "mod_cfg": (
-            "⚙️ <b>{mod}</b>\n\n"
-            "{rows}\n"
-            "Выбери параметр для изменения:"
+        # Категория
+        "choose_core":    "⚙️ <b>Выбери категорию</b>",
+        "builtin":        "🛰 Встроенные",
+        "external":       "🛸 Внешние",
+        # Список модулей
+        "configure":      "⚙️ <b>Выбери модуль для настройки</b>",
+        # Параметры модуля
+        "configuring_mod": (
+            "⚙️ <b>Выбери параметр для модуля</b> <code>{}</code>\n\n"
+            "<b>Текущие настройки:</b>\n\n{}"
         ),
-        "param_cfg": (
-            "⚙️ <b>{mod}</b> › <code>{key}</code>\n\n"
-            "📄 <i>{doc}</i>\n\n"
-            "🔹 По умолчанию: {default}\n"
-            "🔸 Текущее:      {current}\n\n"
-            "<i>Отправь новое значение следующим сообщением или выбери действие ниже.</i>"
+        # Управление параметром
+        "configuring_option": (
+            "⚙️ <b>Управление параметром</b> <code>{}</code> <b>модуля</b> <code>{}</code>\n"
+            "<i>ℹ️ {}</i>\n\n"
+            "<b>Стандартное:</b> {}\n\n"
+            "<b>Текущее:</b> {}\n\n"
+            "{}"
         ),
-        "set_done":    "✅ <b>{mod}</b> › <code>{key}</code> = {val}",
-        "reset_done":  "🔄 <b>{mod}</b> › <code>{key}</code> сброшен до {val}",
-        "cancelled":   "✖️ Ввод отменён.",
-        "no_mod":      "❌ Модуль не найден.",
-        "no_option":   "❌ Параметр не найден.",
-        "fconfig_ok":  "✅ <code>{key}</code> = {val}",
-        "fconfig_args":"❌ Использование: <code>.fconfig &lt;модуль&gt; &lt;параметр&gt; &lt;значение&gt;</code>",
-        "row":         "▫️ <code>{key}</code>: {val}\n",
+        "typehint":       "🕵️ <b>Должно быть {}</b>",
+        # Кнопки
+        "enter_value_btn":   "✍️ Ввести значение",
+        "enter_value_desc":  "✍️ Введи новое значение этого параметра",
+        "set_default_btn":   "♻️ Значение по умолчанию",
+        "back_btn":          "👈 Назад",
+        "close_btn":         "🔻 Закрыть",
+        # Результат
+        "option_saved": (
+            "⚙️ <b>Параметр</b> <code>{}</code> <b>модуля</b> <code>{}</code>"
+            "<b> сохранён!</b>\n<b>Текущее: {}</b>"
+        ),
+        "option_reset": (
+            "⚙️ <b>Параметр</b> <code>{}</code> <b>модуля</b> <code>{}</code>"
+            "<b> сброшен!</b>\n<b>Текущее: {}</b>"
+        ),
+        # Ошибки
+        "no_inline": "❌ <b>Inline-менеджер недоступен.</b>\nНастрой бота через <code>.setbot</code>",
+        "no_mods":   "⚙️ <b>Нет модулей с настройками.</b>",
+        "no_mod":    "❌ Модуль не найден.",
+        "no_option": "❌ Параметр не найден.",
+        "fconfig_args": "❌ Использование: <code>.fconfig &lt;модуль&gt; &lt;параметр&gt; &lt;значение&gt;</code>",
+        "fconfig_ok":   "✅ <code>{key}</code> = {val}",
     }
 
-    # ─── Вспомогательные методы ────────────────────────────────────────────
+    # ─── Helpers ──────────────────────────────────────────────────────────
 
     def _inline(self):
         return getattr(self.client, "_kitsune_inline", None)
 
-    def _mods(self) -> dict:
+    def _mods(self, builtin: bool | None = None) -> dict:
         loader = getattr(self.client, "_kitsune_loader", None)
         if not loader:
             return {}
-        return {
-            name: mod for name, mod in loader.modules.items()
-            if isinstance(getattr(mod, "config", None), ModuleConfig)
-        }
+        result = {}
+        for name, mod in loader.modules.items():
+            if not isinstance(getattr(mod, "config", None), ModuleConfig):
+                continue
+            is_builtin = getattr(mod, "_builtin", False)
+            if builtin is None:
+                result[name] = mod
+            elif builtin and is_builtin:
+                result[name] = mod
+            elif not builtin and not is_builtin:
+                result[name] = mod
+        return result
 
-    def _mod_display(self, mod) -> str:
-        return _esc(mod.name or "")
+    def _get_value(self, mod_name: str, key: str) -> str:
+        loader = getattr(self.client, "_kitsune_loader", None)
+        if not loader:
+            return "<code>—</code>"
+        mod = loader.modules.get(mod_name)
+        if not mod or key not in mod.config:
+            return "<code>—</code>"
+        return _fmt_value(mod.config[key])
 
     def _rows_text(self, mod) -> str:
         lines = ""
         for k in mod.config.keys():
-            lines += self.strings("row").format(
-                key=_esc(k),
-                val=_fmt_value(mod.config[k]),
-            )
+            lines += f"▫️ <code>{_esc(k)}</code>: <b>{_fmt_value(mod.config[k])}</b>\n"
         return lines or "—"
 
-    def _get_awaiting(self):
-        return self.db.get(_DB_PREFIX, _AWAIT_KEY)
-
-    def _set_awaiting(self, state: dict | None):
-        self.db.set_sync(_DB_PREFIX, _AWAIT_KEY, state)
-
-    async def _save_config(self, mod_name: str, mod: KitsuneModule) -> None:
+    async def _save_config(self, mod_name: str, mod) -> None:
         values = {k: mod.config[k] for k in mod.config.keys()}
         await self.db.set(f"{_DB_PREFIX}.{mod_name}", "values", values)
 
-    # ─── Экраны ────────────────────────────────────────────────────────────
+    # ─── Экраны ───────────────────────────────────────────────────────────
 
-    async def _screen_mod_list(self, inline, target, mods=None):
-        mods = mods or self._mods()
+    async def _screen_choose_category(self, target):
+        inline = self._inline()
+        markup = [
+            [
+                {"text": self.strings("builtin"),  "callback": self._cb_global_config, "args": (True,)},
+                {"text": self.strings("external"), "callback": self._cb_global_config, "args": (False,)},
+            ],
+            [{"text": self.strings("close_btn"), "callback": self._cb_close}],
+        ]
+        if hasattr(target, "answer"):
+            await inline.edit(target, self.strings("choose_core"), markup)
+        else:
+            await inline.form(self.strings("choose_core"), target, markup)
+
+    async def _screen_mod_list(self, call, builtin: bool, page: int = 0):
+        inline = self._inline()
+        mods   = self._mods(builtin)
+
         if not mods:
-            if hasattr(target, "answer"):
-                await target.answer(self.strings("no_mods"), show_alert=True)
-            else:
-                await inline.form(self.strings("no_mods"), target, [
-                    [{"text": "✖️ Закрыть", "callback": self._cb_close}]
-                ])
+            await call.answer(self.strings("no_mods"), show_alert=True)
             return
 
-        buttons = []
-        row = []
-        for name, mod in sorted(mods.items()):
-            row.append({
-                "text": f"⚙️ {self._mod_display(mod) or name}",
-                "callback": self._cb_mod,
-                "args": (name,),
-            })
-            if len(row) == ROW_SIZE:
-                buttons.append(row)
-                row = []
-        if row:
-            buttons.append(row)
-        buttons.append([{"text": "✖️ Закрыть", "callback": self._cb_close}])
+        names = sorted(mods.keys())
+        page_names = names[page * NUM_ROWS * ROW_SIZE: (page + 1) * NUM_ROWS * ROW_SIZE]
 
-        if hasattr(target, "inline_message_id") or hasattr(target, "_edit"):
-            await inline.edit(target, self.strings("choose_mod"), buttons)
-        else:
-            await inline.form(self.strings("choose_mod"), target, buttons)
+        btns = [
+            {"text": n, "callback": self._cb_configure, "args": (n, builtin)}
+            for n in page_names
+        ]
+        kb = _chunks(btns, ROW_SIZE)
 
-    async def _screen_mod(self, call, mod_name: str):
+        # Пагинация
+        total_pages = -(-len(names) // (NUM_ROWS * ROW_SIZE))  # ceil
+        if total_pages > 1:
+            nav = []
+            if page > 0:
+                nav.append({"text": "◀️", "callback": self._cb_global_config, "args": (builtin, page - 1)})
+            nav.append({"text": f"{page + 1}/{total_pages}", "callback": self._cb_global_config, "args": (builtin, page)})
+            if page < total_pages - 1:
+                nav.append({"text": "▶️", "callback": self._cb_global_config, "args": (builtin, page + 1)})
+            kb.append(nav)
+
+        kb.append([
+            {"text": self.strings("back_btn"),  "callback": self._cb_choose_category},
+            {"text": self.strings("close_btn"), "callback": self._cb_close},
+        ])
+
+        await inline.edit(call, self.strings("configure"), kb)
+
+    async def _screen_mod(self, call, mod_name: str, builtin: bool):
         inline = self._inline()
-        mods   = self._mods()
-        mod    = mods.get(mod_name)
+        loader = getattr(self.client, "_kitsune_loader", None)
+        if not loader:
+            return
+        mod = loader.modules.get(mod_name)
         if not mod:
             await call.answer(self.strings("no_mod"), show_alert=True)
             return
 
-        text = self.strings("mod_cfg").format(
-            mod=self._mod_display(mod),
-            rows=self._rows_text(mod),
+        text = self.strings("configuring_mod").format(
+            _esc(mod_name),
+            self._rows_text(mod),
         )
 
-        buttons = []
-        row = []
-        for k in mod.config.keys():
-            row.append({
-                "text": f"✏️ {_esc(k)}",
-                "callback": self._cb_param,
-                "args": (mod_name, k),
-            })
-            if len(row) == ROW_SIZE:
-                buttons.append(row)
-                row = []
-        if row:
-            buttons.append(row)
-
-        buttons.append([
-            {"text": "◀️ Назад",    "callback": self._cb_back_list},
-            {"text": "✖️ Закрыть", "callback": self._cb_close},
+        btns = [
+            {"text": k, "callback": self._cb_configure_option, "args": (mod_name, k, builtin)}
+            for k in mod.config.keys()
+        ]
+        kb = _chunks(btns, 2)
+        kb.append([
+            {"text": self.strings("back_btn"),  "callback": self._cb_global_config, "args": (builtin,)},
+            {"text": self.strings("close_btn"), "callback": self._cb_close},
         ])
 
-        await inline.edit(call, text, buttons)
+        await inline.edit(call, text, kb)
 
-    async def _screen_param(self, call, mod_name: str, key: str, *, cancel_row=False):
+    async def _screen_option(self, call, mod_name: str, key: str, builtin: bool):
         inline = self._inline()
-        mods   = self._mods()
-        mod    = mods.get(mod_name)
+        loader = getattr(self.client, "_kitsune_loader", None)
+        if not loader:
+            return
+        mod = loader.modules.get(mod_name)
         if not mod or key not in mod.config:
             await call.answer(self.strings("no_option"), show_alert=True)
             return
 
-        text = self.strings("param_cfg").format(
-            mod     = self._mod_display(mod),
-            key     = _esc(key),
-            doc     = _esc(mod.config.get_doc(key) or "Нет описания"),
-            default = _fmt_value(mod.config.get_default(key)),
-            current = _fmt_value(mod.config[key]),
+        doc     = _esc(mod.config.get_doc(key) or "Нет описания")
+        default = _fmt_value(mod.config.get_default(key))
+        current = _fmt_value(mod.config[key])
+
+        # Подсказка типа для списков
+        default_val = mod.config.get_default(key)
+        if isinstance(default_val, list):
+            typehint = self.strings("typehint").format(
+                "списком значений (ровно 2 шт.), разделённых «,»\n- Пустым значением"
+            )
+        else:
+            typehint = ""
+
+        text = self.strings("configuring_option").format(
+            _esc(key), _esc(mod_name), doc, default, current, typehint
         )
 
-        # Запоминаем ожидание ввода
-        self._set_awaiting({
-            "mod":    mod_name,
-            "key":    key,
-            "chat_id": getattr(call, "chat_id", None),
-            "msg_id":  getattr(call, "message_id", None),
-        })
-
-        buttons = [
+        kb = [
             [{
-                "text":     "🔄 Сбросить до дефолта",
-                "callback": self._cb_reset,
-                "args":     (mod_name, key),
+                "text":    self.strings("enter_value_btn"),
+                "input":   self.strings("enter_value_desc"),
+                "handler": self._inline_set_config,
+                "args":    (mod_name, key, builtin),
+            }],
+            [{
+                "text":     self.strings("set_default_btn"),
+                "callback": self._cb_reset_default,
+                "args":     (mod_name, key, builtin),
             }],
             [
-                {"text": "◀️ Назад",    "callback": self._cb_mod,   "args": (mod_name,)},
-                {"text": "✖️ Закрыть", "callback": self._cb_close},
+                {"text": self.strings("back_btn"),  "callback": self._cb_configure, "args": (mod_name, builtin)},
+                {"text": self.strings("close_btn"), "callback": self._cb_close},
             ],
         ]
 
-        await inline.edit(call, text, buttons)
+        await inline.edit(call, text, kb)
 
-    # ─── Callbacks ─────────────────────────────────────────────────────────
+    # ─── Inline-обработчики ввода ──────────────────────────────────────────
 
-    async def _cb_mod(self, call, mod_name: str):
-        self._set_awaiting(None)
-        await self._screen_mod(call, mod_name)
+    async def _inline_set_config(
+        self, call, query: str, mod_name: str, key: str, builtin: bool
+    ):
+        loader = getattr(self.client, "_kitsune_loader", None)
+        if not loader:
+            return
+        mod = loader.modules.get(mod_name)
+        if not mod or key not in mod.config:
+            return
 
-    async def _cb_param(self, call, mod_name: str, key: str):
-        await self._screen_param(call, mod_name, key)
+        # Автоконвертация типа
+        default_val = mod.config.get_default(key)
+        new_val = query
+        if isinstance(default_val, bool):
+            new_val = query.lower() in ("1", "true", "yes", "да")
+        elif isinstance(default_val, int):
+            try:
+                new_val = int(query)
+            except ValueError:
+                pass
+        elif isinstance(default_val, float):
+            try:
+                new_val = float(query)
+            except ValueError:
+                pass
+        elif isinstance(default_val, list):
+            try:
+                parsed = ast.literal_eval(query)
+                new_val = list(parsed) if isinstance(parsed, (list, tuple, set)) else [parsed]
+            except Exception:
+                # Разбиваем по запятой если не питон-литерал
+                new_val = [x.strip() for x in query.split(",") if x.strip()]
+                if not new_val:
+                    new_val = [query]
 
-    async def _cb_reset(self, call, mod_name: str, key: str):
+        mod.config[key] = new_val
+        await self._save_config(mod_name, mod)
+
         inline = self._inline()
-        mods   = self._mods()
-        mod    = mods.get(mod_name)
+        await inline.edit(
+            call,
+            self.strings("option_saved").format(
+                _esc(key), _esc(mod_name), _fmt_value(new_val)
+            ),
+            [
+                [
+                    {"text": self.strings("back_btn"),  "callback": self._cb_configure, "args": (mod_name, builtin)},
+                    {"text": self.strings("close_btn"), "callback": self._cb_close},
+                ]
+            ],
+        )
+
+    # ─── Callbacks ────────────────────────────────────────────────────────
+
+    async def _cb_choose_category(self, call):
+        await self._screen_choose_category(call)
+
+    async def _cb_global_config(self, call, builtin: bool, page: int = 0):
+        await self._screen_mod_list(call, builtin, page)
+
+    async def _cb_configure(self, call, mod_name: str, builtin: bool):
+        await self._screen_mod(call, mod_name, builtin)
+
+    async def _cb_configure_option(self, call, mod_name: str, key: str, builtin: bool):
+        await self._screen_option(call, mod_name, key, builtin)
+
+    async def _cb_reset_default(self, call, mod_name: str, key: str, builtin: bool):
+        loader = getattr(self.client, "_kitsune_loader", None)
+        if not loader:
+            return
+        mod = loader.modules.get(mod_name)
         if not mod or key not in mod.config:
             await call.answer(self.strings("no_option"), show_alert=True)
             return
 
         mod.config[key] = mod.config.get_default(key)
         await self._save_config(mod_name, mod)
-        self._set_awaiting(None)
 
-        await call.answer(
-            self.strings("reset_done").format(
-                mod=self._mod_display(mod),
-                key=key,
-                val=str(mod.config[key]),
+        inline = self._inline()
+        await inline.edit(
+            call,
+            self.strings("option_reset").format(
+                _esc(key), _esc(mod_name), _fmt_value(mod.config[key])
             ),
-            show_alert=True,
+            [
+                [
+                    {"text": self.strings("back_btn"),  "callback": self._cb_configure, "args": (mod_name, builtin)},
+                    {"text": self.strings("close_btn"), "callback": self._cb_close},
+                ]
+            ],
         )
-        await self._screen_mod(call, mod_name)
-
-    async def _cb_back_list(self, call):
-        self._set_awaiting(None)
-        await self._screen_mod_list(self._inline(), call)
 
     async def _cb_close(self, call):
-        self._set_awaiting(None)
         try:
-            await inline_safe_close(call)
+            await call._edit("✖️")
         except Exception:
             pass
 
-    # ─── Watcher — перехватывает ввод нового значения ──────────────────────
-
-    @watcher()
-    async def config_watcher(self, event) -> None:
-        """Обрабатывает ввод нового значения конфига после нажатия кнопки параметра."""
-        try:
-            state = self._get_awaiting()
-            if not state:
-                return
-
-            message = event.message
-            if not message or not message.text:
-                return
-
-            # Только от владельца, в нужном чате
-            me = await self.client.get_me()
-            if message.sender_id != me.id:
-                return
-
-            # Пропускаем команды с префиксом
-            dispatcher = getattr(self.client, "_kitsune_dispatcher", None)
-            prefix = dispatcher._prefix if dispatcher else "."
-            if message.text.startswith(prefix):
-                return
-
-            mod_name = state.get("mod")
-            key      = state.get("key")
-
-            mods = self._mods()
-            mod  = mods.get(mod_name)
-            if not mod or key not in mod.config:
-                self._set_awaiting(None)
-                return
-
-            # Устанавливаем значение
-            new_val = message.text.strip()
-
-            # Попытка автоконвертации типа
-            old_val = mod.config.get_default(key)
-            if isinstance(old_val, bool):
-                new_val = new_val.lower() in ("1", "true", "yes", "да")
-            elif isinstance(old_val, int):
-                try:
-                    new_val = int(new_val)
-                except ValueError:
-                    pass
-            elif isinstance(old_val, float):
-                try:
-                    new_val = float(new_val)
-                except ValueError:
-                    pass
-            elif isinstance(old_val, list):
-                import ast
-                try:
-                    parsed = ast.literal_eval(new_val)
-                    if isinstance(parsed, (list, tuple, set)):
-                        new_val = list(parsed)
-                    else:
-                        new_val = [parsed]
-                except Exception:
-                    new_val = [new_val]
-
-            mod.config[key] = new_val
-            await self._save_config(mod_name, mod)
-            self._set_awaiting(None)
-
-            await message.delete()
-            await message.respond(
-                self.strings("set_done").format(
-                    mod=self._mod_display(mod),
-                    key=_esc(key),
-                    val=_fmt_value(new_val),
-                ),
-                parse_mode="html",
-            )
-
-        except Exception:
-            logger.exception("config_watcher error")
-
-    # ─── Команды ───────────────────────────────────────────────────────────
+    # ─── Команды ──────────────────────────────────────────────────────────
 
     @command("config")
     async def config_cmd(self, event) -> None:
-        """.config [модуль] — интерактивная настройка модулей."""
+        """.config — интерактивная настройка модулей."""
         inline = self._inline()
         if not inline or not inline._bot:
             await event.message.edit(self.strings("no_inline"), parse_mode="html")
             return
 
         args  = self.get_args(event).strip()
-        mods  = self._mods()
+        loader = getattr(self.client, "_kitsune_loader", None)
 
-        if args:
-            # Прямой переход к модулю
-            mod = mods.get(args) or mods.get(args.lower())
-            if not mod:
-                # Ищем по отображаемому имени
-                for n, m in mods.items():
-                    if (m.name or n).lower() == args.lower():
-                        mod = m
-                        args = n
-                        break
+        if args and loader:
+            mod = loader.modules.get(args)
+            if mod and isinstance(getattr(mod, "config", None), ModuleConfig):
+                is_builtin = getattr(mod, "_builtin", False)
 
-            if mod:
-                await inline.form("⚙️", event.message, [])
-                # Эмулируем call для _screen_mod
                 class _FakeCall:
-                    def __init__(self, msg):
-                        self.inline_message_id = None
-                        self._msg = msg
-                    async def answer(self, text="", show_alert=False):
-                        pass
-                    async def _edit(self, text, **kw):
-                        pass
-                # Открываем список с прямым переходом
-                await self._screen_mod_list(inline, event.message, {args: mod})
+                    inline_message_id = None
+                    chat_id = None
+                    message_id = None
+                    async def answer(self, *a, **kw): pass
+                    async def _edit(self, *a, **kw): pass
+
+                await inline.form("⚙️", event.message, [])
+                # Показываем сразу параметры модуля
+                # Нужен реальный call — открываем через choose_category
+                await self._screen_choose_category(event.message)
                 return
 
-        if not mods:
-            await event.message.edit(self.strings("no_mods"), parse_mode="html")
-            return
-
-        await self._screen_mod_list(inline, event.message, mods)
+        await self._screen_choose_category(event.message)
 
     @command("fconfig")
     async def fconfig_cmd(self, event) -> None:
-        """.fconfig <модуль> <параметр> <значение> — быстрая установка значения без UI."""
+        """.fconfig <модуль> <параметр> <значение> — быстрая установка без UI."""
         args = self.get_args(event).split(maxsplit=2)
         if len(args) < 3:
             await event.message.edit(self.strings("fconfig_args"), parse_mode="html")
             return
 
         mod_name, key, raw_val = args
-        mods = self._mods()
-        mod  = mods.get(mod_name)
+        loader = getattr(self.client, "_kitsune_loader", None)
+        if not loader:
+            return
+        mod = loader.modules.get(mod_name)
         if not mod:
             await event.message.edit(self.strings("no_mod"), parse_mode="html")
             return
@@ -391,17 +411,16 @@ class ConfigModule(KitsuneModule):
             await event.message.edit(self.strings("no_option"), parse_mode="html")
             return
 
-        # Автоконвертация
-        old_val = mod.config.get_default(key)
+        default_val = mod.config.get_default(key)
         new_val = raw_val
-        if isinstance(old_val, bool):
+        if isinstance(default_val, bool):
             new_val = raw_val.lower() in ("1", "true", "yes", "да")
-        elif isinstance(old_val, int):
+        elif isinstance(default_val, int):
             try:
                 new_val = int(raw_val)
             except ValueError:
                 pass
-        elif isinstance(old_val, float):
+        elif isinstance(default_val, float):
             try:
                 new_val = float(raw_val)
             except ValueError:
@@ -409,15 +428,7 @@ class ConfigModule(KitsuneModule):
 
         mod.config[key] = new_val
         await self._save_config(mod_name, mod)
-
         await event.message.edit(
             self.strings("fconfig_ok").format(key=_esc(key), val=_fmt_value(new_val)),
             parse_mode="html",
         )
-
-
-async def inline_safe_close(call):
-    try:
-        await call._edit("✖️")
-    except Exception:
-        pass

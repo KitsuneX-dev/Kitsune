@@ -1,43 +1,71 @@
+# meta developer: @Mikasu32
+# Kitsune — HikkaInfo-style info module
+
 from __future__ import annotations
 
 import time
 
 from ..core.loader import KitsuneModule, command, ModuleConfig, ConfigValue
 from ..core.security import OWNER
-from ..utils import auto_delete
 
 _DB_OWNER = "kitsune.info"
 
+
+def _esc(s: str) -> str:
+    return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
 class InfoModule(KitsuneModule):
-    name        = "info"
-    description = "Информация об аккаунте и UserBot"
-    author      = "Yushi"
+    """Информация об аккаунте и UserBot."""
+
+    name        = "KitsuneInfo"
+    description = "Информация о UserBot с кастомизацией"
+    author      = "@Mikasu32"
+    _builtin    = True
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.config = ModuleConfig(
-            ConfigValue("custom_text",  default="🦊 <b>Kitsune Userbot</b>", doc="Текст заголовка в .info"),
-            ConfigValue("show_uid",     default=True,  doc="Показывать ID аккаунта"),
-            ConfigValue("show_version", default=True,  doc="Показывать версию"),
-            ConfigValue("show_uptime",  default=True,  doc="Показывать аптайм"),
-            ConfigValue("show_prefix",  default=True,  doc="Показывать префикс"),
-            ConfigValue("show_branch",  default=False, doc="Показывать ветку git"),
+            ConfigValue(
+                "custom_message",
+                default=None,
+                doc=(
+                    "Кастомный текст сообщения в info. "
+                    "Может содержать ключевые слова {me}, {version}, {build}, "
+                    "{prefix}, {platform}, {upd}, {uptime}, {cpu_usage}, "
+                    "{ram_usage}, {branch}"
+                ),
+            ),
+            ConfigValue(
+                "custom_button",
+                default=None,
+                doc=(
+                    "Кастомная кнопка в сообщении в info. "
+                    "Оставь пустым, чтобы убрать кнопку"
+                ),
+            ),
+            ConfigValue(
+                "banner_url",
+                default="https://github.com/hikariatama/assets/raw/master/hikka_banner.mp4",
+                doc="Ссылка на баннер-картинку",
+            ),
         )
 
     strings_ru = {
-        "info": (
-            "{custom}\n\n"
-            "👤 <b>Аккаунт:</b> {name}\n"
-            "🆔 <b>ID:</b> <code>{uid}</code>\n"
-            "💠 <b>Версия:</b> <code>{version}</code>\n"
-            "⏱ <b>Аптайм:</b> <code>{uptime}</code>\n"
-            "⌨️ <b>Префикс:</b> <code>{prefix}</code>\n"
-            "🌿 <b>Ветка:</b> <code>{branch}</code>"
-        ),
-        "no_custom":    "🦊 <b>Kitsune Userbot</b>",
-        "set_done":     "✅ Инфо-сообщение обновлено.",
-        "set_no_args":  "❌ Укажи текст: <code>.setinfo Привет, я Kitsune!</code>",
-        "reset_done":   "✅ Инфо-сообщение сброшено.",
+        "owner":      "Владелец",
+        "version":    "Версия",
+        "branch":     "Ветка",
+        "prefix":     "Префикс",
+        "uptime":     "Аптайм",
+        "cpu_usage":  "CPU|RAM|",
+        "ram_usage":  "RAM",
+        "platform":   "Хост",
+        "up-to-date": "",
+        "update_required": "⬆️ Доступно обновление",
+        "send_info":  "Отправить инфо",
+        "description": "Информация о Kitsune UserBot",
+        "setinfo_no_args": "❌ Укажи текст: <code>.setinfo текст</code>",
+        "setinfo_success": "✅ Info-сообщение обновлено.",
     }
 
     def _fmt_uptime(self) -> str:
@@ -52,41 +80,150 @@ class InfoModule(KitsuneModule):
         parts.append(f"{minutes}м")
         return " ".join(parts)
 
+    def _get_platform(self) -> str:
+        import platform as pf
+        system = pf.system()
+        if system == "Linux":
+            return "🐧 Linux"
+        if system == "Windows":
+            return "🪟 Windows"
+        if system == "Darwin":
+            return "🍎 macOS"
+        return f"❓ {system}"
+
+    def _get_cpu_usage(self) -> str:
+        try:
+            import psutil
+            return f"{psutil.cpu_percent(interval=None):.1f}%"
+        except Exception:
+            return "—"
+
+    def _get_ram_usage(self) -> str:
+        try:
+            import psutil
+            mem = psutil.virtual_memory()
+            return f"{mem.used // 1024 // 1024} MB"
+        except Exception:
+            return "—"
+
+    def _get_version(self) -> str:
+        try:
+            from ..version import __version_str__
+            return __version_str__
+        except Exception:
+            return "?.?.?"
+
+    def _get_build(self) -> str:
+        try:
+            import git
+            repo = git.Repo(search_parent_directories=True)
+            return f'<a href="https://github.com/commit/{repo.head.commit.hexsha}">{repo.head.commit.hexsha[:7]}</a>'
+        except Exception:
+            return ""
+
+    def _get_branch(self) -> str:
+        try:
+            from ..version import branch
+            return branch
+        except Exception:
+            try:
+                import git
+                repo = git.Repo(search_parent_directories=True)
+                return repo.active_branch.name
+            except Exception:
+                return "unknown"
+
+    def _get_upd(self) -> str:
+        try:
+            import git
+            from ..version import branch as vbranch
+            repo = git.Repo(search_parent_directories=True)
+            diff = repo.git.log([f"HEAD..origin/{vbranch}", "--oneline"])
+            return self.strings("update_required") if diff else self.strings("up-to-date")
+        except Exception:
+            return ""
+
+    def _render_info(self, me) -> str:
+        from hikkatl.utils import get_display_name
+        name = get_display_name(me) if hasattr(me, "first_name") else str(me)
+        me_link = f'<b><a href="tg://user?id={me.id}">{_esc(name)}</a></b>'
+
+        version  = self._get_version()
+        build    = self._get_build()
+        prefix   = self.db.get("kitsune.dispatcher", "prefix", ".")
+        platform = self._get_platform()
+        uptime   = self._fmt_uptime()
+        cpu      = self._get_cpu_usage()
+        ram      = self._get_ram_usage()
+        branch   = self._get_branch()
+        upd      = self._get_upd()
+
+        custom_msg = self.config["custom_message"]
+
+        if custom_msg:
+            return custom_msg.format(
+                me=me_link,
+                version=version,
+                build=build,
+                prefix=f"«<code>{_esc(prefix)}</code>»",
+                platform=platform,
+                upd=upd,
+                uptime=uptime,
+                cpu_usage=cpu,
+                ram_usage=ram,
+                branch=branch,
+            )
+
+        # Дефолтное сообщение в стиле Hikka
+        return (
+            f"🦊 <b>Kitsune</b>\n\n"
+            f"<b>😎 {self.strings('owner')}:</b> {me_link}\n\n"
+            f"<b>💫 {self.strings('version')}:</b> <i>{version}</i> {build}\n"
+            f"<b>🌳 {self.strings('branch')}:</b> <code>{branch}</code>\n"
+            f"{upd}\n\n"
+            f"<b>⌨️ {self.strings('prefix')}:</b> «<code>{_esc(prefix)}</code>»\n"
+            f"<b>⌛️ {self.strings('uptime')}:</b> {uptime}\n\n"
+            f"<b>⚡️ CPU|RAM|</b> {cpu} | {ram}\n"
+            f"<b>💼 {self.strings('platform')}:</b> {platform}"
+        )
+
+    def _get_mark(self) -> dict | None:
+        btn = self.config["custom_button"]
+        if not btn:
+            return None
+        if isinstance(btn, (list, tuple)) and len(btn) == 2:
+            return {"text": btn[0], "url": btn[1]}
+        return None
+
     @command("info", required=OWNER)
     async def info_cmd(self, event) -> None:
-        from ..version import __version_str__, branch
-        me = await self.client.get_me()
-        name = me.first_name + (f" {me.last_name}" if me.last_name else "")
-        dispatcher = getattr(self.client, "_kitsune_dispatcher", None)
-        prefix = dispatcher._prefix if dispatcher else "."
-        custom = self.config["custom_text"] if self.config else self.db.get(_DB_OWNER, "custom_text", None) or self.strings("no_custom")
+        """.info — показать информацию о UserBot."""
+        inline = getattr(self.client, "_kitsune_inline", None)
+        me     = await self.client.get_me()
+        text   = self._render_info(me)
+        mark   = self._get_mark()
+        banner = self.config["banner_url"]
 
-        text = self.strings("info").format(
-            custom=custom,
-            name=name,
-            uid=me.id,
-            version=__version_str__,
-            uptime=self._fmt_uptime(),
-            prefix=prefix,
-            branch=branch,
-        )
-        msg = await event.reply(text, parse_mode="html")
-        await auto_delete(msg, delay=30)
+        if inline and inline._bot:
+            markup = [[mark]] if mark else []
+            await inline.form(text, event.message, markup)
+        else:
+            await event.reply(text, parse_mode="html")
 
     @command("setinfo", required=OWNER)
     async def setinfo_cmd(self, event) -> None:
+        """.setinfo <текст> — установить кастомный текст info."""
         args = self.get_args(event)
         if not args:
-            await event.reply(self.strings("set_no_args"), parse_mode="html")
+            await event.reply(self.strings("setinfo_no_args"), parse_mode="html")
             return
-        await self.db.set(_DB_OWNER, "custom_text", args)
-        if self.config:
-            self.config["custom_text"] = args
-        m = await event.reply(self.strings("set_done"), parse_mode="html")
-        await auto_delete(m)
+        self.config["custom_message"] = args
+        await self.db.set(_DB_OWNER, "custom_message", args)
+        m = await event.reply(self.strings("setinfo_success"), parse_mode="html")
 
     @command("resetinfo", required=OWNER)
     async def resetinfo_cmd(self, event) -> None:
-        await self.db.delete(_DB_OWNER, "custom_text")
-        m = await event.reply(self.strings("reset_done"), parse_mode="html")
-        await auto_delete(m)
+        """.resetinfo — сбросить кастомный текст info."""
+        self.config["custom_message"] = None
+        await self.db.set(_DB_OWNER, "custom_message", None)
+        m = await event.reply("✅ Info-сообщение сброшено.", parse_mode="html")

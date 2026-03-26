@@ -19,6 +19,8 @@ try:
         InlineQuery,
         InlineQueryResultArticle,
         InputTextMessageContent,
+        Message as AiogramMessage,
+        ForceReply,
     )
     AIOGRAM_AVAILABLE = True
 except ImportError:
@@ -27,6 +29,9 @@ except ImportError:
 from .types import InlineCall
 
 _UNIT_TTL = 60 * 60 * 24
+
+# Ожидающие ввода: {chat_id: {handler, args, kwargs, call, prompt_msg_id}}
+_pending_inputs: dict[int, dict] = {}
 
 
 class InlineManager:
@@ -57,6 +62,7 @@ class InlineManager:
         self._dp.include_router(self._router)
         self._router.callback_query.register(self._on_callback)
         self._router.inline_query.register(self._on_inline_query)
+        self._router.message.register(self._on_message)
         self._started = True
         asyncio.ensure_future(self._dp.start_polling(self._bot, handle_signals=False))
         asyncio.ensure_future(self._cleaner())
@@ -80,8 +86,12 @@ class InlineManager:
             for uid in list(self._units.keys()):
                 if self._units[uid].get("ttl", now + 1) < now:
                     del self._units[uid]
+            # Чистим зависшие pending_inputs старше 5 минут
+            for cid in list(_pending_inputs.keys()):
+                if time.time() - _pending_inputs[cid].get("ts", time.time()) > 300:
+                    del _pending_inputs[cid]
 
-    def generate_markup(self, buttons: list) -> InlineKeyboardMarkup | None:
+    def generate_markup(self, buttons: list) -> "InlineKeyboardMarkup | None":
         if not AIOGRAM_AVAILABLE:
             return None
         keyboard: list[list[InlineKeyboardButton]] = []
@@ -97,6 +107,16 @@ class InlineManager:
                 text = btn.get("text", "?")
                 if url := btn.get("url"):
                     kb_row.append(InlineKeyboardButton(text=text, url=url))
+                elif "input" in btn:
+                    # Кнопка ввода через ForceReply бота
+                    cb_id = str(uuid.uuid4())[:12]
+                    self._callbacks[cb_id] = (
+                        self._handle_input_btn,
+                        (btn,),
+                        self._client.tg_id,
+                        btn.get("disable_security", False),
+                    )
+                    kb_row.append(InlineKeyboardButton(text=text, callback_data=cb_id))
                 elif "callback" in btn:
                     cb_id = str(uuid.uuid4())[:12]
                     self._callbacks[cb_id] = (
@@ -112,6 +132,80 @@ class InlineManager:
                 keyboard.append(kb_row)
         return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
+    async def _handle_input_btn(self, call: "InlineCall", btn: dict) -> None:
+        """Обработка нажатия кнопки с input — бот шлёт ForceReply в чат."""
+        if not AIOGRAM_AVAILABLE or not self._bot:
+            return
+        input_prompt = btn.get("input", "✍️ Введи новое значение этого параметра")
+        handler      = btn.get("handler")
+        args         = btn.get("args", ())
+        kwargs       = btn.get("kwargs", {})
+
+        chat_id = call.chat_id
+        if not chat_id:
+            return
+
+        try:
+            sent = await self._bot.send_message(
+                chat_id=chat_id,
+                text=(
+                    f"✍️ <b>Введи новое значение этого параметра</b>\n"
+                    f"⚠️ <i>Не удаляйте ID!</i> 🦊\n\n"
+                    f"<i>{input_prompt}</i>"
+                ),
+                reply_markup=ForceReply(selective=True),
+                parse_mode="HTML",
+            )
+        except Exception:
+            logger.exception("_handle_input_btn: failed to send force reply")
+            return
+
+        _pending_inputs[chat_id] = {
+            "handler":       handler,
+            "args":          args,
+            "kwargs":        kwargs,
+            "call":          call,
+            "prompt_msg_id": sent.message_id,
+            "ts":            time.time(),
+        }
+        await call.answer()
+
+    async def _on_message(self, message: "AiogramMessage") -> None:
+        """Перехватываем ответ пользователя на ForceReply."""
+        if not message.chat:
+            return
+        chat_id = message.chat.id
+        pending = _pending_inputs.get(chat_id)
+        if not pending:
+            return
+
+        reply = message.reply_to_message
+        if not reply or reply.message_id != pending["prompt_msg_id"]:
+            return
+
+        del _pending_inputs[chat_id]
+
+        handler = pending["handler"]
+        args    = pending["args"]
+        kwargs  = pending["kwargs"]
+        call    = pending["call"]
+        query   = (message.text or "").strip()
+
+        try:
+            await self._bot.delete_message(chat_id, pending["prompt_msg_id"])
+        except Exception:
+            pass
+        try:
+            await message.delete()
+        except Exception:
+            pass
+
+        if handler:
+            try:
+                await handler(call, query, *args, **kwargs)
+            except Exception:
+                logger.exception("_on_message: handler error")
+
     async def form(
         self,
         text: str,
@@ -123,7 +217,6 @@ class InlineManager:
             "text":    text,
             "buttons": reply_markup or [],
             "ttl":     time.time() + _UNIT_TTL,
-            "future":  asyncio.Event(),
         }
         result = await self._invoke_unit(unit_id, message)
         return result
