@@ -66,6 +66,7 @@ class InlineManager:
         self._started = True
         asyncio.ensure_future(self._dp.start_polling(self._bot, handle_signals=False))
         asyncio.ensure_future(self._cleaner())
+        await asyncio.sleep(1)  # Даём polling время инициализироваться
         try:
             me = await self._bot.get_me()
             self._bot_username = me.username
@@ -271,6 +272,8 @@ class InlineManager:
             logger.error("InlineManager: cannot resolve entity", exc_info=True)
             return None
 
+        await asyncio.sleep(0.3)
+
         for attempt in range(3):
             try:
                 results = await self._client.inline_query(self._bot_username, unit_id)
@@ -278,6 +281,10 @@ class InlineManager:
                     await asyncio.sleep(0.3)
                     continue
                 sent = await results[0].click(entity, reply_to=reply_to)
+                try:
+                    await message.delete()
+                except Exception:
+                    pass
                 return sent
             except Exception as exc:
                 err = str(exc)
