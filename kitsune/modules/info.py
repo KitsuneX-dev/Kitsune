@@ -134,12 +134,17 @@ class InfoModule(KitsuneModule):
                 return "unknown"
 
     def _get_upd(self) -> str:
+        # Только локальное сравнение, без git fetch (он блокирует event loop)
         try:
             import git
             from ..version import branch as vbranch
             repo = git.Repo(search_parent_directories=True)
-            diff = repo.git.log([f"HEAD..origin/{vbranch}", "--oneline"])
-            return self.strings("update_required") if diff else self.strings("up-to-date")
+            local = repo.head.commit.hexsha
+            try:
+                remote = repo.commit(f"origin/{vbranch}").hexsha
+            except Exception:
+                return ""
+            return self.strings("update_required") if local != remote else self.strings("up-to-date")
         except Exception:
             return ""
 
@@ -210,7 +215,7 @@ class InfoModule(KitsuneModule):
             markup = [[mark]] if mark else []
             await inline.form(text, event.message, markup)
         else:
-            await event.reply(text, parse_mode="html")
+            await event.edit(text, parse_mode="html")
 
     @command("setinfo", required=OWNER)
     async def setinfo_cmd(self, event) -> None:
