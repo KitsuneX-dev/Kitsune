@@ -28,6 +28,8 @@ class InfoModule(KitsuneModule):
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
+        self._banner_cache: bytes | None = None
+        self._banner_cache_url: str | None = None
         self.config = ModuleConfig(
             ConfigValue(
                 "custom_message",
@@ -160,7 +162,7 @@ class InfoModule(KitsuneModule):
 
         version  = self._get_version()
         build    = self._get_build()
-        prefix   = self.db.get("kitsune.dispatcher", "prefix", ".")
+        prefix   = self.db.get("kitsune.core", "prefix", getattr(getattr(self.client, "_kitsune_dispatcher", None), "_prefix", "."))
         platform = self._get_platform()
         uptime   = self._fmt_uptime()
         cpu      = self._get_cpu_usage()
@@ -215,11 +217,14 @@ class InfoModule(KitsuneModule):
         if banner:
             try:
                 import aiohttp, io
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(banner) as resp:
-                        data = await resp.read()
+                # Используем кэш если URL не изменился
+                if self._banner_cache is None or self._banner_cache_url != banner:
+                    async with aiohttp.ClientSession() as session:
+                        async with session.get(banner) as resp:
+                            self._banner_cache = await resp.read()
+                            self._banner_cache_url = banner
                 fname = banner.split("/")[-1] or "banner.mp4"
-                file_obj = io.BytesIO(data)
+                file_obj = io.BytesIO(self._banner_cache)
                 file_obj.name = fname
                 await event.edit(
                     text,
