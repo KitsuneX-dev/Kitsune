@@ -234,7 +234,7 @@ class InlineManager:
     async def _on_inline_query(self, query: "InlineQuery") -> None:
         q = query.query.strip()
 
-        # Проверяем — это input switch_query? (начало совпадает с _switch_query какой-то кнопки)
+        # input-кнопки: switch_query механизм как у Hikka
         for unit in self._units.values():
             for row in unit.get("buttons", []):
                 row_ = row if isinstance(row, list) else [row]
@@ -242,15 +242,20 @@ class InlineManager:
                     if not isinstance(btn, dict):
                         continue
                     sq = btn.get("_switch_query", "")
-                    if sq and q.startswith(sq):
-                        # Показываем подсказку — пользователь вводит значение
-                        input_hint = btn.get("input", "✍️ Введи значение")
+                    if not sq or not q.startswith(sq):
+                        continue
+                    input_hint = btn.get("input", "✍️ Введи значение")
+                    parts = q.split(maxsplit=1)
+                    has_value = len(parts) > 1 and parts[1].strip()
+                    if has_value:
+                        # Пользователь уже ввёл значение — показываем результат который можно нажать
+                        value_preview = parts[1].strip()
                         await query.answer(
                             results=[
                                 InlineQueryResultArticle(
                                     id=str(uuid.uuid4()),
-                                    title=input_hint,
-                                    description="Нажми чтобы передать значение",
+                                    title=f"✅ Применить: {value_preview[:50]}",
+                                    description="Нажми чтобы сохранить значение",
                                     input_message_content=InputTextMessageContent(
                                         message_text="🔄 <b>Передаю значение...</b>",
                                         parse_mode="HTML",
@@ -260,7 +265,24 @@ class InlineManager:
                             ],
                             cache_time=0,
                         )
-                        return
+                    else:
+                        # Пустой ввод — подсказка что нужно ввести
+                        await query.answer(
+                            results=[
+                                InlineQueryResultArticle(
+                                    id=str(uuid.uuid4()),
+                                    title=input_hint,
+                                    description="Введи значение после пробела и нажми на результат",
+                                    input_message_content=InputTextMessageContent(
+                                        message_text="🔄 <b>Передаю значение...</b>",
+                                        parse_mode="HTML",
+                                        disable_web_page_preview=True,
+                                    ),
+                                )
+                            ],
+                            cache_time=0,
+                        )
+                    return
 
         # Обычный unit (form)
         unit = self._units.get(q)
