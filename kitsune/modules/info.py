@@ -1,15 +1,15 @@
 # meta developer: @Mikasu32
-# Kitsune — HikkaInfo-style info module
+# Kitsune — Info module (based on Hikka HikkaInfo approach)
 
 from __future__ import annotations
 
 import logging
 import time
 
-logger = logging.getLogger(__name__)
-
 from ..core.loader import KitsuneModule, command, ModuleConfig, ConfigValue
 from ..core.security import OWNER
+
+logger = logging.getLogger(__name__)
 
 _DB_OWNER = "kitsune.info"
 
@@ -28,8 +28,6 @@ class InfoModule(KitsuneModule):
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        self._banner_cache: bytes | None = None
-        self._banner_cache_url: str | None = None
         self.config = ModuleConfig(
             ConfigValue(
                 "custom_message",
@@ -44,64 +42,46 @@ class InfoModule(KitsuneModule):
             ConfigValue(
                 "custom_button",
                 default=None,
-                doc=(
-                    "Кастомная кнопка в сообщении в info. "
-                    "Оставь пустым, чтобы убрать кнопку"
-                ),
+                doc="Кастомная кнопка в сообщении info [текст, url]. Оставь пустым чтобы убрать.",
             ),
             ConfigValue(
                 "banner_url",
-                default=None,
-                doc="Ссылка на баннер-картинку",
+                default="https://github.com/hikariatama/assets/raw/master/hikka_banner.mp4",
+                doc="Ссылка на баннер (видео/гифка). Передаётся напрямую боту — сервер не скачивает.",
             ),
         )
 
-    async def on_load(self) -> None:
-        """Миграция: сбрасываем старый hikka banner_url если он там застрял."""
-        current = self.config.get("banner_url") if hasattr(self.config, "get") else self.config["banner_url"]
-        if current and "hikariatama" in str(current):
-            self.config["banner_url"] = None
-            logger.info("info: reset stale hikka banner_url")
-
     strings_ru = {
-        "owner":      "Владелец",
-        "version":    "Версия",
-        "branch":     "Ветка",
-        "prefix":     "Префикс",
-        "uptime":     "Аптайм",
-        "cpu_usage":  "CPU|RAM|",
-        "ram_usage":  "RAM",
-        "platform":   "Хост",
-        "up-to-date": "",
+        "owner":           "Владелец",
+        "version":         "Версия",
+        "branch":          "Ветка",
+        "prefix":          "Префикс",
+        "uptime":          "Аптайм",
+        "platform":        "Хост",
+        "up-to-date":      "",
         "update_required": "⬆️ Доступно обновление",
-        "send_info":  "Отправить инфо",
-        "description": "Информация о Kitsune UserBot",
         "setinfo_no_args": "❌ Укажи текст: <code>.setinfo текст</code>",
         "setinfo_success": "✅ Info-сообщение обновлено.",
     }
 
+    # ── helpers ───────────────────────────────────────────────────────────
+
     def _fmt_uptime(self) -> str:
         stored = self.db.get("kitsune.ping", "start_time", None)
-        secs = int(time.time() - (float(stored) if stored else time.time()))
-        days, rem = divmod(secs, 86400)
-        hours, rem = divmod(rem, 3600)
-        minutes, _ = divmod(rem, 60)
+        secs   = int(time.time() - (float(stored) if stored else time.time()))
+        days, rem   = divmod(secs, 86400)
+        hours, rem  = divmod(rem, 3600)
+        minutes, _  = divmod(rem, 60)
         parts = []
-        if days:    parts.append(f"{days}д")
-        if hours:   parts.append(f"{hours}ч")
+        if days:   parts.append(f"{days}д")
+        if hours:  parts.append(f"{hours}ч")
         parts.append(f"{minutes}м")
         return " ".join(parts)
 
     def _get_platform(self) -> str:
         import platform as pf
-        system = pf.system()
-        if system == "Linux":
-            return "🐧 Linux"
-        if system == "Windows":
-            return "🪟 Windows"
-        if system == "Darwin":
-            return "🍎 macOS"
-        return f"❓ {system}"
+        s = pf.system()
+        return {"Linux": "🐧 Linux", "Windows": "🪟 Windows", "Darwin": "🍎 macOS"}.get(s, f"❓ {s}")
 
     def _get_cpu_usage(self) -> str:
         try:
@@ -113,8 +93,7 @@ class InfoModule(KitsuneModule):
     def _get_ram_usage(self) -> str:
         try:
             import psutil
-            mem = psutil.virtual_memory()
-            return f"{mem.used // 1024 // 1024} MB"
+            return f"{psutil.virtual_memory().used // 1024 // 1024} MB"
         except Exception:
             return "—"
 
@@ -126,7 +105,7 @@ class InfoModule(KitsuneModule):
             return "?.?.?"
 
     def _get_git_info(self) -> tuple:
-        """Открываем repo ОДИН раз и возвращаем (build, branch, upd)."""
+        """Открываем repo ОДИН раз -> (build, branch, upd)."""
         try:
             import git
             from ..version import branch as vbranch
@@ -139,45 +118,36 @@ class InfoModule(KitsuneModule):
                 branch = vbranch
             try:
                 remote = repo.commit(f"origin/{vbranch}").hexsha
-                upd = self.strings("update_required") if hexsha != remote else self.strings("up-to-date")
+                upd    = self.strings("update_required") if hexsha != remote else self.strings("up-to-date")
             except Exception:
                 upd = ""
             return build, branch, upd
         except Exception:
             return "", "unknown", ""
 
-    def _render_info(self, me) -> str:
+    def _render_info(self, me, git_info: tuple | None = None) -> str:
         if hasattr(me, "first_name"):
             name = " ".join(filter(None, [me.first_name, getattr(me, "last_name", None)]))
         else:
             name = str(me)
         me_link = f'<b><a href="tg://user?id={me.id}">{_esc(name)}</a></b>'
 
-        version        = self._get_version()
-        build, branch, upd = getattr(self, '_cached_git_info', None) or self._get_git_info()
+        build, branch, upd = git_info if git_info else self._get_git_info()
+        version  = self._get_version()
         prefix   = self.db.get("kitsune.dispatcher", "prefix", ".")
         platform = self._get_platform()
         uptime   = self._fmt_uptime()
         cpu      = self._get_cpu_usage()
         ram      = self._get_ram_usage()
 
-        custom_msg = self.config["custom_message"]
-
-        if custom_msg:
-            return custom_msg.format(
-                me=me_link,
-                version=version,
-                build=build,
+        if self.config["custom_message"]:
+            return self.config["custom_message"].format(
+                me=me_link, version=version, build=build,
                 prefix=f"«<code>{_esc(prefix)}</code>»",
-                platform=platform,
-                upd=upd,
-                uptime=uptime,
-                cpu_usage=cpu,
-                ram_usage=ram,
-                branch=branch,
+                platform=platform, upd=upd, uptime=uptime,
+                cpu_usage=cpu, ram_usage=ram, branch=branch,
             )
 
-        # Дефолтное сообщение в стиле Hikka
         return (
             f"🦊 <b>Kitsune</b>\n\n"
             f"<b>😎 {self.strings('owner')}:</b> {me_link}\n\n"
@@ -186,7 +156,7 @@ class InfoModule(KitsuneModule):
             f"{upd}\n\n"
             f"<b>⌨️ {self.strings('prefix')}:</b> «<code>{_esc(prefix)}</code>»\n"
             f"<b>⌛️ {self.strings('uptime')}:</b> {uptime}\n\n"
-            f"<b>⚡️ CPU|RAM|</b> {cpu} | {ram}\n"
+            f"<b>⚡️ CPU | RAM:</b> {cpu} | {ram}\n"
             f"<b>💼 {self.strings('platform')}:</b> {platform}"
         )
 
@@ -198,56 +168,36 @@ class InfoModule(KitsuneModule):
             return {"text": btn[0], "url": btn[1]}
         return None
 
+    # ── commands ──────────────────────────────────────────────────────────
+
     @command("info", required=OWNER)
     async def info_cmd(self, event) -> None:
         """.info — показать информацию о UserBot."""
         import asyncio as _asyncio
         loop = _asyncio.get_event_loop()
-        # get_me() и git.Repo (блокирующий) запускаем параллельно
+
+        # get_me() и git (блокирующий) — параллельно
         me, git_info = await _asyncio.gather(
             self.client.get_me(),
             loop.run_in_executor(None, self._get_git_info),
         )
-        self._cached_git_info = git_info  # кэшируем чтобы _render_info не считал повторно
-        text   = self._render_info(me)
+
+        text   = self._render_info(me, git_info)
+        mark   = self._get_mark()
         banner = self.config["banner_url"]
+        inline = getattr(self.client, "_kitsune_inline", None)
 
-        if banner:
-            import io, os
-            file_obj = None
-
-            # Кэш — не скачиваем повторно если URL не изменился
-            if self._banner_cache and self._banner_cache_url == banner:
-                fname    = banner.split("/")[-1] or "banner.mp4"
-                file_obj = io.BytesIO(self._banner_cache)
-                file_obj.name = fname
-            elif os.path.isfile(banner):
-                # Локальный файл — читаем напрямую
-                with open(banner, "rb") as f:
-                    self._banner_cache     = f.read()
-                    self._banner_cache_url = banner
-                file_obj      = io.BytesIO(self._banner_cache)
-                file_obj.name = os.path.basename(banner)
-            else:
-                # URL — скачиваем через Telethon (он уже имеет сетевое соединение)
-                try:
-                    import urllib.request
-                    data = await loop.run_in_executor(
-                        None,
-                        lambda: urllib.request.urlopen(banner, timeout=10).read()
-                    )
-                    self._banner_cache     = data
-                    self._banner_cache_url = banner
-                    fname    = banner.split("/")[-1] or "banner.mp4"
-                    file_obj = io.BytesIO(data)
-                    file_obj.name = fname
-                except Exception:
-                    logger.warning("info_cmd: cannot download banner from %s — showing text only", banner)
-
-            if file_obj:
-                await event.edit(text, file=file_obj, parse_mode="html")
-            else:
-                await event.edit(text, parse_mode="html")
+        if inline and inline._bot:
+            markup = [[mark]] if mark else []
+            # Передаём banner как video= — бот отдаёт URL напрямую через InlineQueryResultVideo
+            # Сервер ничего не скачивает
+            kwargs = {"video": banner} if banner else {}
+            await inline.form(
+                text=text,
+                message=event.message,
+                reply_markup=markup,
+                **kwargs,
+            )
         else:
             await event.edit(text, parse_mode="html")
 
@@ -260,11 +210,11 @@ class InfoModule(KitsuneModule):
             return
         self.config["custom_message"] = args
         await self.db.set(_DB_OWNER, "custom_message", args)
-        m = await event.reply(self.strings("setinfo_success"), parse_mode="html")
+        await event.reply(self.strings("setinfo_success"), parse_mode="html")
 
     @command("resetinfo", required=OWNER)
     async def resetinfo_cmd(self, event) -> None:
         """.resetinfo — сбросить кастомный текст info."""
         self.config["custom_message"] = None
         await self.db.set(_DB_OWNER, "custom_message", None)
-        m = await event.reply("✅ Info-сообщение сброшено.", parse_mode="html")
+        await event.reply("✅ Info-сообщение сброшено.", parse_mode="html")
