@@ -51,10 +51,17 @@ class InfoModule(KitsuneModule):
             ),
             ConfigValue(
                 "banner_url",
-                default="https://github.com/hikariatama/assets/raw/master/hikka_banner.mp4",
+                default=None,
                 doc="Ссылка на баннер-картинку",
             ),
         )
+
+    async def on_load(self) -> None:
+        """Миграция: сбрасываем старый hikka banner_url если он там застрял."""
+        current = self.config.get("banner_url") if hasattr(self.config, "get") else self.config["banner_url"]
+        if current and "hikariatama" in str(current):
+            self.config["banner_url"] = None
+            logger.info("info: reset stale hikka banner_url")
 
     strings_ru = {
         "owner":      "Владелец",
@@ -206,24 +213,40 @@ class InfoModule(KitsuneModule):
         banner = self.config["banner_url"]
 
         if banner:
-            try:
-                import aiohttp, io
-                # Используем кэш если URL не изменился
-                if self._banner_cache is None or self._banner_cache_url != banner:
-                    async with aiohttp.ClientSession() as session:
-                        async with session.get(banner) as resp:
-                            self._banner_cache = await resp.read()
-                            self._banner_cache_url = banner
-                fname = banner.split("/")[-1] or "banner.mp4"
+            import io, os
+            file_obj = None
+
+            # Кэш — не скачиваем повторно если URL не изменился
+            if self._banner_cache and self._banner_cache_url == banner:
+                fname    = banner.split("/")[-1] or "banner.mp4"
                 file_obj = io.BytesIO(self._banner_cache)
                 file_obj.name = fname
-                await event.edit(
-                    text,
-                    file=file_obj,
-                    parse_mode="html",
-                )
-            except Exception:
-                logger.exception("info_cmd: failed to load banner, falling back to text")
+            elif os.path.isfile(banner):
+                # Локальный файл — читаем напрямую
+                with open(banner, "rb") as f:
+                    self._banner_cache     = f.read()
+                    self._banner_cache_url = banner
+                file_obj      = io.BytesIO(self._banner_cache)
+                file_obj.name = os.path.basename(banner)
+            else:
+                # URL — скачиваем через Telethon (он уже имеет сетевое соединение)
+                try:
+                    import urllib.request
+                    data = await loop.run_in_executor(
+                        None,
+                        lambda: urllib.request.urlopen(banner, timeout=10).read()
+                    )
+                    self._banner_cache     = data
+                    self._banner_cache_url = banner
+                    fname    = banner.split("/")[-1] or "banner.mp4"
+                    file_obj = io.BytesIO(data)
+                    file_obj.name = fname
+                except Exception:
+                    logger.warning("info_cmd: cannot download banner from %s — showing text only", banner)
+
+            if file_obj:
+                await event.edit(text, file=file_obj, parse_mode="html")
+            else:
                 await event.edit(text, parse_mode="html")
         else:
             await event.edit(text, parse_mode="html")
