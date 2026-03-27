@@ -280,7 +280,7 @@ class InlineManager:
                             caption=unit["text"],
                             parse_mode="HTML",
                             video_url=unit["video"],
-                            thumb_url="https://img.icons8.com/cotton/452/moon-satellite.png",
+                            thumbnail_url="https://img.icons8.com/cotton/452/moon-satellite.png",
                             mime_type="video/mp4",
                             reply_markup=markup,
                         )
