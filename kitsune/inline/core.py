@@ -19,6 +19,7 @@ try:
         InlineKeyboardMarkup,
         InlineQuery,
         InlineQueryResultArticle,
+        InlineQueryResultVideo,
         InputTextMessageContent,
         Message as AiogramMessage,
     )
@@ -140,12 +141,14 @@ class InlineManager:
         text: str,
         message: typing.Any,
         reply_markup: list | None = None,
+        video: str | None = None,
     ) -> typing.Any:
         unit_id = str(uuid.uuid4())[:16]
         self._units[unit_id] = {
             "text":    text,
             "buttons": reply_markup or [],
             "ttl":     time.time() + _UNIT_TTL,
+            **({"video": video} if video else {}),
         }
         return await self._invoke_unit(unit_id, message)
 
@@ -267,21 +270,39 @@ class InlineManager:
 
         markup = self.generate_markup(unit.get("buttons", []))
         try:
-            await query.answer(
-                results=[
-                    InlineQueryResultArticle(
-                        id=str(uuid.uuid4()),
-                        title="Kitsune",
-                        input_message_content=InputTextMessageContent(
-                            message_text=unit["text"],
+            if "video" in unit:
+                await query.answer(
+                    results=[
+                        InlineQueryResultVideo(
+                            id=str(uuid.uuid4()),
+                            title="Kitsune",
+                            description="Kitsune UserBot",
+                            caption=unit["text"],
                             parse_mode="HTML",
-                            disable_web_page_preview=True,
-                        ),
-                        reply_markup=markup,
-                    )
-                ],
-                cache_time=0,
-            )
+                            video_url=unit["video"],
+                            thumb_url="https://img.icons8.com/cotton/452/moon-satellite.png",
+                            mime_type="video/mp4",
+                            reply_markup=markup,
+                        )
+                    ],
+                    cache_time=0,
+                )
+            else:
+                await query.answer(
+                    results=[
+                        InlineQueryResultArticle(
+                            id=str(uuid.uuid4()),
+                            title="Kitsune",
+                            input_message_content=InputTextMessageContent(
+                                message_text=unit["text"],
+                                parse_mode="HTML",
+                                disable_web_page_preview=True,
+                            ),
+                            reply_markup=markup,
+                        )
+                    ],
+                    cache_time=0,
+                )
         except Exception:
             logger.exception("InlineManager._on_inline_query failed")
 
