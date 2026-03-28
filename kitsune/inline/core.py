@@ -157,12 +157,24 @@ class InlineManager:
         call_or_msg: typing.Any,
         text: str,
         reply_markup: list | None = None,
+        inline_message_id: str | None = None,  # явный override inline_message_id
     ) -> None:
         if not AIOGRAM_AVAILABLE or not self._bot:
             return
         markup = self.generate_markup(reply_markup or [])
+
+        # После generate_markup() кнопки с "input" получили "_switch_query".
+        # Сохраняем их в _units, чтобы _on_inline_query мог их найти по switch-query.
+        effective_iid = inline_message_id or getattr(call_or_msg, "inline_message_id", None)
+        if reply_markup and effective_iid:
+            unit_key = f"iid:{effective_iid}"
+            self._units[unit_key] = {
+                "buttons": reply_markup,
+                "ttl": time.time() + _UNIT_TTL,
+            }
+
         try:
-            iid = getattr(call_or_msg, "inline_message_id", None)
+            iid = inline_message_id or getattr(call_or_msg, "inline_message_id", None)
             if iid:
                 await self._bot.edit_message_text(
                     inline_message_id=iid,
@@ -257,9 +269,19 @@ class InlineManager:
                                     title=f"✅ Применить: {value_preview[:50]}",
                                     description="Нажми чтобы сохранить значение",
                                     input_message_content=InputTextMessageContent(
-                                        message_text="🔄 <b>Передаю значение...</b>",
+                                        message_text="✅",
                                         parse_mode="HTML",
                                         disable_web_page_preview=True,
+                                    ),
+                                    # reply_markup нужен чтобы получить inline_message_id
+                                    # в chosen_inline_result (для удаления temp-сообщения)
+                                    reply_markup=InlineKeyboardMarkup(
+                                        inline_keyboard=[[
+                                            InlineKeyboardButton(
+                                                text="­",          # soft hyphen — невидимый
+                                                callback_data="__noop__",
+                                            )
+                                        ]]
                                     ),
                                 )
                             ],
@@ -352,7 +374,16 @@ class InlineManager:
                     if not handler:
                         return
 
-                    # Создаём InlineCall с inline_message_id из chosen result
+                    # Восстанавливаем inline_message_id ОРИГИНАЛЬНОЙ формы.
+                    # Если юнит был создан через edit() — ключ имеет вид "iid:{original_iid}".
+                    # Именно этот iid нужен handler-у, чтобы отредактировать исходное сообщение,
+                    # а не временное «✅», которое Telegram прислал в chosen_inline_result.
+                    if unit_id.startswith("iid:"):
+                        original_iid = unit_id[4:]
+                    else:
+                        # Юнит из form() — inline_message_id уже хранится в нём
+                        original_iid = unit.get("inline_message_id") or result.inline_message_id or ""
+
                     wrapped = InlineCall(
                         id="chosen",
                         chat_id=0,
@@ -361,7 +392,22 @@ class InlineManager:
                         _answer=self._noop_answer,
                         _edit=None,
                     )
-                    wrapped.inline_message_id = result.inline_message_id or ""
+                    wrapped.inline_message_id = original_iid
+
+                    # Пробуем убрать временное сообщение-посредник («✅»)
+                    # Бот не может удалять inline-сообщения, но может их отредактировать
+                    # в пустой текст, чтобы не мозолило глаза.
+                    temp_iid = result.inline_message_id
+                    if temp_iid and temp_iid != original_iid:
+                        try:
+                            await self._bot.edit_message_text(
+                                inline_message_id=temp_iid,
+                                text="✅",
+                                reply_markup=InlineKeyboardMarkup(inline_keyboard=[]),
+                                parse_mode="HTML",
+                            )
+                        except Exception:
+                            pass  # Не критично — просто оставляем как есть
 
                     try:
                         await handler(wrapped, value, *args, **kwargs)
@@ -376,6 +422,11 @@ class InlineManager:
         pass  # Больше не нужен ForceReply
 
     async def _on_callback(self, call: "CallbackQuery") -> None:
+        # Невидимая кнопка на временном сообщении-посреднике — просто игнорируем
+        if call.data == "__noop__":
+            await call.answer()
+            return
+
         entry = self._callbacks.get(call.data)
         if entry is None:
             await call.answer("⚠️ Устаревшая кнопка.", show_alert=True)
