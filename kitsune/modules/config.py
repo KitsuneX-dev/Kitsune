@@ -243,7 +243,9 @@ class ConfigModule(KitsuneModule):
                 "text":    self.strings("enter_value_btn"),
                 "input":   self.strings("enter_value_desc"),
                 "handler": self._inline_set_config,
-                "args":    (mod_name, key, builtin),
+                # inline_message_id передаём явно, чтобы handler мог отредактировать
+                # именно исходную форму, а не временное сообщение-посредник
+                "args":    (mod_name, key, builtin, getattr(call, "inline_message_id", "")),
             }],
             [{
                 "text":     self.strings("set_default_btn"),
@@ -261,7 +263,8 @@ class ConfigModule(KitsuneModule):
     # ─── Inline-обработчики ввода ──────────────────────────────────────────
 
     async def _inline_set_config(
-        self, call, query: str, mod_name: str, key: str, builtin: bool
+        self, call, query: str, mod_name: str, key: str, builtin: bool,
+        inline_message_id: str = "",
     ):
         loader = getattr(self.client, "_kitsune_loader", None)
         if not loader:
@@ -298,6 +301,9 @@ class ConfigModule(KitsuneModule):
         mod.config[key] = new_val
         await self._save_config(mod_name, mod)
 
+        # Приоритет: явный inline_message_id из args → тот, что на call-объекте
+        iid = inline_message_id or getattr(call, "inline_message_id", "")
+
         inline = self._inline()
         await inline.edit(
             call,
@@ -310,6 +316,7 @@ class ConfigModule(KitsuneModule):
                     {"text": self.strings("close_btn"), "callback": self._cb_close},
                 ]
             ],
+            inline_message_id=iid or None,
         )
 
     # ─── Callbacks ────────────────────────────────────────────────────────
