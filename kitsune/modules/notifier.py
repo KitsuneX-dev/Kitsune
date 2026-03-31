@@ -752,6 +752,7 @@ class NotifierModule(KitsuneModule):
             inline_router = _Router()
             inline_router.callback_query.register(inline._on_callback)
             inline_router.inline_query.register(inline._on_inline_query)
+            inline_router.chosen_inline_result.register(inline._on_chosen_inline)
             self._dp.include_router(inline_router)
 
             self.client._kitsune_inline = inline
