@@ -354,6 +354,7 @@ class InlineManager:
         """Пользователь выбрал inline результат — проверяем input-кнопки."""
         q = result.query.strip()
 
+        logger.warning("_on_chosen_inline: query=%r, units_count=%d", q, len(self._units))
         for unit_id, unit in self._units.copy().items():
             for row in unit.get("buttons", []):
                 row_ = row if isinstance(row, list) else [row]
@@ -361,6 +362,7 @@ class InlineManager:
                     if not isinstance(btn, dict):
                         continue
                     sq = btn.get("_switch_query", "")
+                    logger.warning("  checking unit=%s sq=%r has_input=%s", unit_id[:12], sq, "input" in btn)
                     if not sq or not q.startswith(sq):
                         continue
 
@@ -454,6 +456,10 @@ class InlineManager:
             _edit=call.message.edit_text if call.message else None,
         )
         wrapped.inline_message_id = call.inline_message_id or ""
+        logger.warning("_on_callback: data=%s inline_message_id=%r chat_id=%s msg_id=%s",
+                       call.data, call.inline_message_id,
+                       call.message.chat.id if call.message else None,
+                       call.message.message_id if call.message else None)
 
         try:
             await handler(wrapped, *args, **kwargs)
