@@ -338,18 +338,11 @@ class ConfigModule(KitsuneModule):
                     {"text": self.strings("close_btn"), "callback": self._cb_close},
                 ],
             ]
-            try:
-                await inline.edit(call, text, kb, inline_message_id=iid)
-            except Exception:
-                pass
+            logger.debug("_inline_set_config: editing form iid=%s key=%s val=%r", iid, key, new_val)
+            await inline.edit(call, text, kb, inline_message_id=iid)
         else:
-            # Fallback: просто показываем подтверждение
-            try:
-                await call.answer(
-                    f"✅ {_esc(key)} сохранён!", show_alert=True
-                )
-            except Exception:
-                pass
+            logger.warning("_inline_set_config: iid is empty, cannot update form! inline_message_id arg=%r call.iid=%r",
+                           inline_message_id, getattr(call, "inline_message_id", None))
 
     # ─── Callbacks ────────────────────────────────────────────────────────
 
