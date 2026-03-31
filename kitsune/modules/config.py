@@ -301,23 +301,55 @@ class ConfigModule(KitsuneModule):
         mod.config[key] = new_val
         await self._save_config(mod_name, mod)
 
-        # Приоритет: явный inline_message_id из args → тот, что на call-объекте
+        inline = self._inline()
+
+        # Определяем inline_message_id исходной формы
         iid = inline_message_id or getattr(call, "inline_message_id", "")
 
-        inline = self._inline()
-        await inline.edit(
-            call,
-            self.strings("option_saved").format(
-                _esc(key), _esc(mod_name), _fmt_value(new_val)
-            ),
-            [
+        if iid:
+            # Обновляем исходную форму конфига — показываем актуальные данные параметра
+            doc     = _esc(mod.config.get_doc(key) or "Нет описания")
+            default = _fmt_value(mod.config.get_default(key))
+            current = _fmt_value(mod.config[key])
+            default_val2 = mod.config.get_default(key)
+            if isinstance(default_val2, list):
+                typehint = self.strings("typehint").format(
+                    "списком значений (ровно 2 шт.), разделённых «,»\n- Пустым значением"
+                )
+            else:
+                typehint = ""
+            text = self.strings("configuring_option").format(
+                _esc(key), _esc(mod_name), doc, default, current, typehint
+            )
+            kb = [
+                [{
+                    "text":    self.strings("enter_value_btn"),
+                    "input":   self.strings("enter_value_desc"),
+                    "handler": self._inline_set_config,
+                    "args":    (mod_name, key, builtin, iid),
+                }],
+                [{
+                    "text":     self.strings("set_default_btn"),
+                    "callback": self._cb_reset_default,
+                    "args":     (mod_name, key, builtin),
+                }],
                 [
                     {"text": self.strings("back_btn"),  "callback": self._cb_configure, "args": (mod_name, builtin)},
                     {"text": self.strings("close_btn"), "callback": self._cb_close},
-                ]
-            ],
-            inline_message_id=iid or None,
-        )
+                ],
+            ]
+            try:
+                await inline.edit(call, text, kb, inline_message_id=iid)
+            except Exception:
+                pass
+        else:
+            # Fallback: просто показываем подтверждение
+            try:
+                await call.answer(
+                    f"✅ {_esc(key)} сохранён!", show_alert=True
+                )
+            except Exception:
+                pass
 
     # ─── Callbacks ────────────────────────────────────────────────────────
 
