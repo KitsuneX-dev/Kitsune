@@ -144,13 +144,24 @@ class InlineManager:
         video: str | None = None,
     ) -> typing.Any:
         unit_id = str(uuid.uuid4())[:16]
+        future: asyncio.Future = asyncio.get_event_loop().create_future()
         self._units[unit_id] = {
             "text":    text,
             "buttons": reply_markup or [],
             "ttl":     time.time() + _UNIT_TTL,
+            "future":  future,
+            "inline_message_id": "",
             **({"video": video} if video else {}),
         }
-        return await self._invoke_unit(unit_id, message)
+        sent = await self._invoke_unit(unit_id, message)
+        # Ждём пока _on_chosen_inline запишет inline_message_id формы
+        try:
+            await asyncio.wait_for(asyncio.shield(future), timeout=10)
+        except asyncio.TimeoutError:
+            logger.warning("form: timeout waiting for inline_message_id for unit %s", unit_id)
+        if "future" in self._units.get(unit_id, {}):
+            del self._units[unit_id]["future"]
+        return sent
 
     async def edit(
         self,
@@ -354,6 +365,20 @@ class InlineManager:
         """Пользователь выбрал inline результат — проверяем input-кнопки."""
         q = result.query.strip()
 
+        # Сначала проверяем — это chosen_inline для самой формы (не input-кнопки)?
+        # Hikka-паттерн: сохраняем inline_message_id формы через future
+        for unit_id, unit in self._units.items():
+            if (
+                unit_id == q
+                and "future" in unit
+                and isinstance(unit["future"], asyncio.Future)
+                and not unit["future"].done()
+            ):
+                unit["inline_message_id"] = result.inline_message_id
+                unit["future"].set_result(result.inline_message_id)
+                logger.debug("form: saved inline_message_id=%s for unit %s", result.inline_message_id, unit_id)
+                return
+
         logger.warning("_on_chosen_inline: query=%r, units_count=%d", q, len(self._units))
         for unit_id, unit in self._units.copy().items():
             for row in unit.get("buttons", []):
@@ -383,15 +408,9 @@ class InlineManager:
                     if unit_id.startswith("iid:"):
                         original_iid = unit_id[4:]
                     else:
-                        # Юнит из form() — пробуем взять iid из args кнопки (передаётся явно
-                        # из _screen_option как 4-й аргумент), либо из ранее сохранённого значения.
+                        # Юнит из form() — inline_message_id сохранён через future-механизм
                         original_iid = unit.get("inline_message_id", "")
-                        if not original_iid:
-                            btn_args = btn.get("args", ())
-                            if btn_args and len(btn_args) >= 4 and btn_args[3]:
-                                original_iid = btn_args[3]
-                                # Сохраняем для следующих вызовов
-                                self._units[unit_id]["inline_message_id"] = original_iid
+                        logger.warning("_on_chosen_inline: input handler, unit=%s original_iid=%r", unit_id[:12], original_iid)
 
                     wrapped = InlineCall(
                         id="chosen",
