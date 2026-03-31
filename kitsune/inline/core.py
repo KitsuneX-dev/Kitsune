@@ -19,6 +19,7 @@ try:
         InlineKeyboardMarkup,
         InlineQuery,
         InlineQueryResultArticle,
+        InlineQueryResultGif,
         InlineQueryResultVideo,
         InputTextMessageContent,
         Message as AiogramMessage,
@@ -136,13 +137,33 @@ class InlineManager:
 
     # ── form / edit ───────────────────────────────────────────────────────
 
+    @staticmethod
+    def _classify_media(url: str | None) -> str | None:
+        """Возвращает 'gif' если URL указывает на .mp4/.gif файл, иначе 'video'."""
+        if not url:
+            return None
+        try:
+            import os
+            from urllib.parse import urlparse
+            ext = os.path.splitext(urlparse(url).path)[1].lower()
+            if ext in (".gif", ".mp4"):
+                return "gif"
+        except Exception:
+            pass
+        return "video"
+
     async def form(
         self,
         text: str,
         message: typing.Any,
         reply_markup: list | None = None,
         video: str | None = None,
+        gif: str | None = None,
     ) -> typing.Any:
+        # Hikka-паттерн: если передали video= с .mp4/.gif ссылкой — автоматически gif-режим
+        media_url = gif or video
+        media_type = self._classify_media(media_url)
+
         unit_id = str(uuid.uuid4())[:16]
         future: asyncio.Future = asyncio.get_event_loop().create_future()
         self._units[unit_id] = {
@@ -151,7 +172,7 @@ class InlineManager:
             "ttl":     time.time() + _UNIT_TTL,
             "future":  future,
             "inline_message_id": "",
-            **({"video": video} if video else {}),
+            **({media_type: media_url} if media_url and media_type else {}),
         }
         sent = await self._invoke_unit(unit_id, message)
         # Ждём пока _on_chosen_inline запишет inline_message_id формы
@@ -325,7 +346,22 @@ class InlineManager:
 
         markup = self.generate_markup(unit.get("buttons", []))
         try:
-            if "video" in unit:
+            if "gif" in unit:
+                await query.answer(
+                    results=[
+                        InlineQueryResultGif(
+                            id=str(uuid.uuid4()),
+                            gif_url=unit["gif"],
+                            thumbnail_url="https://img.icons8.com/cotton/452/moon-satellite.png",
+                            title="Kitsune",
+                            caption=unit["text"],
+                            parse_mode="HTML",
+                            reply_markup=markup,
+                        )
+                    ],
+                    cache_time=0,
+                )
+            elif "video" in unit:
                 await query.answer(
                     results=[
                         InlineQueryResultVideo(

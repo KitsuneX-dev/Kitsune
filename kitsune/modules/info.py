@@ -47,7 +47,7 @@ class InfoModule(KitsuneModule):
             ConfigValue(
                 "banner_url",
                 default="https://github.com/hikariatama/assets/raw/master/hikka_banner.mp4",
-                doc="Ссылка на баннер (видео/гифка). Передаётся напрямую боту — сервер не скачивает.",
+                doc="Ссылка на баннер (видео/гифка). Используй прямую ссылку (raw). Для GitHub: замени /blob/ на /raw/ в URL.",
             ),
         )
 
@@ -187,11 +187,18 @@ class InfoModule(KitsuneModule):
         banner = self.config["banner_url"]
         inline = getattr(self.client, "_kitsune_inline", None)
 
+        # Проверяем что ссылка прямая (raw), а не страница GitHub (/blob/)
+        if banner and "/blob/" in banner and "github.com" in banner:
+            banner = banner.replace("/blob/", "/raw/")
+            logger.warning(
+                "info_cmd: banner_url содержит /blob/ — автоматически исправлено на /raw/. "
+                "Обнови ссылку в конфиге на: %s", banner
+            )
+
         if inline and inline._bot:
             markup = [[mark]] if mark else []
-            # Передаём banner как video= — бот отдаёт URL напрямую через InlineQueryResultVideo
-            # Сервер ничего не скачивает
-            kwargs = {"video": banner} if banner else {}
+            # Передаём как gif= — InlineManager сам определит тип по расширению (.mp4/.gif)
+            kwargs = {"gif": banner} if banner else {}
             await inline.form(
                 text=text,
                 message=event.message,
