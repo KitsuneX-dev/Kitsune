@@ -300,49 +300,66 @@ class ConfigModule(KitsuneModule):
 
         mod.config[key] = new_val
         await self._save_config(mod_name, mod)
+        # Принудительно сбрасываем на диск сразу — не ждём debounce (1 сек),
+        # иначе при быстром рестарте бота значение может не успеть записаться.
+        try:
+            await self.db.force_save()
+        except Exception:
+            logger.warning("_inline_set_config: force_save failed, value may be lost on restart")
 
         inline = self._inline()
 
-        # Определяем inline_message_id исходной формы
-        iid = inline_message_id or getattr(call, "inline_message_id", "")
+        # Определяем inline_message_id исходной формы.
+        # Приоритет: явный аргумент → атрибут call (callback-query на inline-сообщении).
+        iid = inline_message_id or getattr(call, "inline_message_id", "") or ""
+
+        # Строим обновлённый экран параметра (одинаково — и для обновления формы, и для fallback)
+        doc      = _esc(mod.config.get_doc(key) or "Нет описания")
+        default  = _fmt_value(mod.config.get_default(key))
+        current  = _fmt_value(mod.config[key])
+        default_val2 = mod.config.get_default(key)
+        typehint = (
+            self.strings("typehint").format(
+                "списком значений (ровно 2 шт.), разделённых «,»\n- Пустым значением"
+            )
+            if isinstance(default_val2, list)
+            else ""
+        )
+        text = self.strings("configuring_option").format(
+            _esc(key), _esc(mod_name), doc, default, current, typehint
+        )
+        kb = [
+            [{
+                "text":    self.strings("enter_value_btn"),
+                "input":   self.strings("enter_value_desc"),
+                "handler": self._inline_set_config,
+                "args":    (mod_name, key, builtin, iid),
+            }],
+            [{
+                "text":     self.strings("set_default_btn"),
+                "callback": self._cb_reset_default,
+                "args":     (mod_name, key, builtin),
+            }],
+            [
+                {"text": self.strings("back_btn"),  "callback": self._cb_configure, "args": (mod_name, builtin)},
+                {"text": self.strings("close_btn"), "callback": self._cb_close},
+            ],
+        ]
 
         if iid:
-            # Обновляем исходную форму конфига — показываем актуальные данные параметра
-            doc     = _esc(mod.config.get_doc(key) or "Нет описания")
-            default = _fmt_value(mod.config.get_default(key))
-            current = _fmt_value(mod.config[key])
-            default_val2 = mod.config.get_default(key)
-            if isinstance(default_val2, list):
-                typehint = self.strings("typehint").format(
-                    "списком значений (ровно 2 шт.), разделённых «,»\n- Пустым значением"
-                )
-            else:
-                typehint = ""
-            text = self.strings("configuring_option").format(
-                _esc(key), _esc(mod_name), doc, default, current, typehint
-            )
-            kb = [
-                [{
-                    "text":    self.strings("enter_value_btn"),
-                    "input":   self.strings("enter_value_desc"),
-                    "handler": self._inline_set_config,
-                    "args":    (mod_name, key, builtin, iid),
-                }],
-                [{
-                    "text":     self.strings("set_default_btn"),
-                    "callback": self._cb_reset_default,
-                    "args":     (mod_name, key, builtin),
-                }],
-                [
-                    {"text": self.strings("back_btn"),  "callback": self._cb_configure, "args": (mod_name, builtin)},
-                    {"text": self.strings("close_btn"), "callback": self._cb_close},
-                ],
-            ]
             logger.debug("_inline_set_config: editing form iid=%s key=%s val=%r", iid, key, new_val)
             await inline.edit(call, text, kb, inline_message_id=iid)
         else:
-            logger.warning("_inline_set_config: iid is empty, cannot update form! inline_message_id arg=%r call.iid=%r",
-                           inline_message_id, getattr(call, "inline_message_id", None))
+            # iid недоступен — данные уже сохранены в БД, пробуем fallback-редактирование
+            logger.warning(
+                "_inline_set_config: iid is empty — data saved, cannot refresh form. "
+                "inline_message_id arg=%r call.iid=%r",
+                inline_message_id, getattr(call, "inline_message_id", None),
+            )
+            try:
+                await inline.edit(call, text, kb)
+            except Exception:
+                pass  # Не критично — данные записаны в БД, форма обновится при следующем .config
 
     # ─── Callbacks ────────────────────────────────────────────────────────
 
@@ -369,6 +386,10 @@ class ConfigModule(KitsuneModule):
 
         mod.config[key] = mod.config.get_default(key)
         await self._save_config(mod_name, mod)
+        try:
+            await self.db.force_save()
+        except Exception:
+            pass
 
         inline = self._inline()
         await inline.edit(
@@ -443,6 +464,10 @@ class ConfigModule(KitsuneModule):
 
         mod.config[key] = new_val
         await self._save_config(mod_name, mod)
+        try:
+            await self.db.force_save()
+        except Exception:
+            pass
         await event.message.edit(
             self.strings("fconfig_ok").format(key=_esc(key), val=_fmt_value(new_val)),
             parse_mode="html",
