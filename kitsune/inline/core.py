@@ -381,8 +381,15 @@ class InlineManager:
                     if unit_id.startswith("iid:"):
                         original_iid = unit_id[4:]
                     else:
-                        # Юнит из form() — inline_message_id уже хранится в нём
-                        original_iid = unit.get("inline_message_id") or result.inline_message_id or ""
+                        # Юнит из form() — пробуем взять iid из args кнопки (передаётся явно
+                        # из _screen_option как 4-й аргумент), либо из ранее сохранённого значения.
+                        original_iid = unit.get("inline_message_id", "")
+                        if not original_iid:
+                            btn_args = btn.get("args", ())
+                            if btn_args and len(btn_args) >= 4 and btn_args[3]:
+                                original_iid = btn_args[3]
+                                # Сохраняем для следующих вызовов
+                                self._units[unit_id]["inline_message_id"] = original_iid
 
                     wrapped = InlineCall(
                         id="chosen",
