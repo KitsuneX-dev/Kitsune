@@ -80,6 +80,10 @@ class InfoModule(KitsuneModule):
 
     def _get_platform(self) -> str:
         import platform as pf
+        import os
+        # Определяем Termux по наличию характерных переменных окружения
+        if os.environ.get("TERMUX_VERSION") or os.path.isdir("/data/data/com.termux"):
+            return "📱 Termux — Android"
         s = pf.system()
         return {"Linux": "🐧 Linux", "Windows": "🪟 Windows", "Darwin": "🍎 macOS"}.get(s, f"❓ {s}")
 
@@ -134,7 +138,8 @@ class InfoModule(KitsuneModule):
 
         build, branch, upd = git_info if git_info else self._get_git_info()
         version  = self._get_version()
-        prefix   = self.db.get("kitsune.dispatcher", "prefix", ".")
+        dispatcher = getattr(self.client, "_kitsune_dispatcher", None)
+        prefix   = dispatcher._prefix if dispatcher else self.db.get("kitsune.core", "prefix", ".")
         platform = self._get_platform()
         uptime   = self._fmt_uptime()
         cpu      = self._get_cpu_usage()
