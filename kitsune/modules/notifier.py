@@ -410,9 +410,15 @@ class NotifierModule(KitsuneModule):
         await self._stop_polling()
 
         try:
+            import ssl as _ssl
+            import aiohttp as _aiohttp
             from aiogram.client.session.aiohttp import AiohttpSession
 
-            session = AiohttpSession(timeout=30)
+            _ssl_ctx = _ssl.create_default_context()
+            _ssl_ctx.check_hostname = False
+            _ssl_ctx.verify_mode = _ssl.CERT_NONE
+            _connector = _aiohttp.TCPConnector(ssl=_ssl_ctx)
+            session = AiohttpSession(timeout=30, connector=_connector)
             self._bot = Bot(
                 token=token,
                 default=DefaultBotProperties(parse_mode=ParseMode.HTML),
@@ -843,12 +849,18 @@ class NotifierModule(KitsuneModule):
         from aiogram import Bot
         from aiogram.client.default import DefaultBotProperties
         from aiogram.enums import ParseMode
+        import ssl as _ssl
+        import aiohttp as _aiohttp
         from aiogram.client.session.aiohttp import AiohttpSession
 
+        _ssl_ctx = _ssl.create_default_context()
+        _ssl_ctx.check_hostname = False
+        _ssl_ctx.verify_mode = _ssl.CERT_NONE
+        _connector = _aiohttp.TCPConnector(ssl=_ssl_ctx)
         return Bot(
             token=str(token),
             default=DefaultBotProperties(parse_mode=ParseMode.HTML),
-            session=AiohttpSession(timeout=30),
+            session=AiohttpSession(timeout=30, connector=_connector),
         )
 
     async def send_restart_report(self, restart_time: str, total_time: str, mod_count: int) -> None:
