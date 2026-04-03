@@ -1,5 +1,3 @@
-# meta developer: @Mikasu32
-# Kitsune — конфигуратор модулей (портирован с Hikka)
 
 from __future__ import annotations
 
@@ -16,10 +14,8 @@ NUM_ROWS = 5
 
 _DB_PREFIX = "kitsune.config"
 
-
 def _esc(s: str) -> str:
     return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-
 
 def _fmt_value(value) -> str:
     """Форматирует значение для HTML."""
@@ -34,10 +30,8 @@ def _fmt_value(value) -> str:
         return f"<code>[</code>\n    {items}\n<code>]</code>"
     return f"<code>{_esc(str(value))}</code>"
 
-
 def _chunks(lst: list, n: int) -> list:
     return [lst[i:i + n] for i in range(0, len(lst), n)]
-
 
 class ConfigModule(KitsuneModule):
     """Интерактивный конфигуратор модулей Kitsune."""
@@ -48,18 +42,14 @@ class ConfigModule(KitsuneModule):
     version     = "3.0-kitsune"
 
     strings_ru = {
-        # Категория
         "choose_core":    "⚙️ <b>Выбери категорию</b>",
         "builtin":        "🛰 Встроенные",
         "external":       "🛸 Внешние",
-        # Список модулей
         "configure":      "⚙️ <b>Выбери модуль для настройки</b>",
-        # Параметры модуля
         "configuring_mod": (
             "⚙️ <b>Выбери параметр для модуля</b> <code>{}</code>\n\n"
             "<b>Текущие настройки:</b>\n\n{}"
         ),
-        # Управление параметром
         "configuring_option": (
             "⚙️ <b>Управление параметром</b> <code>{}</code> <b>модуля</b> <code>{}</code>\n"
             "<i>ℹ️ {}</i>\n\n"
@@ -68,13 +58,11 @@ class ConfigModule(KitsuneModule):
             "{}"
         ),
         "typehint":       "🕵️ <b>Должно быть {}</b>",
-        # Кнопки
         "enter_value_btn":   "✍️ Ввести значение",
         "enter_value_desc":  "✍️ Введи новое значение этого параметра",
         "set_default_btn":   "♻️ Значение по умолчанию",
         "back_btn":          "👈 Назад",
         "close_btn":         "🔻 Закрыть",
-        # Результат
         "option_saved": (
             "⚙️ <b>Параметр</b> <code>{}</code> <b>модуля</b> <code>{}</code>"
             "<b> сохранён!</b>\n<b>Текущее: {}</b>"
@@ -83,7 +71,6 @@ class ConfigModule(KitsuneModule):
             "⚙️ <b>Параметр</b> <code>{}</code> <b>модуля</b> <code>{}</code>"
             "<b> сброшен!</b>\n<b>Текущее: {}</b>"
         ),
-        # Ошибки
         "no_inline": "❌ <b>Inline-менеджер недоступен.</b>\nНастрой бота через <code>.setbot</code>",
         "no_mods":   "⚙️ <b>Нет модулей с настройками.</b>",
         "no_mod":    "❌ Модуль не найден.",
@@ -91,8 +78,6 @@ class ConfigModule(KitsuneModule):
         "fconfig_args": "❌ Использование: <code>.fconfig &lt;модуль&gt; &lt;параметр&gt; &lt;значение&gt;</code>",
         "fconfig_ok":   "✅ <code>{key}</code> = {val}",
     }
-
-    # ─── Helpers ──────────────────────────────────────────────────────────
 
     def _inline(self):
         return getattr(self.client, "_kitsune_inline", None)
@@ -133,8 +118,6 @@ class ConfigModule(KitsuneModule):
         values = {k: mod.config[k] for k in mod.config.keys()}
         await self.db.set(f"{_DB_PREFIX}.{mod_name}", "values", values)
 
-    # ─── Экраны ───────────────────────────────────────────────────────────
-
     async def _screen_choose_category(self, target):
         inline = self._inline()
         markup = [
@@ -166,8 +149,7 @@ class ConfigModule(KitsuneModule):
         ]
         kb = _chunks(btns, ROW_SIZE)
 
-        # Пагинация
-        total_pages = -(-len(names) // (NUM_ROWS * ROW_SIZE))  # ceil
+        total_pages = -(-len(names) // (NUM_ROWS * ROW_SIZE))
         if total_pages > 1:
             nav = []
             if page > 0:
@@ -225,7 +207,6 @@ class ConfigModule(KitsuneModule):
         default = _fmt_value(mod.config.get_default(key))
         current = _fmt_value(mod.config[key])
 
-        # Подсказка типа для списков
         default_val = mod.config.get_default(key)
         if isinstance(default_val, list):
             typehint = self.strings("typehint").format(
@@ -243,8 +224,6 @@ class ConfigModule(KitsuneModule):
                 "text":    self.strings("enter_value_btn"),
                 "input":   self.strings("enter_value_desc"),
                 "handler": self._inline_set_config,
-                # inline_message_id передаём явно, чтобы handler мог отредактировать
-                # именно исходную форму, а не временное сообщение-посредник
                 "args":    (mod_name, key, builtin, getattr(call, "inline_message_id", "")),
             }],
             [{
@@ -260,8 +239,6 @@ class ConfigModule(KitsuneModule):
 
         await inline.edit(call, text, kb)
 
-    # ─── Inline-обработчики ввода ──────────────────────────────────────────
-
     async def _inline_set_config(
         self, call, query: str, mod_name: str, key: str, builtin: bool,
         inline_message_id: str = "",
@@ -273,7 +250,6 @@ class ConfigModule(KitsuneModule):
         if not mod or key not in mod.config:
             return
 
-        # Автоконвертация типа
         default_val = mod.config.get_default(key)
         new_val = query
         if isinstance(default_val, bool):
@@ -293,15 +269,12 @@ class ConfigModule(KitsuneModule):
                 parsed = ast.literal_eval(query)
                 new_val = list(parsed) if isinstance(parsed, (list, tuple, set)) else [parsed]
             except Exception:
-                # Разбиваем по запятой если не питон-литерал
                 new_val = [x.strip() for x in query.split(",") if x.strip()]
                 if not new_val:
                     new_val = [query]
 
         mod.config[key] = new_val
         await self._save_config(mod_name, mod)
-        # Принудительно сбрасываем на диск сразу — не ждём debounce (1 сек),
-        # иначе при быстром рестарте бота значение может не успеть записаться.
         try:
             await self.db.force_save()
         except Exception:
@@ -309,11 +282,8 @@ class ConfigModule(KitsuneModule):
 
         inline = self._inline()
 
-        # Определяем inline_message_id исходной формы.
-        # Приоритет: явный аргумент → атрибут call (callback-query на inline-сообщении).
         iid = inline_message_id or getattr(call, "inline_message_id", "") or ""
 
-        # Строим обновлённый экран параметра (одинаково — и для обновления формы, и для fallback)
         doc      = _esc(mod.config.get_doc(key) or "Нет описания")
         default  = _fmt_value(mod.config.get_default(key))
         current  = _fmt_value(mod.config[key])
@@ -350,7 +320,6 @@ class ConfigModule(KitsuneModule):
             logger.debug("_inline_set_config: editing form iid=%s key=%s val=%r", iid, key, new_val)
             await inline.edit(call, text, kb, inline_message_id=iid)
         else:
-            # iid недоступен — данные уже сохранены в БД, пробуем fallback-редактирование
             logger.warning(
                 "_inline_set_config: iid is empty — data saved, cannot refresh form. "
                 "inline_message_id arg=%r call.iid=%r",
@@ -359,9 +328,7 @@ class ConfigModule(KitsuneModule):
             try:
                 await inline.edit(call, text, kb)
             except Exception:
-                pass  # Не критично — данные записаны в БД, форма обновится при следующем .config
-
-    # ─── Callbacks ────────────────────────────────────────────────────────
+                pass
 
     async def _cb_choose_category(self, call):
         await self._screen_choose_category(call)
@@ -411,8 +378,6 @@ class ConfigModule(KitsuneModule):
         except Exception:
             pass
 
-    # ─── Команды ──────────────────────────────────────────────────────────
-
     @command("config")
     async def config_cmd(self, event) -> None:
         """.config — интерактивная настройка модулей."""
@@ -423,7 +388,6 @@ class ConfigModule(KitsuneModule):
 
         args   = self.get_args(event).strip()
 
-        # Редактируем сообщение-команду сразу, чтобы не удалялось
         await event.message.edit("⚙️ <b>Загрузка...</b>", parse_mode="html")
         await self._screen_choose_category(event.message)
 

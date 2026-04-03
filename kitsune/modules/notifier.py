@@ -104,7 +104,6 @@ class NotifierModule(KitsuneModule):
         await self.db.delete(_DB_OWNER, "bot_token")
         await self.db.delete(_DB_OWNER, "bot_name")
         await self.db.delete(_DB_OWNER, "bot_username")
-        # Сбрасываем флаг, чтобы /start снова показал настройку авто-бэкапа
         await self.db.delete(_DB_OWNER, "backup_interval_asked")
         await self._stop_polling()
         await event.reply(self.strings("reset_done"), parse_mode="html")
@@ -118,7 +117,6 @@ class NotifierModule(KitsuneModule):
         m = await event.reply(f"⚙️ Включаю Inline Mode для @{username}...", parse_mode="html")
         await self._enable_inline_mode(username)
         await m.edit(f"✅ Inline Mode включён для @{username}\n\nТеперь в любом чате можно писать <code>@{username} запрос</code>", parse_mode="html")
-
 
     @command("setinline", required=OWNER)
     async def setinline_cmd(self, event) -> None:
@@ -210,7 +208,6 @@ class NotifierModule(KitsuneModule):
             await self.db.set(_DB_OWNER, "owner_id",     me.id)
             self._save_token_to_config(token)
 
-            # Включаем inline mode всегда — как для нового бота, так и для старого
             if bot_username:
                 asyncio.ensure_future(self._enable_inline_mode(bot_username))
 
@@ -351,7 +348,6 @@ class NotifierModule(KitsuneModule):
             logger.error("Notifier: _create_bot failed — %s", exc)
             return None, None
 
-
     async def _enable_inline_mode(self, username: str) -> None:
         import asyncio as _aio
         try:
@@ -430,8 +426,6 @@ class NotifierModule(KitsuneModule):
             @router.message(Command("start"))
             async def on_start(msg: Message) -> None:
                 owner_id = ref.db.get(_DB_OWNER, "owner_id", None)
-                # Защищаем от ситуации когда owner_id ещё не сохранён
-                # или пришёл как другой тип из JSON
                 if owner_id is None or msg.from_user.id != int(owner_id):
                     try:
                         await msg.answer("🔒 Нет доступа.")
@@ -444,8 +438,6 @@ class NotifierModule(KitsuneModule):
                     loader          = getattr(ref.client, "_kitsune_loader", None)
                     backup          = loader.modules.get("backup") if loader else None
 
-                    # Показываем настройку если: (a) ещё не спрашивали, или
-                    # (b) флаг стоит но интервал до сих пор не выбран
                     needs_setup = (not backup_asked) or (not interval_set)
 
                     if needs_setup and backup:
@@ -500,7 +492,6 @@ class NotifierModule(KitsuneModule):
                     await backup.handle_interval_callback(call)
                 else:
                     await call.answer("Модуль backup не загружен.", show_alert=True)
-
 
             @router.callback_query(lambda c: c.data and c.data.startswith("cfg_"))
             async def on_config_cb(call: CallbackQuery) -> None:

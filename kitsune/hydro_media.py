@@ -6,10 +6,8 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-
 def _hydro(client: typing.Any) -> typing.Any | None:
     return getattr(client, "hydrogram", None)
-
 
 async def send_file(
     client: typing.Any,
@@ -50,7 +48,6 @@ async def send_file(
         parse_mode=parse_mode,
     )
 
-
 async def download_media(
     client: typing.Any,
     message: typing.Any,
@@ -74,7 +71,6 @@ async def download_media(
             logger.warning("hydro_media: Hydrogram download failed (%s), falling back to Telethon", exc)
 
     return await message.download_media(bytes)
-
 
 def _get_hydro_file_id(message: typing.Any) -> str | None:
     media = getattr(message, "media", None)

@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 import asyncio
@@ -20,6 +19,7 @@ LOG_FILE = LOG_DIR / "kitsune.log"
 
 _orig_getlines = linecache.getlines
 
+
 def _patched_getlines(filename: str, module_globals=None) -> list[str]:
     try:
         if filename.startswith("<") and filename.endswith(">"):
@@ -31,7 +31,9 @@ def _patched_getlines(filename: str, module_globals=None) -> list[str]:
         pass
     return _orig_getlines(filename, module_globals)
 
+
 linecache.getlines = _patched_getlines
+
 
 def _override_text(exc: Exception) -> str | None:
     try:
@@ -41,6 +43,7 @@ def _override_text(exc: Exception) -> str | None:
     except ImportError:
         pass
     return None
+
 
 class KitsuneException:
 
@@ -125,6 +128,72 @@ class KitsuneException:
 
         return cls(message=error_text, full_stack=full_stack, sysinfo=(exc_type, exc_value, tb))
 
+
+class TelegramChannelHandler(logging.Handler):
+
+    def __init__(self, client: typing.Any, channel_id: int, level: int = logging.WARNING) -> None:
+        super().__init__(level)
+        self._client = client
+        self._channel_id = channel_id
+        self._queue: asyncio.Queue = asyncio.Queue(maxsize=500)
+        self._task: asyncio.Task | None = None
+        self._formatter = logging.Formatter("[%(levelname)s] %(name)s: %(message)s")
+
+    def start(self) -> None:
+        if self._task is None or self._task.done():
+            self._task = asyncio.ensure_future(self._worker())
+
+    def stop(self) -> None:
+        if self._task and not self._task.done():
+            self._task.cancel()
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            text = self._formatter.format(record)
+            self._queue.put_nowait(text)
+        except asyncio.QueueFull:
+            pass
+        except Exception:
+            pass
+
+    async def _worker(self) -> None:
+        import contextlib
+
+        while True:
+            await asyncio.sleep(5)
+            lines: list[str] = []
+            while not self._queue.empty():
+                try:
+                    lines.append(self._queue.get_nowait())
+                except asyncio.QueueEmpty:
+                    break
+
+            if not lines:
+                continue
+
+            from . import utils
+
+            combined = "\n".join(lines)
+
+            if len(combined) > 3800:
+                buf = io.BytesIO(combined.encode())
+                buf.name = "kitsune-logs.txt"
+                buf.seek(0)
+                with contextlib.suppress(Exception):
+                    await self._client.send_file(
+                        self._channel_id,
+                        buf,
+                        caption="📋 <b>Kitsune Logs</b>",
+                    )
+            else:
+                with contextlib.suppress(Exception):
+                    await self._client.send_message(
+                        self._channel_id,
+                        f"<code>{utils.escape_html(combined)}</code>",
+                        parse_mode="html",
+                    )
+
+
 class KitsuneLogsHandler(logging.Handler):
 
     def __init__(self, targets: list[logging.Handler], capacity: int = 7000) -> None:
@@ -195,10 +264,10 @@ class KitsuneLogsHandler(logging.Handler):
 
                 from . import utils
                 combined = utils.escape_html("".join(text_chunks))
-                chunks = list(utils.chunks(combined, 4096))
+                chunked = list(utils.chunks(combined, 4096))
 
-                if len(chunks) > 5:
-                    buf = io.BytesIO("".join(chunks).encode())
+                if len(chunked) > 5:
+                    buf = io.BytesIO("".join(chunked).encode())
                     buf.name = "kitsune-logs.txt"
                     buf.seek(0)
                     try:
@@ -210,7 +279,7 @@ class KitsuneLogsHandler(logging.Handler):
                         pass
                     continue
 
-                for chunk in chunks:
+                for chunk in chunked:
                     if chunk:
                         try:
                             await mod.inline.bot.send_message(
@@ -256,7 +325,7 @@ class KitsuneLogsHandler(logging.Handler):
         except Exception:
             pass
 
-        record.kitsune_caller = caller  # type: ignore[attr-defined]
+        record.kitsune_caller = caller
 
         if record.levelno >= self.tg_level:
             if record.exc_info:
@@ -302,8 +371,9 @@ class KitsuneLogsHandler(logging.Handler):
             finally:
                 self.release()
 
-    def setLevel(self, level: int) -> None:  # type: ignore[override]
+    def setLevel(self, level: int) -> None:
         self.lvl = level
+
 
 _main_formatter = logging.Formatter(
     fmt="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -322,6 +392,44 @@ rotating_handler = RotatingFileHandler(
     delay=False,
 )
 rotating_handler.setFormatter(_main_formatter)
+
+_tg_channel_handler: TelegramChannelHandler | None = None
+
+
+async def setup_tg_logging(client: typing.Any) -> None:
+    global _tg_channel_handler
+
+    try:
+        from .utils import asset_channel
+
+        channel_id, created = await asset_channel(
+            client,
+            title="Kitsune-logs",
+            description="Kitsune Userbot — system logs",
+            archive=True,
+        )
+
+        handler = TelegramChannelHandler(client, channel_id, level=logging.WARNING)
+        handler.setFormatter(_tg_formatter)
+        handler.start()
+
+        logging.getLogger().addHandler(handler)
+        _tg_channel_handler = handler
+
+        if created:
+            import contextlib
+            with contextlib.suppress(Exception):
+                await client.send_message(
+                    channel_id,
+                    "🦊 <b>Kitsune-logs channel created.</b>\n\nWarning and Error level logs will appear here.",
+                    parse_mode="html",
+                )
+
+        logging.getLogger(__name__).info("log: TG channel logging active (channel_id=%d)", channel_id)
+
+    except Exception:
+        logging.getLogger(__name__).exception("log: failed to set up TG channel logging")
+
 
 def init() -> None:
     console_handler = logging.StreamHandler(sys.stdout)

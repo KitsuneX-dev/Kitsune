@@ -1,9 +1,3 @@
-# 🦊 Kitsune Userbot — gallery.py
-# Inline-галерея с листанием стрелками.
-# Положи в kitsune/inline/gallery.py (или рядом с inline/core.py).
-#
-# Зависимости: aiogram, pyrogram или telethon (адаптируй _send_photo под свой стек).
-# В этом файле использован aiogram-стиль inline bot — как в Hikka.
 
 import asyncio
 import logging
@@ -12,9 +6,6 @@ import typing
 from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
-
-
-# ─── Хелпер для списка URL ────────────────────────────────────────────────────
 
 class ListGalleryHelper:
     """Оборачивает список URL и позволяет итерироваться по нему циклически."""
@@ -32,9 +23,6 @@ class ListGalleryHelper:
 
     def __len__(self) -> int:
         return len(self.urls)
-
-
-# ─── Mixin для GalleryUnit ────────────────────────────────────────────────────
 
 class Gallery:
     """
@@ -88,7 +76,6 @@ class Gallery:
         if always_allow is None:
             always_allow = []
 
-        # Нормализуем next_handler
         if isinstance(next_handler, list):
             if not all(isinstance(u, str) for u in next_handler):
                 logger.error("gallery: next_handler список должен содержать только строки")
@@ -98,7 +85,6 @@ class Gallery:
         if isinstance(caption, list):
             caption = ListGalleryHelper(caption)
 
-        # Получаем первый URL
         try:
             first_url = await self._resolve_url(next_handler)
         except Exception:
@@ -135,7 +121,6 @@ class Gallery:
             **({"always_allow": always_allow} if always_allow else {}),
         }
 
-        # Статусное сообщение
         status_message = None
         if not silent and hasattr(message, "out"):
             try:
@@ -144,7 +129,6 @@ class Gallery:
             except Exception:
                 pass
 
-        # Отправляем inline
         try:
             m = await self._invoke_unit(unit_id, message)
         except Exception:
@@ -152,7 +136,6 @@ class Gallery:
             del self._units[unit_id]
             return False
 
-        # Ждём подтверждения от inline handler что фото получено
         await self._units[unit_id]["future"].wait()
         del self._units[unit_id]["future"]
 
@@ -161,20 +144,16 @@ class Gallery:
         if hasattr(m, "chat_id"):
             self._units[unit_id]["chat"] = m.chat_id
 
-        # Убираем статусное сообщение
         if status_message:
             try:
                 await status_message.delete()
             except Exception:
                 pass
 
-        # Фоновая предзагрузка
         if preload and not isinstance(next_handler, ListGalleryHelper):
             asyncio.ensure_future(self._preload_photos(unit_id))
 
         return m
-
-    # ─── Вспомогательные методы ───────────────────────────────────────────────
 
     def _make_page_handler(self, unit_id: str):
         """Возвращает coroutine-handler для btn_call_data."""
@@ -217,7 +196,6 @@ class Gallery:
         except Exception:
             logger.debug("gallery: ошибка предзагрузки", exc_info=True)
 
-        # Продолжаем если нужно больше
         unit = self._units.get(unit_id)
         if unit and len(unit["photos"]) - unit["current_index"] < unit["preload"]:
             asyncio.ensure_future(self._preload_photos(unit_id))
@@ -233,7 +211,6 @@ class Gallery:
             try:
                 result = caption()
                 if asyncio.iscoroutine(result):
-                    # Синхронный вызов не поддерживает async caption
                     return ""
                 return result
             except Exception:
@@ -259,7 +236,6 @@ class Gallery:
 
         nav_row = []
 
-        # Кнопка «назад»
         if idx > 0:
             nav_row.append({
                 "text": "⬅️",
@@ -267,14 +243,12 @@ class Gallery:
                 "args": (idx - 1,),
             })
 
-        # Счётчик
         nav_row.append({
             "text": f"{idx + 1} / {total}",
             "callback": callback,
             "args": ("noop",),
         })
 
-        # Кнопка «вперёд»
         has_more = (
             idx < total - 1
             or not isinstance(unit["next_handler"], ListGalleryHelper)
@@ -327,7 +301,6 @@ class Gallery:
             await call.answer("Это первое фото")
             return
 
-        # Нужно догрузить?
         if idx >= len(unit["photos"]):
             if isinstance(unit["next_handler"], ListGalleryHelper):
                 await call.answer("Это последнее фото")
@@ -340,7 +313,6 @@ class Gallery:
         self._units[unit_id]["current_index"] = idx
         photo_url = unit["photos"][idx]
 
-        # Обновляем медиа
         try:
             from aiogram.types import InputMediaPhoto, InputMediaAnimation
 
@@ -368,7 +340,6 @@ class Gallery:
 
         await call.answer()
 
-        # Продолжить предзагрузку если нужно
         if (
             unit.get("preload")
             and not isinstance(unit["next_handler"], ListGalleryHelper)
@@ -414,7 +385,6 @@ class Gallery:
 
                     await inline_query.answer([result], cache_time=0)
 
-                    # Сигналим что unit готов
                     if "future" in unit:
                         unit["future"].set()
 
@@ -423,25 +393,3 @@ class Gallery:
 
                 return
 
-
-# ─── Пример использования в модуле ───────────────────────────────────────────
-#
-#   @loader.command()
-#   async def gallery_cmd(self, message):
-#       """Показать галерею"""
-#       photos = [
-#           "https://example.com/photo1.jpg",
-#           "https://example.com/photo2.jpg",
-#           "https://example.com/photo3.jpg",
-#       ]
-#       await self.inline.gallery(
-#           message,
-#           next_handler=photos,
-#           caption="Фото {i}",
-#       )
-#
-#   # Или с динамической загрузкой:
-#   async def fetch_next():
-#       return await some_api_call()
-#
-#   await self.inline.gallery(message, next_handler=fetch_next, preload=5)

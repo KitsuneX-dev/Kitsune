@@ -7,7 +7,7 @@ import os
 import tempfile
 from pathlib import Path
 
-from ..core.loader import KitsuneModule, command, ModuleLoadError, ASTSecurityError  # noqa: F401
+from ..core.loader import KitsuneModule, command, ModuleLoadError, ASTSecurityError
 from ..core.security import OWNER
 from ..utils import auto_delete, ProgressMessage
 from ..hydro_media import download_media as hydro_download
@@ -249,7 +249,6 @@ class LoaderModule(KitsuneModule):
                 desc=mod.description or "—",
             )
         await event.reply(text, parse_mode="html")
-
 
     @command("dlm", required=OWNER)
     async def dlm_cmd(self, event) -> None:

@@ -1,5 +1,3 @@
-# meta developer: @Mikasu32
-# Kitsune — Info module (based on Hikka HikkaInfo approach)
 
 from __future__ import annotations
 
@@ -13,10 +11,8 @@ logger = logging.getLogger(__name__)
 
 _DB_OWNER = "kitsune.info"
 
-
 def _esc(s: str) -> str:
     return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-
 
 class InfoModule(KitsuneModule):
     """Информация об аккаунте и UserBot."""
@@ -64,8 +60,6 @@ class InfoModule(KitsuneModule):
         "setinfo_success": "✅ Info-сообщение обновлено.",
     }
 
-    # ── helpers ───────────────────────────────────────────────────────────
-
     def _fmt_uptime(self) -> str:
         stored = self.db.get("kitsune.ping", "start_time", None)
         secs   = int(time.time() - (float(stored) if stored else time.time()))
@@ -81,7 +75,6 @@ class InfoModule(KitsuneModule):
     def _get_platform(self) -> str:
         import platform as pf
         import os
-        # Определяем Termux по наличию характерных переменных окружения
         if os.environ.get("TERMUX_VERSION") or os.path.isdir("/data/data/com.termux"):
             return "📱 Termux — Android"
         s = pf.system()
@@ -173,15 +166,12 @@ class InfoModule(KitsuneModule):
             return {"text": btn[0], "url": btn[1]}
         return None
 
-    # ── commands ──────────────────────────────────────────────────────────
-
     @command("info", required=OWNER)
     async def info_cmd(self, event) -> None:
         """.info — показать информацию о UserBot."""
         import asyncio as _asyncio
         loop = _asyncio.get_event_loop()
 
-        # get_me() и git (блокирующий) — параллельно
         me, git_info = await _asyncio.gather(
             self.client.get_me(),
             loop.run_in_executor(None, self._get_git_info),
@@ -192,7 +182,6 @@ class InfoModule(KitsuneModule):
         banner = self.config["banner_url"]
         inline = getattr(self.client, "_kitsune_inline", None)
 
-        # Проверяем что ссылка прямая (raw), а не страница GitHub (/blob/)
         if banner and "/blob/" in banner and "github.com" in banner:
             banner = banner.replace("/blob/", "/raw/")
             logger.warning(
@@ -202,7 +191,6 @@ class InfoModule(KitsuneModule):
 
         if inline and inline._bot:
             markup = [[mark]] if mark else []
-            # Передаём как gif= — InlineManager сам определит тип по расширению (.mp4/.gif)
             kwargs = {"gif": banner} if banner else {}
             await inline.form(
                 text=text,

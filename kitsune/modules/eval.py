@@ -103,7 +103,7 @@ class EvalModule(KitsuneModule):
                 f"    {line}" for line in code.splitlines()
             )
             local_ns: dict = {}
-            exec(compile(exec_code, "<exec>", "exec"), exec_globals, local_ns)  # noqa: S102
+            exec(compile(exec_code, "<exec>", "exec"), exec_globals, local_ns)
             await local_ns["_kitsune_exec"]()
             return buf.getvalue(), ""
         except Exception:

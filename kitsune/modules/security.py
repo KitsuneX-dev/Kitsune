@@ -109,7 +109,6 @@ class SecurityModule(KitsuneModule):
             await self._set_co_owners(owners)
         await event.edit(self.strings("owner_added").format(uid=uid))
 
-
     @command("ownerrm", required=OWNER)
     async def ownerrm_cmd(self, event) -> None:
         if event.sender_id != self.client.tg_id:

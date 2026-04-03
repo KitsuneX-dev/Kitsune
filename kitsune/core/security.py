@@ -34,6 +34,7 @@ DEFAULT_PERMISSIONS = OWNER
 _CACHE_TTL = 60.0
 _DB_KEY    = "kitsune.security"
 
+
 class SecurityManager:
 
     def __init__(self, client: typing.Any, db: typing.Any) -> None:
@@ -113,12 +114,6 @@ class SecurityManager:
 
         bits = GROUP_MEMBER
         try:
-            from telethon.tl.types import (
-                ChannelParticipantCreator,
-                ChannelParticipantAdmin,
-                ChatParticipantCreator,
-                ChatParticipantAdmin,
-            )
             participant = await self._client.get_permissions(chat_id, user_id)
 
             if getattr(participant, "is_creator", False):
