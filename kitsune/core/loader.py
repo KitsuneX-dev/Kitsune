@@ -234,6 +234,10 @@ class Loader:
         self._dispatcher = dispatcher
         self._modules: dict[str, KitsuneModule] = {}
 
+    @property
+    def modules(self) -> dict[str, KitsuneModule]:
+        return self._modules
+
     def get_modules(self) -> dict[str, KitsuneModule]:
         return dict(self._modules)
 
