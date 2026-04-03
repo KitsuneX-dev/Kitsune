@@ -100,9 +100,9 @@ class HelpModule(KitsuneModule):
         prefix = dispatcher._prefix if dispatcher else "."
         for attr_name in dir(mod):
             method = getattr(mod, attr_name, None)
-            if callable(method) and hasattr(method, "_kitsune_command"):
+            if callable(method) and getattr(method, "_is_command", False):
                 doc = (inspect.getdoc(method) or "").strip()
-                cmd_name = method._kitsune_command
+                cmd_name = method._command_name
                 if doc.startswith(("." + cmd_name, prefix + cmd_name)):
                     doc = doc[len(prefix) + len(cmd_name):].lstrip(" —-")
                 lines.append(f"  • <code>{prefix}{cmd_name}</code> — {doc or '—'}")
@@ -113,6 +113,6 @@ class HelpModule(KitsuneModule):
         cmds = []
         for attr in dir(mod):
             method = getattr(mod, attr, None)
-            if callable(method) and hasattr(method, "_kitsune_command"):
-                cmds.append(method._kitsune_command)
+            if callable(method) and getattr(method, "_is_command", False):
+                cmds.append(method._command_name)
         return sorted(cmds)
