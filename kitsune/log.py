@@ -483,3 +483,19 @@ async def _send_startup_banner(client: typing.Any, channel_id: int) -> None:
 
     except Exception:
         logging.getLogger(__name__).exception("log: failed to send startup banner")
+
+def init() -> None:
+    import sys
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setLevel(logging.INFO)
+    console_handler.setFormatter(_main_formatter)
+
+    root = logging.getLogger()
+    root.handlers = []
+    root.addHandler(KitsuneLogsHandler([console_handler, rotating_handler], capacity=7000))
+    root.setLevel(logging.NOTSET)
+
+    for noisy in ("telethon", "pyrogram", "matplotlib", "aiohttp", "aiogram", "httpx"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
+
+    logging.captureWarnings(True)
