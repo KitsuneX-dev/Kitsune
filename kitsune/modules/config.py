@@ -6,6 +6,7 @@ import logging
 import typing
 
 from ..core.loader import KitsuneModule, command, ModuleConfig
+from ..core.security import OWNER
 
 logger = logging.getLogger(__name__)
 
@@ -378,7 +379,7 @@ class ConfigModule(KitsuneModule):
         except Exception:
             pass
 
-    @command("config")
+    @command("config", required=OWNER)
     async def config_cmd(self, event) -> None:
         """.config — интерактивная настройка модулей."""
         inline = self._inline()
@@ -392,7 +393,7 @@ class ConfigModule(KitsuneModule):
         await event.message.edit("⚙️ <b>Загрузка...</b>", parse_mode="html")
         await self._screen_choose_category(event.message)
 
-    @command("fconfig")
+    @command("fconfig", required=OWNER)
     async def fconfig_cmd(self, event) -> None:
         """.fconfig <модуль> <параметр> <значение> — быстрая установка без UI."""
         args = self.get_args(event).split(maxsplit=2)
