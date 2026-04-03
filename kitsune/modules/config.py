@@ -6,7 +6,6 @@ import logging
 import typing
 
 from ..core.loader import KitsuneModule, command, ModuleConfig
-from ..core.security import OWNER
 
 logger = logging.getLogger(__name__)
 
@@ -379,93 +378,40 @@ class ConfigModule(KitsuneModule):
         except Exception:
             pass
 
-    @command("config", required=OWNER)
+    @command("config")
     async def config_cmd(self, event) -> None:
         """.config — интерактивная настройка модулей."""
-        args = self.get_args(event).strip()
-
-        loader = getattr(self.client, "_kitsune_loader", None)
-        if not loader:
-            await event.message.edit("❌ Loader недоступен.", parse_mode="html")
+        inline = self._inline()
+        if not inline or not inline._bot:
+            await event.message.edit(self.strings("no_inline"), parse_mode="html")
             return
 
-        mods_with_config = {
-            name: mod for name, mod in loader.modules.items()
-            if getattr(mod, "config", None) and list(mod.config.keys())
-        }
+        args   = self.get_args(event).strip()
 
-        if not mods_with_config:
-            await event.message.edit(self.strings("no_mods"), parse_mode="html")
-            return
+        # Редактируем сообщение-команду сразу, чтобы не удалялось
+        await event.message.edit("⚙️ <b>Загрузка...</b>", parse_mode="html")
+        await self._screen_choose_category(event.message)
 
-        if args:
-            mod = mods_with_config.get(args.lower())
-            if not mod:
-                await event.message.edit(self.strings("no_mod"), parse_mode="html")
-                return
-            text = self._render_mod_config(args.lower(), mod)
-            text += (
-                "\n\n💡 Используй <code>.fconfig {mod} {key} {value}</code> для изменения.".format(
-                    mod=args.lower(), key="ключ", value="значение"
-                )
-            )
-            await event.message.edit(text, parse_mode="html")
-            return
-
-        lines = ["⚙️ <b>Модули с настройками:</b>\n"]
-        prefix = "."
-        try:
-            dispatcher = getattr(self.client, "_kitsune_dispatcher", None)
-            if dispatcher:
-                prefix = dispatcher._prefix
-        except Exception:
-            pass
-
-        for name, mod in sorted(mods_with_config.items()):
-            keys = list(mod.config.keys())
-            lines.append(f"  • <b>{mod.name}</b> — {len(keys)} параметр(а): " +
-                         ", ".join(f"<code>{k}</code>" for k in keys))
-
-        lines.append(f"\n💡 <code>{prefix}config &lt;модуль&gt;</code> — подробности")
-        lines.append(f"💡 <code>{prefix}fconfig &lt;модуль&gt; &lt;ключ&gt; &lt;значение&gt;</code> — установить")
-
-        await event.message.edit("\n".join(lines), parse_mode="html")
-
-    def _render_mod_config(self, name: str, mod) -> str:
-        lines = [f"\u2699\ufe0f <b>\u041d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0438 \u043c\u043e\u0434\u0443\u043b\u044f {mod.name}:</b>\n"]
-        for key in mod.config.keys():
-            val = mod.config[key]
-            default = mod.config.get_default(key)
-            doc = mod.config.get_doc(key) or ""
-            changed = " <i>(\u0438\u0437\u043c\u0435\u043d\u0435\u043d\u043e)</i>" if val != default else ""
-            entry = f"  <b>{key}</b>{changed}\n"
-            entry += f"  \u0422\u0435\u043a\u0443\u0449\u0435\u0435: {_fmt_value(val)}\n"
-            entry += f"  \u041f\u043e \u0443\u043c\u043e\u043b\u0447\u0430\u043d\u0438\u044e: {_fmt_value(default)}\n"
-            if doc:
-                entry += f"  <i>{_esc(doc)}</i>\n"
-            lines.append(entry)
-        return "\n".join(lines)
-
-    @command("fconfig", required=OWNER)
+    @command("fconfig")
     async def fconfig_cmd(self, event) -> None:
-        """.fconfig <module> <key> <value> — быстрая установка параметра."""
-        args = self.get_args(event).strip().split(maxsplit=2)
+        """.fconfig <модуль> <параметр> <значение> — быстрая установка без UI."""
+        args = self.get_args(event).split(maxsplit=2)
         if len(args) < 3:
             await event.message.edit(self.strings("fconfig_args"), parse_mode="html")
             return
 
-        mod_name, key, raw_val = args[0].lower(), args[1], args[2]
-
+        mod_name, key, raw_val = args
         loader = getattr(self.client, "_kitsune_loader", None)
         if not loader:
             return
-
         mod = loader.modules.get(mod_name)
-        if not mod or not getattr(mod, "config", None) or key not in mod.config:
+        if not mod:
+            await event.message.edit(self.strings("no_mod"), parse_mode="html")
+            return
+        if key not in mod.config:
             await event.message.edit(self.strings("no_option"), parse_mode="html")
             return
 
-        import ast as _ast
         default_val = mod.config.get_default(key)
         new_val = raw_val
         if isinstance(default_val, bool):
@@ -480,12 +426,6 @@ class ConfigModule(KitsuneModule):
                 new_val = float(raw_val)
             except ValueError:
                 pass
-        elif isinstance(default_val, list):
-            try:
-                parsed = _ast.literal_eval(raw_val)
-                new_val = list(parsed) if isinstance(parsed, (list, tuple, set)) else [parsed]
-            except Exception:
-                new_val = [x.strip() for x in raw_val.split(",") if x.strip()]
 
         mod.config[key] = new_val
         await self._save_config(mod_name, mod)
@@ -493,8 +433,7 @@ class ConfigModule(KitsuneModule):
             await self.db.force_save()
         except Exception:
             pass
-
         await event.message.edit(
-            self.strings("fconfig_ok").format(key=key, val=_fmt_value(new_val)),
+            self.strings("fconfig_ok").format(key=_esc(key), val=_fmt_value(new_val)),
             parse_mode="html",
         )
