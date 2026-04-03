@@ -11,7 +11,6 @@ DATA_DIR     = Path.home() / ".kitsune"
 SESSION_PATH = DATA_DIR / "kitsune.session"
 ENC_PATH     = DATA_DIR / "kitsune.session.enc"
 
-
 def encrypt_session_file() -> bool:
     if not SESSION_PATH.exists():
         return False
@@ -25,7 +24,6 @@ def encrypt_session_file() -> bool:
     except Exception:
         logger.exception("session_enc: failed to encrypt session")
         return False
-
 
 def decrypt_session_file() -> bool:
     if not ENC_PATH.exists():
@@ -42,10 +40,8 @@ def decrypt_session_file() -> bool:
         logger.exception("session_enc: failed to decrypt session")
         return False
 
-
 def is_encrypted() -> bool:
     return ENC_PATH.exists() and not SESSION_PATH.exists()
-
 
 def session_ready() -> bool:
     if SESSION_PATH.exists():

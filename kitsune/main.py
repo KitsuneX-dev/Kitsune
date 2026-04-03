@@ -287,6 +287,8 @@ async def _startup(args: argparse.Namespace) -> None:
         except Exception:
             logger.exception("main: web startup failed")
 
+    asyncio.ensure_future(log.setup_tg_logging(client))
+
     _print_banner(me)
 
     asyncio.ensure_future(_keepalive(client))
@@ -313,7 +315,6 @@ async def _startup(args: argparse.Namespace) -> None:
         await db.force_save()
         encrypt_session_file()
         logger.info("main: goodbye 🦊")
-
 
 async def _keepalive(client: Any) -> None:
     import contextlib

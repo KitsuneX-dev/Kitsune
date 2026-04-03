@@ -18,7 +18,6 @@ _DB_OWNER = "kitsune.backup"
 
 _INTERVAL_OPTIONS = [2, 4, 6, 8, 12, 24, 48]
 
-
 class BackupModule(KitsuneModule):
     name        = "backup"
     description = "Резервное копирование базы данных"
@@ -111,7 +110,6 @@ class BackupModule(KitsuneModule):
             except Exception as exc:
                 await prog.done(f"❌ Ошибка: <code>{exc}</code>")
 
-
     @command("backupmods", required=OWNER)
     async def backupmods_cmd(self, event) -> None:
         loader = getattr(self.client, "_kitsune_loader", None)
@@ -176,7 +174,7 @@ class BackupModule(KitsuneModule):
     async def _initial_backup_after_setup(self) -> None:
         """Создаёт группу KitsuneBackup и делает первый бэкап сразу после настройки."""
         try:
-            await asyncio.sleep(2)  # небольшая задержка чтобы callback успел обработаться
+            await asyncio.sleep(2)
             dest = await self._ensure_backup_dest()
             await self._send_backup(dest, auto=False)
             logger.info("Backup: initial backup created after interval setup")
@@ -255,7 +253,6 @@ class BackupModule(KitsuneModule):
             parse_mode="HTML",
         )
 
-        # Создаём группу и делаем первый бэкап сразу после выбора интервала
         asyncio.ensure_future(self._initial_backup_after_setup())
 
     async def _ensure_backup_dest(self) -> int:

@@ -10,7 +10,6 @@ KEY_PATH = Path.home() / ".kitsune" / "kitsune.key"
 
 MAGIC = b"KBAK1:"
 
-
 def _load_or_create_key() -> bytes:
     env_key = os.environ.get(KEY_ENV, "").strip()
     if env_key:
@@ -25,24 +24,19 @@ def _load_or_create_key() -> bytes:
     KEY_PATH.chmod(0o600)
     return key
 
-
 def _fernet() -> Fernet:
     return Fernet(_load_or_create_key())
 
-
 def encrypt(data: bytes) -> bytes:
     return MAGIC + _fernet().encrypt(data)
-
 
 def decrypt(data: bytes) -> bytes:
     if not data.startswith(MAGIC):
         raise ValueError("not an encrypted Kitsune backup")
     return _fernet().decrypt(data[len(MAGIC):])
 
-
 def is_encrypted(data: bytes) -> bool:
     return data.startswith(MAGIC)
-
 
 def key_path() -> Path:
     return KEY_PATH

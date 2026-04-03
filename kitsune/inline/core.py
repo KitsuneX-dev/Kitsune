@@ -32,7 +32,6 @@ from .types import InlineCall
 
 _UNIT_TTL = 60 * 60 * 24
 
-
 class InlineManager:
 
     def __init__(self, client: typing.Any, db: typing.Any, token: str) -> None:
@@ -88,8 +87,6 @@ class InlineManager:
                 if self._units[uid].get("ttl", now + 1) < now:
                     del self._units[uid]
 
-    # ── Markup ────────────────────────────────────────────────────────────
-
     def generate_markup(self, buttons: list) -> "InlineKeyboardMarkup | None":
         if not AIOGRAM_AVAILABLE:
             return None
@@ -98,13 +95,11 @@ class InlineManager:
         def _row(r):
             return r if isinstance(r, list) else [r]
 
-        # Первый проход — назначаем _switch_query для input-кнопок
         for row in buttons:
             for btn in _row(row):
                 if isinstance(btn, dict) and "input" in btn and "_switch_query" not in btn:
                     btn["_switch_query"] = str(uuid.uuid4())[:10]
 
-        # Второй проход — строим клавиатуру
         for row in buttons:
             kb_row: list[InlineKeyboardButton] = []
             for btn in _row(row):
@@ -114,7 +109,6 @@ class InlineManager:
                 if url := btn.get("url"):
                     kb_row.append(InlineKeyboardButton(text=text, url=url))
                 elif "input" in btn:
-                    # switch_inline_query — открывает inline поле, как у Hikka
                     kb_row.append(InlineKeyboardButton(
                         text=text,
                         switch_inline_query_current_chat=btn["_switch_query"] + " ",
@@ -135,8 +129,6 @@ class InlineManager:
                 keyboard.append(kb_row)
         return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
-    # ── form / edit ───────────────────────────────────────────────────────
-
     async def form(
         self,
         text: str,
@@ -145,7 +137,6 @@ class InlineManager:
         video: str | None = None,
         gif: str | None = None,
     ) -> typing.Any:
-        # Если передали video= с .mp4/.gif ссылкой — используем gif-режим как Hikka
         media_url = gif or video
         media_type = None
         if media_url:
@@ -167,7 +158,6 @@ class InlineManager:
             **({media_type: media_url} if media_url and media_type else {}),
         }
         sent = await self._invoke_unit(unit_id, message)
-        # Ждём пока _on_chosen_inline запишет inline_message_id формы
         try:
             await asyncio.wait_for(asyncio.shield(future), timeout=10)
         except asyncio.TimeoutError:
@@ -186,11 +176,8 @@ class InlineManager:
         if not AIOGRAM_AVAILABLE or not self._bot:
             return
 
-        # generate_markup назначает _switch_query input-кнопкам in-place
         markup = self.generate_markup(reply_markup or [])
 
-        # Сохраняем кнопки (уже с _switch_query) в _units под ключом iid:
-        # чтобы _on_chosen_inline мог найти нужный handler по _switch_query
         effective_iid = inline_message_id or getattr(call_or_msg, "inline_message_id", None)
         if effective_iid:
             unit_key = f"iid:{effective_iid}"
@@ -220,8 +207,6 @@ class InlineManager:
                 )
         except Exception:
             logger.exception("InlineManager.edit: failed")
-
-    # ── _invoke_unit ──────────────────────────────────────────────────────
 
     async def _invoke_unit(self, unit_id: str, message: typing.Any) -> typing.Any:
         if not self._bot_username:
@@ -267,12 +252,9 @@ class InlineManager:
         logger.error("InlineManager._invoke_unit: all attempts failed for unit %s", unit_id)
         return None
 
-    # ── Handlers ──────────────────────────────────────────────────────────
-
     async def _on_inline_query(self, query: "InlineQuery") -> None:
         q = query.query.strip()
 
-        # input-кнопки: switch_query механизм как у Hikka
         for unit in self._units.values():
             for row in unit.get("buttons", []):
                 row_ = row if isinstance(row, list) else [row]
@@ -286,7 +268,6 @@ class InlineManager:
                     parts = q.split(maxsplit=1)
                     has_value = len(parts) > 1 and parts[1].strip()
                     if has_value:
-                        # Пользователь уже ввёл значение — показываем результат который можно нажать
                         value_preview = parts[1].strip()
                         await query.answer(
                             results=[
@@ -299,12 +280,10 @@ class InlineManager:
                                         parse_mode="HTML",
                                         disable_web_page_preview=True,
                                     ),
-                                    # reply_markup нужен чтобы получить inline_message_id
-                                    # в chosen_inline_result (для удаления temp-сообщения)
                                     reply_markup=InlineKeyboardMarkup(
                                         inline_keyboard=[[
                                             InlineKeyboardButton(
-                                                text="­",          # soft hyphen — невидимый
+                                                text="­",
                                                 callback_data="__noop__",
                                             )
                                         ]]
@@ -314,7 +293,6 @@ class InlineManager:
                             cache_time=0,
                         )
                     else:
-                        # Пустой ввод — подсказка что нужно ввести
                         await query.answer(
                             results=[
                                 InlineQueryResultArticle(
@@ -332,7 +310,6 @@ class InlineManager:
                         )
                     return
 
-        # Обычный unit (form)
         unit = self._units.get(q)
         if not unit:
             await query.answer([], cache_time=0)
@@ -398,7 +375,6 @@ class InlineManager:
         if not q:
             return
 
-        # Сначала: chosen_inline для самой формы — сохраняем inline_message_id через future
         for unit_id, unit in self._units.items():
             if (
                 unit_id == q
@@ -411,7 +387,6 @@ class InlineManager:
                 logger.debug("form: saved inline_message_id=%s for unit %s", result.inline_message_id, unit_id)
                 return
 
-        # Hikka-паттерн: ищем кнопку по первому слову запроса (точное совпадение)
         first_word = q.split()[0]
         value = q.split(maxsplit=1)[1] if len(q.split()) > 1 else ""
 
@@ -434,7 +409,6 @@ class InlineManager:
                     if not handler:
                         return
 
-                    # Получаем inline_message_id оригинальной формы
                     if unit_id.startswith("iid:"):
                         original_iid = unit_id[4:]
                     else:
@@ -462,10 +436,9 @@ class InlineManager:
         pass
 
     async def _on_message(self, message: "AiogramMessage") -> None:
-        pass  # Больше не нужен ForceReply
+        pass
 
     async def _on_callback(self, call: "CallbackQuery") -> None:
-        # Невидимая кнопка на временном сообщении-посреднике — просто игнорируем
         if call.data == "__noop__":
             await call.answer()
             return

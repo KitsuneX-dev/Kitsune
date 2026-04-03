@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 import asyncio
@@ -7,6 +6,7 @@ import time
 import typing
 
 logger = logging.getLogger(__name__)
+
 
 class TokenBucket:
 
@@ -34,6 +34,7 @@ class TokenBucket:
     def remaining(self) -> float:
         elapsed = time.monotonic() - self._last_refill
         return min(self.capacity, self._tokens + elapsed * self.rate)
+
 
 class RateLimiter:
 
@@ -69,9 +70,7 @@ class RateLimiter:
         if not allowed:
             logger.debug(
                 "Rate limit hit: user_id=%d command=%r remaining=%.2f",
-                user_id,
-                command,
-                bucket.remaining(),
+                user_id, command, bucket.remaining(),
             )
         return allowed
 

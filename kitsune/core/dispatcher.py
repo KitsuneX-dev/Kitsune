@@ -11,7 +11,8 @@ from .security import SecurityManager, OWNER
 
 logger = logging.getLogger(__name__)
 
-_FLOOD_REPLY = "⏳ <b>Слишком часто. Подожди немного.</b>"
+_FLOOD_REPLY = "⏳ <b>Too fast. Please wait a moment.</b>"
+
 
 class CommandDispatcher:
 
@@ -34,23 +35,14 @@ class CommandDispatcher:
 
         self._client.add_event_handler(self._on_message, events.NewMessage(outgoing=True))
 
-    def register_command(
-        self,
-        name: str,
-        handler: typing.Callable,
-        required: int = OWNER,
-    ) -> None:
+    def register_command(self, name: str, handler: typing.Callable, required: int = OWNER) -> None:
         self._commands[name.lower()] = (handler, required)
         logger.debug("Dispatcher: registered command .%s", name)
 
     def unregister_command(self, name: str) -> None:
         self._commands.pop(name.lower(), None)
 
-    def register_watcher(
-        self,
-        handler: typing.Callable,
-        filter_func: typing.Callable | None = None,
-    ) -> None:
+    def register_watcher(self, handler: typing.Callable, filter_func: typing.Callable | None = None) -> None:
         self._watchers.append((filter_func, handler))
 
     def unregister_watchers_for(self, module: typing.Any) -> None:
@@ -115,12 +107,7 @@ class CommandDispatcher:
                 continue
             await self._safe_call(handler, event, f"watcher:{handler.__name__}")
 
-    async def _safe_call(
-        self,
-        handler: typing.Callable,
-        event: typing.Any,
-        label: str,
-    ) -> None:
+    async def _safe_call(self, handler: typing.Callable, event: typing.Any, label: str) -> None:
         try:
             await handler(event)
         except asyncio.CancelledError:
