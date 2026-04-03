@@ -416,14 +416,7 @@ async def setup_tg_logging(client: typing.Any) -> None:
         logging.getLogger().addHandler(handler)
         _tg_channel_handler = handler
 
-        if created:
-            import contextlib
-            with contextlib.suppress(Exception):
-                await client.send_message(
-                    channel_id,
-                    "🦊 <b>Kitsune-logs channel created.</b>\n\nWarning and Error level logs will appear here.",
-                    parse_mode="html",
-                )
+        await _send_startup_banner(client, channel_id)
 
         logging.getLogger(__name__).info("log: TG channel logging active (channel_id=%d)", channel_id)
 
@@ -431,17 +424,62 @@ async def setup_tg_logging(client: typing.Any) -> None:
         logging.getLogger(__name__).exception("log: failed to set up TG channel logging")
 
 
-def init() -> None:
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setLevel(logging.INFO)
-    console_handler.setFormatter(_main_formatter)
+async def _send_startup_banner(client: typing.Any, channel_id: int) -> None:
+    import contextlib
+    import os
 
-    root = logging.getLogger()
-    root.handlers = []
-    root.addHandler(KitsuneLogsHandler([console_handler, rotating_handler], capacity=7000))
-    root.setLevel(logging.NOTSET)
+    try:
+        from .version import __version_str__, branch
 
-    for noisy in ("telethon", "pyrogram", "matplotlib", "aiohttp", "aiogram", "httpx"):
-        logging.getLogger(noisy).setLevel(logging.WARNING)
+        commit_sha = "unknown"
+        commit_url = ""
+        with contextlib.suppress(Exception):
+            import git
+            repo_path = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+            repo = git.Repo(path=repo_path)
+            commit_sha = repo.head.commit.hexsha[:7]
+            commit_url = f"https://github.com/KitsuneX-dev/Kitsune/commit/{repo.head.commit.hexsha}"
 
-    logging.captureWarnings(True)
+        update_status = "✅ Up-to-date"
+        with contextlib.suppress(Exception):
+            import git
+            repo_path = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+            repo = git.Repo(path=repo_path)
+            repo.remotes.origin.fetch()
+            behind = list(repo.iter_commits(f"HEAD..origin/{branch}"))
+            if behind:
+                update_status = f"🆕 Update available ({len(behind)} commits)"
+
+        cfg_web_port = 8080
+        with contextlib.suppress(Exception):
+            from .main import get_config_key
+            cfg_web_port = int(get_config_key("web_port", 8080))
+
+        sha_line = f"<a href="{commit_url}">{commit_sha}</a>" if commit_url else f"<code>{commit_sha}</code>"
+
+        text = (
+            f"🌘 <b>Kitsune {__version_str__} started!</b>
+
+"
+            f"🌳 GitHub commit SHA: {sha_line}
+"
+            f"✊ Update status: {update_status}
+"
+            f"🌐 Web url: <code>http://127.0.0.1:{cfg_web_port}</code>"
+        )
+
+        gif_path = os.path.join(os.path.dirname(__file__), "..", "banner.gif")
+        if os.path.exists(gif_path):
+            with contextlib.suppress(Exception):
+                await client.send_file(
+                    channel_id,
+                    gif_path,
+                    caption=text,
+                    parse_mode="html",
+                )
+                return
+
+        await client.send_message(channel_id, text, parse_mode="html", link_preview=False)
+
+    except Exception:
+        logging.getLogger(__name__).exception("log: failed to send startup banner")

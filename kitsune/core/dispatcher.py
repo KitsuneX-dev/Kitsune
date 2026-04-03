@@ -7,7 +7,7 @@ import typing
 from telethon import events
 
 from .rate_limiter import RateLimiter
-from .security import SecurityManager, OWNER
+from .security import SecurityManager, OWNER, SUDO
 
 logger = logging.getLogger(__name__)
 
@@ -33,11 +33,12 @@ class CommandDispatcher:
         self._commands: dict[str, tuple[typing.Callable, int]] = {}
         self._watchers: list[tuple[typing.Callable | None, typing.Callable]] = []
 
-        self._client.add_event_handler(self._on_message, events.NewMessage(outgoing=True))
+        self._client.add_event_handler(self._on_out_message,  events.NewMessage(outgoing=True))
+        self._client.add_event_handler(self._on_in_message,   events.NewMessage(incoming=True))
 
     def register_command(self, name: str, handler: typing.Callable, required: int = OWNER) -> None:
         self._commands[name.lower()] = (handler, required)
-        logger.debug("Dispatcher: registered command .%s", name)
+        logger.debug("Dispatcher: registered command .%s (required=%d)", name, required)
 
     def unregister_command(self, name: str) -> None:
         self._commands.pop(name.lower(), None)
@@ -59,7 +60,24 @@ class CommandDispatcher:
         self._limiter.set_owner(owner_id)
         self._limiter.start_cleanup()
 
-    async def _on_message(self, event: events.NewMessage.Event) -> None:
+    async def _on_out_message(self, event: events.NewMessage.Event) -> None:
+        await self._handle_message(event, is_own=True)
+
+    async def _on_in_message(self, event: events.NewMessage.Event) -> None:
+        message = event.message
+        if not message or not message.text:
+            return
+        sender_id = message.sender_id
+        if not sender_id or sender_id == self._client.tg_id:
+            return
+        sec = self._security
+        sudo_users = sec.get_sudo_users() if sec else []
+        co_owners  = self._db.get("kitsune.security", "co_owners", [])
+        if sender_id not in sudo_users and sender_id not in co_owners:
+            return
+        await self._handle_message(event, is_own=False)
+
+    async def _handle_message(self, event: events.NewMessage.Event, *, is_own: bool) -> None:
         message = event.message
         if not message or not message.text:
             return
@@ -78,13 +96,18 @@ class CommandDispatcher:
                 return
 
             handler, required = entry
+
+            if not is_own and required >= OWNER:
+                return
+
             sender_id = message.sender_id or 0
 
             if not await self._limiter.check(sender_id, cmd_name):
-                try:
-                    await message.respond(_FLOOD_REPLY, parse_mode="html")
-                except Exception:
-                    pass
+                if is_own:
+                    try:
+                        await message.respond(_FLOOD_REPLY, parse_mode="html")
+                    except Exception:
+                        pass
                 return
 
             try:
@@ -99,13 +122,14 @@ class CommandDispatcher:
             await self._safe_call(handler, event, cmd_name)
             return
 
-        for filter_func, handler in list(self._watchers):
-            try:
-                if filter_func is not None and not filter_func(message):
+        if is_own:
+            for filter_func, handler in list(self._watchers):
+                try:
+                    if filter_func is not None and not filter_func(message):
+                        continue
+                except Exception:
                     continue
-            except Exception:
-                continue
-            await self._safe_call(handler, event, f"watcher:{handler.__name__}")
+                await self._safe_call(handler, event, f"watcher:{handler.__name__}")
 
     async def _safe_call(self, handler: typing.Callable, event: typing.Any, label: str) -> None:
         try:
