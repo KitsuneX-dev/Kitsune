@@ -417,8 +417,14 @@ class NotifierModule(KitsuneModule):
             _ssl_ctx = _ssl.create_default_context()
             _ssl_ctx.check_hostname = False
             _ssl_ctx.verify_mode = _ssl.CERT_NONE
-            _connector = _aiohttp.TCPConnector(ssl=_ssl_ctx)
-            session = AiohttpSession(timeout=30, connector=_connector)
+
+            class _NoSSLSession(AiohttpSession):
+                async def create_connector(self, _bot=None):
+                    connector = _aiohttp.TCPConnector(ssl=_ssl_ctx)
+                    self._should_reset_connector = False
+                    return connector
+
+            session = _NoSSLSession(timeout=30)
             self._bot = Bot(
                 token=token,
                 default=DefaultBotProperties(parse_mode=ParseMode.HTML),
@@ -734,11 +740,14 @@ class NotifierModule(KitsuneModule):
 
     async def _start_inline_manager(self, token: str) -> None:
         import asyncio as _aio
-        for _ in range(20):
-            if self._bot is not None:
+        for _ in range(40):
+            if self._bot is not None and self._dp is not None:
                 break
             await _aio.sleep(0.5)
         try:
+            if self._bot is None or self._dp is None:
+                logger.warning("Notifier: bot/dispatcher not ready, skipping InlineManager")
+                return
             from ..inline.core import InlineManager
             inline = InlineManager(self.client, self.db, token)
             inline._bot     = self._bot
@@ -856,11 +865,17 @@ class NotifierModule(KitsuneModule):
         _ssl_ctx = _ssl.create_default_context()
         _ssl_ctx.check_hostname = False
         _ssl_ctx.verify_mode = _ssl.CERT_NONE
-        _connector = _aiohttp.TCPConnector(ssl=_ssl_ctx)
+
+        class _NoSSLSession(AiohttpSession):
+            async def create_connector(self, _bot=None):
+                connector = _aiohttp.TCPConnector(ssl=_ssl_ctx)
+                self._should_reset_connector = False
+                return connector
+
         return Bot(
             token=str(token),
             default=DefaultBotProperties(parse_mode=ParseMode.HTML),
-            session=AiohttpSession(timeout=30, connector=_connector),
+            session=_NoSSLSession(timeout=30),
         )
 
     async def send_restart_report(self, restart_time: str, total_time: str, mod_count: int) -> None:
