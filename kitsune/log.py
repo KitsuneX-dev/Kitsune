@@ -455,16 +455,16 @@ async def _send_startup_banner(client: typing.Any, channel_id: int) -> None:
             from .main import get_config_key
             cfg_web_port = int(get_config_key("web_port", 8080))
 
-        sha_line = f"<a href="{commit_url}">{commit_sha}</a>" if commit_url else f"<code>{commit_sha}</code>"
+        sha_line = (
+            f'<a href="{commit_url}">{commit_sha}</a>'
+            if commit_url
+            else f"<code>{commit_sha}</code>"
+        )
 
         text = (
-            f"🌘 <b>Kitsune {__version_str__} started!</b>
-
-"
-            f"🌳 GitHub commit SHA: {sha_line}
-"
-            f"✊ Update status: {update_status}
-"
+            f"🌘 <b>Kitsune {__version_str__} started!</b>\n\n"
+            f"🌳 GitHub commit SHA: {sha_line}\n"
+            f"✊ Update status: {update_status}\n"
             f"🌐 Web url: <code>http://127.0.0.1:{cfg_web_port}</code>"
         )
 
