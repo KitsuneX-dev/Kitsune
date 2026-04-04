@@ -124,19 +124,14 @@ class HelpModule(KitsuneModule):
             f"<b>{self.strings('header').format(count=total, hidden=hidden_count)}</b>"
         )
 
+        # Используем спойлеры (||текст||) для изначально свёрнутого текста
         if core_lines:
-            body += (
-                "\n<blockquote expandable collapsed>"
-                + "".join(core_lines)
-                + "\n</blockquote>"
-            )
+            core_text = "".join(core_lines)
+            body += f"\n||{core_text}\n||"
 
         if plain_lines:
-            body += (
-                "\n<blockquote expandable collapsed>"
-                + "".join(plain_lines)
-                + "\n</blockquote>"
-            )
+            plain_text = "".join(plain_lines)
+            body += f"\n||{plain_text}\n||"
 
         banner = self.config["banner_url"]
         inline = self._inline()
@@ -184,11 +179,9 @@ class HelpModule(KitsuneModule):
 
         body = header
         if cmd_lines:
-            body += (
-                "\n<blockquote expandable collapsed>\n"
-                + "\n".join(cmd_lines)
-                + "\n</blockquote>"
-            )
+            # Используем спойлеры для изначально свёрнутого списка команд
+            cmd_text = "\n".join(cmd_lines)
+            body += f"\n||\n{cmd_text}\n||"
 
         await event.message.edit(body, parse_mode="html")
 
