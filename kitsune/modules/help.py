@@ -124,14 +124,19 @@ class HelpModule(KitsuneModule):
             f"<b>{self.strings('header').format(count=total, hidden=hidden_count)}</b>"
         )
 
-        # Используем спойлеры (||текст||) для изначально свёрнутого текста
         if core_lines:
-            core_text = "".join(core_lines)
-            body += f"\n||{core_text}\n||"
+            body += (
+                "\n<blockquote expandable>"
+                + "".join(core_lines)
+                + "\n</blockquote>"
+            )
 
         if plain_lines:
-            plain_text = "".join(plain_lines)
-            body += f"\n||{plain_text}\n||"
+            body += (
+                "\n<blockquote expandable>"
+                + "".join(plain_lines)
+                + "\n</blockquote>"
+            )
 
         banner = self.config["banner_url"]
         inline = self._inline()
@@ -179,11 +184,56 @@ class HelpModule(KitsuneModule):
 
         body = header
         if cmd_lines:
-            # Используем спойлеры для изначально свёрнутого списка команд
-            cmd_text = "\n".join(cmd_lines)
-            body += f"\n||\n{cmd_text}\n||"
+            body += (
+                "\n<blockquote expandable>\n"
+                + "\n".join(cmd_lines)
+                + "\n</blockquote>"
+            )
 
         await event.message.edit(body, parse_mode="html")
+
+    @command("helphide", required=OWNER)
+    async def helphide_cmd(self, event) -> None:
+        """.helphide <модуль> — скрыть/показать модуль в .help."""
+        args = self.get_args(event).strip().lower()
+        if not args:
+            await event.message.edit("❌ Укажи имя модуля.", parse_mode="html")
+            return
+
+        hidden: list[str] = self.db.get("kitsune.help", "hidden", []) if self.db else []
+        if args in hidden:
+            hidden.remove(args)
+            status = f"👁 Модуль <code>{args}</code> снова виден в .help."
+        else:
+            hidden.append(args)
+            status = f"🙈 Модуль <code>{args}</code> скрыт из .help."
+
+        if self.db:
+            await self.db.set("kitsune.help", "hidden", hidden)
+
+        await event.message.edit(status, parse_mode="html")
+")
+
+    # ─── callback handler ─────────────────────────────────────────────────
+
+    @command("help_callback", required=OWNER, hide=True)
+    async def help_callback_cmd(self, event) -> None:
+        """Обработчик callback-кнопок help."""
+        if not event.data:
+            return
+
+        data = event.data.decode() if isinstance(event.data, bytes) else event.data
+
+        if data == "help:expand":
+            loader = self._loader()
+            if loader:
+                body, keyboard = self._build_module_text(loader, show_all=True)
+                await event.edit(body, parse_mode="html", buttons=keyboard)
+        elif data == "help:collapse":
+            loader = self._loader()
+            if loader:
+                body, keyboard = self._build_module_text(loader, show_all=False)
+                await event.edit(body, parse_mode="html", buttons=keyboard)
 
     @command("helphide", required=OWNER)
     async def helphide_cmd(self, event) -> None:
