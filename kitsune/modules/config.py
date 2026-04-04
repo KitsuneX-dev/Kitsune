@@ -116,8 +116,8 @@ class ConfigModule(KitsuneModule):
         return lines or "—"
 
     async def _save_config(self, mod_name: str, mod) -> None:
-        values = {k: mod.config[k] for k in mod.config.keys()}
-        await self.db.set(f"{_DB_PREFIX}.{mod_name}", "values", values)
+        for k in mod.config.keys():
+            await self.db.set(f"{_DB_PREFIX}.{mod_name.lower()}", k, mod.config[k])
 
     async def _screen_choose_category(self, target):
         inline = self._inline()
