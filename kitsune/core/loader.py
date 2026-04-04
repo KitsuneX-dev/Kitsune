@@ -141,7 +141,7 @@ class KitsuneModule:
     def _load_config_from_db(self) -> None:
         if self.config is None:
             return
-        db_key = f"kitsune.config.{self.name}"
+        db_key = f"kitsune.config.{self.name.lower()}"
         for key in self.config.keys():
             saved = self.db.get(db_key, key, None)
             if saved is not None:
