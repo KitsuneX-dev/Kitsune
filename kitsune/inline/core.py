@@ -463,10 +463,6 @@ class InlineManager:
             _edit=call.message.edit_text if call.message else None,
         )
         wrapped.inline_message_id = call.inline_message_id or ""
-        logger.warning("_on_callback: data=%s inline_message_id=%r chat_id=%s msg_id=%s",
-                       call.data, call.inline_message_id,
-                       call.message.chat.id if call.message else None,
-                       call.message.message_id if call.message else None)
 
         try:
             await handler(wrapped, *args, **kwargs)
