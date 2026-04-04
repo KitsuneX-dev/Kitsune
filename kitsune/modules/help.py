@@ -97,7 +97,6 @@ class HelpModule(KitsuneModule):
         await self._full_help(event, loader)
 
     async def _full_help(self, event, loader) -> None:
-        prefix = self._prefix()
         hidden: list[str] = self.db.get("kitsune.help", "hidden", []) if self.db else []
 
         core_lines:  list[str] = []
@@ -126,10 +125,18 @@ class HelpModule(KitsuneModule):
         )
 
         if core_lines:
-            body += "\n<blockquote expandable>" + "".join(core_lines) + "\n</blockquote>"
+            body += (
+                "\n<blockquote expandable collapsed>"
+                + "".join(core_lines)
+                + "\n</blockquote>"
+            )
 
         if plain_lines:
-            body += "\n<blockquote expandable>" + "".join(plain_lines) + "\n</blockquote>"
+            body += (
+                "\n<blockquote expandable collapsed>"
+                + "".join(plain_lines)
+                + "\n</blockquote>"
+            )
 
         banner = self.config["banner_url"]
         inline = self._inline()
@@ -177,7 +184,11 @@ class HelpModule(KitsuneModule):
 
         body = header
         if cmd_lines:
-            body += "\n<blockquote expandable>\n" + "\n".join(cmd_lines) + "\n</blockquote>"
+            body += (
+                "\n<blockquote expandable collapsed>\n"
+                + "\n".join(cmd_lines)
+                + "\n</blockquote>"
+            )
 
         await event.message.edit(body, parse_mode="html")
 
