@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import inspect
 
+from telethon.extensions import html as tl_html
+from telethon.tl.types import MessageEntityBlockquote
+
 from ..core.loader import KitsuneModule, command, ModuleConfig, ConfigValue
 from ..core.security import OWNER
 
@@ -51,6 +54,20 @@ class HelpModule(KitsuneModule):
     }
 
     # ─── helpers ──────────────────────────────────────────────────────────
+
+    @staticmethod
+    async def _edit_collapsed(message, html_text: str) -> None:
+        """Редактировать сообщение с blockquote, которые свёрнуты по умолчанию.
+
+        Telethon парсит <blockquote expandable> как обычную цитату (collapsed=None),
+        игнорируя атрибут expandable. Этот метод парсит HTML, а затем вручную
+        выставляет collapsed=True на все MessageEntityBlockquote.
+        """
+        text, entities = tl_html.parse(html_text)
+        for e in entities:
+            if isinstance(e, MessageEntityBlockquote):
+                e.collapsed = True
+        await message.edit(text, formatting_entities=entities)
 
     def _prefix(self) -> str:
         d = getattr(self.client, "_kitsune_dispatcher", None)
@@ -146,7 +163,7 @@ class HelpModule(KitsuneModule):
             except Exception:
                 pass
 
-        await event.message.edit(body, parse_mode="html")
+        await self._edit_collapsed(event.message, body)
 
     async def _mod_help(self, event, mod: KitsuneModule) -> None:
         prefix  = self._prefix()
@@ -179,7 +196,7 @@ class HelpModule(KitsuneModule):
         if cmd_lines:
             body += "\n<blockquote expandable>\n" + "\n".join(cmd_lines) + "\n</blockquote>"
 
-        await event.message.edit(body, parse_mode="html")
+        await self._edit_collapsed(event.message, body)
 
     @command("helphide", required=OWNER)
     async def helphide_cmd(self, event) -> None:
