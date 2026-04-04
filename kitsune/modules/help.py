@@ -1,118 +1,203 @@
 from __future__ import annotations
 
-from ..core.loader import KitsuneModule, command
+import inspect
+
+from ..core.loader import KitsuneModule, command, ModuleConfig, ConfigValue
 from ..core.security import OWNER
 
-_BUILTIN_NAMES = {
-    "backup", "config", "eval", "health", "help", "info",
-    "loader", "notifier", "paste", "ping",
-    "security", "settings", "updater",
-}
-
-_DISPLAY_NAMES: dict[str, str] = {
-    "backup":   "Backup",
-    "config":   "Config",
-    "eval":     "Evaluator",
-    "health":   "Health",
-    "help":     "Help",
-    "info":     "Info",
-    "loader":   "Loader",
-    "notifier": "Notifier",
-    "paste":    "Pastebin",
-    "ping":     "Tester",
-    "security": "Security",
-    "settings": "Settings",
-    "updater":  "Updater",
-}
 
 class HelpModule(KitsuneModule):
+    """Список команд и модулей."""
+
     name        = "help"
     description = "Список команд и модулей"
-    author      = "Yushi"
+    author      = "@Mikasu32"
+    _builtin    = True
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.config = ModuleConfig(
+            ConfigValue(
+                "core_emoji",
+                default="▪️",
+                doc="Эмодзи для встроенных модулей. Можно вставить tg-emoji.",
+            ),
+            ConfigValue(
+                "plain_emoji",
+                default="▫️",
+                doc="Эмодзи для пользовательских модулей.",
+            ),
+            ConfigValue(
+                "desc_icon",
+                default="🦊",
+                doc="Иконка перед заголовком .help.",
+            ),
+            ConfigValue(
+                "command_emoji",
+                default="▫️",
+                doc="Эмодзи перед каждой командой в детальном .help <модуль>.",
+            ),
+            ConfigValue(
+                "banner_url",
+                default=None,
+                doc="Прямая ссылка на баннер (gif/mp4/jpg). Оставь пустым чтобы убрать.",
+            ),
+        )
 
     strings_ru = {
-        "header":     "🦊 <b>Kitsune Userbot</b> — {count} модулей загружено:\n\n",
-        "sys_header": "▪ <b>Системные модули:</b>\n",
-        "usr_header": "\n▫️ <b>Пользовательские модули:</b>\n",
-        "module_sys": "▪ <b>{name}:</b> ( {cmds} )\n",
-        "module_usr": "▫️ <b>{name}:</b> ( {cmds} )\n",
-        "no_modules": "Модули не загружены.",
+        "header":     "{count} модулей доступно, {hidden} скрыто:",
+        "no_modules": "⚙️ Модули не загружены.",
+        "no_mod":     "❌ Модуль <code>{name}</code> не найден.",
     }
+
+    # ─── helpers ──────────────────────────────────────────────────────────
+
+    def _prefix(self) -> str:
+        d = getattr(self.client, "_kitsune_dispatcher", None)
+        return d._prefix if d else "."
+
+    def _loader(self):
+        return getattr(self.client, "_kitsune_loader", None)
+
+    def _inline(self):
+        return getattr(self.client, "_kitsune_inline", None)
+
+    @staticmethod
+    def _get_cmds(mod: KitsuneModule) -> list[str]:
+        out = []
+        for attr in dir(mod):
+            m = getattr(mod, attr, None)
+            if callable(m) and getattr(m, "_is_command", False):
+                out.append(m._command_name)
+        return sorted(out)
+
+    # ─── команды ──────────────────────────────────────────────────────────
 
     @command("help", required=OWNER)
     async def help_cmd(self, event) -> None:
-        args = self.get_args(event)
-        loader = getattr(self.client, "_kitsune_loader", None)
-
-        if args:
-            mod_name = args.lower()
-            if loader:
-                mod = loader.modules.get(mod_name)
-                if mod:
-                    await self._send_module_help(event, mod)
-                    return
-            await event.reply(f"❌ Модуль <code>{mod_name}</code> не найден.", parse_mode="html")
-            return
+        """.help [модуль] — список всех модулей или детали модуля."""
+        args = self.get_args(event).strip()
+        loader = self._loader()
 
         if not loader or not loader.modules:
-            await event.reply(self.strings("no_modules"), parse_mode="html")
+            await event.message.edit(self.strings("no_modules"), parse_mode="html")
             return
 
-        dispatcher = getattr(self.client, "_kitsune_dispatcher", None)
-        prefix = dispatcher._prefix if dispatcher else "."
+        if args:
+            mod = loader.modules.get(args.lower())
+            if not mod:
+                await event.message.edit(
+                    self.strings("no_mod").format(name=args),
+                    parse_mode="html",
+                )
+                return
+            await self._mod_help(event, mod)
+            return
 
-        count = len(loader.modules)
-        text = self.strings("header").format(count=count)
+        await self._full_help(event, loader)
 
-        sys_mods = {}
-        usr_mods = {}
-        for name, mod in sorted(loader.modules.items()):
-            if getattr(mod, "_is_builtin", name in _BUILTIN_NAMES):
-                sys_mods[name] = mod
+    async def _full_help(self, event, loader) -> None:
+        prefix = self._prefix()
+        hidden: list[str] = self.db.get("kitsune.help", "hidden", []) if self.db else []
+
+        core_lines:  list[str] = []
+        plain_lines: list[str] = []
+
+        for name, mod in sorted(loader.modules.items(), key=lambda x: x[0].lower()):
+            cmds = self._get_cmds(mod)
+            if not cmds:
+                continue
+            is_core = getattr(mod, "_is_builtin", False)
+            icon    = self.config["core_emoji"] if is_core else self.config["plain_emoji"]
+            display = mod.name or name.capitalize()
+            hidden_mark = " 🙈" if name in hidden else ""
+            line = f"\n{icon} <code>{display}</code>{hidden_mark}: ( {' | '.join(cmds)} )"
+            if is_core:
+                core_lines.append(line)
             else:
-                usr_mods[name] = mod
+                plain_lines.append(line)
 
-        if sys_mods:
-            text += self.strings("sys_header")
-            for name, mod in sys_mods.items():
-                cmds = self._get_commands(mod)
-                display = _DISPLAY_NAMES.get(name) or (mod.name or name).capitalize()
-                cmds_str = " | ".join(f"<code>{prefix}{c}</code>" for c in cmds) if cmds else "—"
-                text += self.strings("module_sys").format(name=display, cmds=cmds_str)
+        total        = len(loader.modules)
+        hidden_count = len(hidden)
 
-        if usr_mods:
-            text += self.strings("usr_header")
-            for name, mod in usr_mods.items():
-                cmds = self._get_commands(mod)
-                display = _DISPLAY_NAMES.get(name) or (mod.name or name).capitalize()
-                cmds_str = " | ".join(f"<code>{prefix}{c}</code>" for c in cmds) if cmds else "—"
-                text += self.strings("module_usr").format(name=display, cmds=cmds_str)
+        body = (
+            f"{self.config['desc_icon']} "
+            f"<b>{self.strings('header').format(count=total, hidden=hidden_count)}</b>"
+        )
 
-        await event.reply(text, parse_mode="html")
+        if core_lines:
+            body += "\n<blockquote expandable>" + "".join(core_lines) + "\n</blockquote>"
 
-    async def _send_module_help(self, event, mod: KitsuneModule) -> None:
-        import inspect
-        lines = [
-            f"📦 <b>{mod.name}</b>  v{mod.version}",
-            f"<i>{mod.description or '—'}</i>\n",
-        ]
-        dispatcher = getattr(self.client, "_kitsune_dispatcher", None)
-        prefix = dispatcher._prefix if dispatcher else "."
-        for attr_name in dir(mod):
-            method = getattr(mod, attr_name, None)
-            if callable(method) and getattr(method, "_is_command", False):
-                doc = (inspect.getdoc(method) or "").strip()
-                cmd_name = method._command_name
-                if doc.startswith(("." + cmd_name, prefix + cmd_name)):
-                    doc = doc[len(prefix) + len(cmd_name):].lstrip(" —-")
-                lines.append(f"  • <code>{prefix}{cmd_name}</code> — {doc or '—'}")
-        await event.reply("\n".join(lines), parse_mode="html")
+        if plain_lines:
+            body += "\n<blockquote expandable>" + "".join(plain_lines) + "\n</blockquote>"
 
-    @staticmethod
-    def _get_commands(mod: KitsuneModule) -> list[str]:
-        cmds = []
-        for attr in dir(mod):
-            method = getattr(mod, attr, None)
-            if callable(method) and getattr(method, "_is_command", False):
-                cmds.append(method._command_name)
-        return sorted(cmds)
+        banner = self.config["banner_url"]
+        inline = self._inline()
+
+        if banner and inline and getattr(inline, "_bot", None):
+            try:
+                await inline.form(
+                    text=body,
+                    message=event.message,
+                    reply_markup=[],
+                    gif=banner,
+                )
+                return
+            except Exception:
+                pass
+
+        await event.message.edit(body, parse_mode="html")
+
+    async def _mod_help(self, event, mod: KitsuneModule) -> None:
+        prefix  = self._prefix()
+        icon    = self.config["desc_icon"]
+        display = mod.name or mod.__class__.__name__
+        version = getattr(mod, "version", "")
+        ver_str = f" <i>v{version}</i>" if version else ""
+
+        header = f"{icon} <b>{display}</b>{ver_str}:"
+        if mod.description:
+            header += f"\n<i>ℹ️ {mod.description}</i>"
+
+        cmd_lines = []
+        for attr in sorted(dir(mod)):
+            m = getattr(mod, attr, None)
+            if not (callable(m) and getattr(m, "_is_command", False)):
+                continue
+            cmd_name = m._command_name
+            doc = (inspect.getdoc(m) or "").strip()
+            if "—" in doc:
+                doc = doc.split("—", 1)[-1].strip()
+            elif doc.lower().startswith(f"{prefix}{cmd_name}") or doc.lower().startswith(f".{cmd_name}"):
+                doc = ""
+            cmd_lines.append(
+                f"{self.config['command_emoji']} <code>{prefix}{cmd_name}</code>"
+                + (f" — {doc}" if doc else "")
+            )
+
+        body = header
+        if cmd_lines:
+            body += "\n<blockquote expandable>\n" + "\n".join(cmd_lines) + "\n</blockquote>"
+
+        await event.message.edit(body, parse_mode="html")
+
+    @command("helphide", required=OWNER)
+    async def helphide_cmd(self, event) -> None:
+        """.helphide <модуль> — скрыть/показать модуль в .help."""
+        args = self.get_args(event).strip().lower()
+        if not args:
+            await event.message.edit("❌ Укажи имя модуля.", parse_mode="html")
+            return
+
+        hidden: list[str] = self.db.get("kitsune.help", "hidden", []) if self.db else []
+        if args in hidden:
+            hidden.remove(args)
+            status = f"👁 Модуль <code>{args}</code> снова виден в .help."
+        else:
+            hidden.append(args)
+            status = f"🙈 Модуль <code>{args}</code> скрыт из .help."
+
+        if self.db:
+            await self.db.set("kitsune.help", "hidden", hidden)
+
+        await event.message.edit(status, parse_mode="html")
