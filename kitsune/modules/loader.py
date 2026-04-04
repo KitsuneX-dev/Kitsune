@@ -1,347 +1,416 @@
-
 from __future__ import annotations
 
+import ast
 import asyncio
+import importlib
+import importlib.util
+import inspect
 import logging
 import os
-import tempfile
+import sys
+import typing
 from pathlib import Path
-
-from ..core.loader import KitsuneModule, command, ModuleLoadError, ASTSecurityError
-from ..core.security import OWNER
-from ..utils import auto_delete, ProgressMessage
-from ..hydro_media import download_media as hydro_download
+from types import ModuleType
 
 logger = logging.getLogger(__name__)
 
-_DB_OWNER         = "kitsune.loader"
-_DB_KEY_MODS      = "user_modules"
-_USER_MODULES_DIR = Path.home() / ".kitsune" / "modules"
+_BLOCKED_IMPORTS: frozenset[str] = frozenset({
+    "subprocess", "pty", "ctypes", "multiprocessing",
+    "socket", "importlib", "pickle", "marshal",
+    "code", "codeop", "compileall", "py_compile",
+    "shelve", "dbm", "zipimport", "zipapp",
+    "runpy", "distutils",
+})
 
-_ALLOWED_HOSTS = {"raw.githubusercontent.com", "github.com", "gist.githubusercontent.com"}
+_BUILTIN_MODULES_DIR = Path(__file__).parent.parent / "modules"
 
-def _is_github_url(url: str) -> bool:
-    try:
-        from urllib.parse import urlparse
-        host = urlparse(url).netloc.lower().lstrip("www.")
-        return host in _ALLOWED_HOSTS
-    except Exception:
-        return False
 
-class LoaderModule(KitsuneModule):
-    name        = "loader"
-    description = "Управление модулями"
-    author      = "Yushi"
+class ModuleLoadError(Exception):
+    pass
 
-    strings_ru = {
-        "loading":        "⏳ Загружаю <code>{name}</code>...",
-        "loaded":         "✅ Модуль <b>{name}</b> v{ver} загружен.",
-        "reloaded":       "🔄 Модуль <b>{name}</b> v{ver} перезагружен.",
-        "unloaded":       "✅ Модуль <b>{name}</b> выгружен.",
-        "not_found":      "❌ Модуль <code>{name}</code> не найден.",
-        "security_err":   "🚫 Модуль отклонён (нарушение безопасности):\n<code>{err}</code>",
-        "load_err":       "❌ Ошибка загрузки:\n<code>{err}</code>",
-        "requires_err":   "🔗 Сначала загрузи зависимости:\n<code>{deps}</code>",
-        "not_github":     "❌ Только GitHub! Укажи ссылку на raw.githubusercontent.com",
-        "no_url":         "❌ Укажи ссылку: <code>.dlmod https://raw.githubusercontent.com/...</code>",
-        "no_file":        "❌ Ответь на .py файл чтобы загрузить модуль.",
-        "no_name":        "❌ Укажи имя модуля: <code>.unloadmod имя</code>",
-        "mods_header":    "📦 <b>Загружённые модули:</b>\n\n",
-        "mod_line":       "  • <b>{name}</b> v{ver} — {desc}\n",
-        "no_mods":        "Нет загруженных модулей.",
-        "watch_on":       "👁 Слежу за изменениями в <code>~/.kitsune/modules/</code>",
-        "watch_off":      "👁 Слежение за файлами отключено.",
-        "auto_reload":    "🔄 Авто-перезагрузка: <b>{name}</b>",
-        "auto_err":       "❌ Авто-перезагрузка <b>{name}</b> провалилась:\n<code>{err}</code>",
-    }
 
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
-        self._watch_mtimes: dict[str, float] = {}
-        self._watch_task: asyncio.Task | None = None
+class ASTSecurityError(ModuleLoadError):
+    pass
+
+
+class ConfigValue:
+
+    def __init__(
+        self,
+        key: str,
+        default: typing.Any = None,
+        doc: str = "",
+        validator: typing.Any = None,
+    ) -> None:
+        self.key = key
+        self.default = default
+        self.doc = doc
+        self.validator = validator
+        self.value = default
+
+    def set(self, raw_value: typing.Any) -> None:
+        if self.validator is not None:
+            from ..validators import ValidationError
+            try:
+                self.value = self.validator.validate(raw_value)
+            except ValidationError:
+                raise
+        else:
+            self.value = raw_value
+
+
+class ModuleConfig:
+
+    def __init__(self, *values: ConfigValue) -> None:
+        self._config: dict[str, ConfigValue] = {v.key: v for v in values}
+
+    def __getitem__(self, key: str) -> typing.Any:
+        return self._config[key].value
+
+    def __setitem__(self, key: str, value: typing.Any) -> None:
+        self._config[key].set(value)
+
+    def __contains__(self, key: object) -> bool:
+        return key in self._config
+
+    def __iter__(self):
+        return iter(self._config)
+
+    def keys(self):
+        return self._config.keys()
+
+    def items(self):
+        return {k: v.value for k, v in self._config.items()}.items()
+
+    def get_default(self, key: str) -> typing.Any:
+        return self._config[key].default
+
+    def get_doc(self, key: str) -> str:
+        return self._config[key].doc
+
+    def get_validator(self, key: str) -> typing.Any:
+        return self._config[key].validator
+
+    def get_config_value(self, key: str) -> ConfigValue:
+        return self._config[key]
+
+
+class KitsuneModule:
+
+    name: str = ""
+    description: str = ""
+    author: str = ""
+    version: str = "1.0"
+    icon: str = "📦"
+    category: str = "other"
+    requires: typing.ClassVar[list[str]] = []
+
+    def __init__(self, client: typing.Any, db: typing.Any) -> None:
+        self.client = client
+        self.db = db
+        self.tg_id: int = 0
+        self.inline: typing.Any = None
+        if not hasattr(self, "config"):
+            self.config: ModuleConfig | None = None
 
     async def on_load(self) -> None:
-        saved = self.db.get(_DB_OWNER, _DB_KEY_MODS, [])
-        if saved:
-            loader = self._get_loader()
-            if loader:
-                for url in saved:
-                    try:
-                        await loader.load_from_url(url)
-                    except Exception as exc:
-                        logger.warning("Loader: failed to restore %s — %s", url, exc)
-
-        if self.db.get(_DB_OWNER, "watch_enabled", False):
-            self._start_watcher()
+        pass
 
     async def on_unload(self) -> None:
-        self._stop_watcher()
+        pass
 
-    @command("dlmod", required=OWNER)
-    async def dlmod_cmd(self, event) -> None:
-        url = self.get_args(event).strip()
-        if not url:
-            await event.reply(self.strings("no_url"), parse_mode="html")
+    def get_args(self, event: "typing.Any") -> str:
+        dispatcher = getattr(self.client, "_kitsune_dispatcher", None)
+        prefix = dispatcher._prefix if dispatcher else "."
+        text = event.message.raw_text or event.message.text or ""
+        if text.startswith(prefix):
+            parts = text.split(maxsplit=1)
+            return parts[1] if len(parts) > 1 else ""
+        return ""
+
+    def strings(self, key: str, **kwargs: typing.Any) -> str:
+        db = getattr(self, "db", None)
+        lang = db.get("kitsune.core", "lang", "ru") if db else "ru"
+
+        strings_key = f"strings_{lang}" if lang != "en" else "strings"
+        strings = getattr(self, strings_key, None) or getattr(self, "strings_ru", None) or getattr(self, "strings", {})
+
+        text = strings.get(key, key) if isinstance(strings, dict) else key
+        return text.format(**kwargs) if kwargs else text
+
+    def _load_config_from_db(self) -> None:
+        if self.config is None:
             return
+        db_key = f"kitsune.config.{self.name.lower()}"
+        for key in self.config.keys():
+            saved = self.db.get(db_key, key, None)
+            if saved is not None:
+                try:
+                    self.config[key] = saved
+                except Exception:
+                    pass
 
-        if not _is_github_url(url):
-            await event.reply(self.strings("not_github"), parse_mode="html")
-            return
 
-        url = _to_raw_url(url)
+def command(
+    name: str | None = None,
+    *,
+    required: int = 0,
+    aliases: list[str] | None = None,
+) -> typing.Callable:
+    def decorator(func: typing.Callable) -> typing.Callable:
+        func._is_command = True
+        func._command_name = name or func.__name__.removesuffix("_cmd")
+        func._required = required
+        func._aliases = aliases or []
+        return func
+    return decorator
 
-        m = await event.reply(
-            self.strings("loading").format(name=url.split("/")[-1]),
-            parse_mode="html",
+
+def watcher(
+    filter_func: typing.Callable | None = None,
+) -> typing.Callable:
+    def decorator(func: typing.Callable) -> typing.Callable:
+        func._is_watcher = True
+        func._watcher_filter = filter_func
+        return func
+    return decorator
+
+
+class _ASTScanner(ast.NodeVisitor):
+
+    def __init__(self) -> None:
+        self.errors: list[str] = []
+
+    def visit_Import(self, node: ast.Import) -> None:
+        for alias in node.names:
+            root = alias.name.split(".")[0]
+            if root in _BLOCKED_IMPORTS:
+                self.errors.append(f"Blocked import: {alias.name} (line {node.lineno})")
+        self.generic_visit(node)
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        if node.module:
+            root = node.module.split(".")[0]
+            if root in _BLOCKED_IMPORTS:
+                self.errors.append(f"Blocked import: {node.module} (line {node.lineno})")
+        self.generic_visit(node)
+
+    def visit_Call(self, node: ast.Call) -> None:
+        if isinstance(node.func, ast.Name) and node.func.id == "__import__":
+            if node.args and isinstance(node.args[0], ast.Constant):
+                root = str(node.args[0].value).split(".")[0]
+                if root in _BLOCKED_IMPORTS:
+                    self.errors.append(
+                        f"Blocked __import__: {node.args[0].value} (line {node.lineno})"
+                    )
+        self.generic_visit(node)
+
+
+def _scan_ast(source: str, filename: str = "<module>") -> None:
+    try:
+        tree = ast.parse(source, filename=filename)
+    except SyntaxError as exc:
+        raise ModuleLoadError(f"Syntax error: {exc}") from exc
+
+    scanner = _ASTScanner()
+    scanner.visit(tree)
+
+    if scanner.errors:
+        raise ASTSecurityError(
+            "Security scan failed:\n" + "\n".join(f"  • {e}" for e in scanner.errors)
         )
-        loader = self._get_loader()
-        if not loader:
+
+
+class Loader:
+
+    def __init__(
+        self,
+        client: typing.Any,
+        db: typing.Any,
+        dispatcher: typing.Any,
+    ) -> None:
+        self._client = client
+        self._db = db
+        self._dispatcher = dispatcher
+        self._modules: dict[str, KitsuneModule] = {}
+
+    @property
+    def modules(self) -> dict[str, KitsuneModule]:
+        return self._modules
+
+    def get_modules(self) -> dict[str, KitsuneModule]:
+        return dict(self._modules)
+
+    def get_module(self, name: str) -> KitsuneModule | None:
+        return self._modules.get(name.lower())
+
+    async def load_all_builtin(self) -> None:
+        if not _BUILTIN_MODULES_DIR.exists():
             return
 
-        try:
-            async with ProgressMessage(
-                event,
-                f"⬇️ Загружаю <code>{url.split('/')[-1]}</code>...",
-                total=3,
-            ) as prog:
-                await prog.update(1)
-                mod = await loader.load_from_url(url)
-                await prog.update(2)
-                saved = list(self.db.get(_DB_OWNER, _DB_KEY_MODS, []))
-                if url not in saved:
-                    saved.append(url)
-                    await self.db.set(_DB_OWNER, _DB_KEY_MODS, saved)
-                await prog.done(
-                    self.strings("loaded").format(name=mod.name, ver=mod.version)
-                )
-        except ASTSecurityError as exc:
-            await m.edit(self.strings("security_err").format(err=str(exc)), parse_mode="html")
-            await auto_delete(m, delay=10)
-        except ModuleLoadError as exc:
-            await m.edit(self._fmt_load_err(exc), parse_mode="html")
-            await auto_delete(m, delay=10)
-        except Exception as exc:
-            await m.edit(self.strings("load_err").format(err=str(exc)), parse_mode="html")
-            await auto_delete(m, delay=10)
-
-    @command("loadmod", required=OWNER)
-    async def loadmod_cmd(self, event) -> None:
-        reply = await event.message.get_reply_message()
-        if not reply or not reply.file:
-            await event.reply(self.strings("no_file"), parse_mode="html")
-            return
-
-        fname = getattr(reply.file, "name", "") or ""
-        if not fname.endswith(".py"):
-            await event.reply("❌ Файл должен быть .py", parse_mode="html")
-            return
-
-        m = await event.reply(
-            self.strings("loading").format(name=fname),
-            parse_mode="html",
-        )
-        loader = self._get_loader()
-        if not loader:
-            return
-
-        try:
-            raw: bytes = await hydro_download(self.client, reply)
-            source = raw.decode("utf-8")
-
-            _USER_MODULES_DIR.mkdir(parents=True, exist_ok=True)
-            dest = _USER_MODULES_DIR / fname
-            dest.write_text(source, encoding="utf-8")
-
-            mod = await loader.load_from_file(dest)
-            await m.edit(
-                self.strings("loaded").format(name=mod.name, ver=mod.version),
-                parse_mode="html",
-            )
-        except ASTSecurityError as exc:
-            await m.edit(self.strings("security_err").format(err=str(exc)), parse_mode="html")
-        except ModuleLoadError as exc:
-            await m.edit(self._fmt_load_err(exc), parse_mode="html")
-        except Exception as exc:
-            await m.edit(self.strings("load_err").format(err=str(exc)), parse_mode="html")
-
-    @command("unloadmod", required=OWNER)
-    async def unloadmod_cmd(self, event) -> None:
-        name = self.get_args(event).strip().lower()
-        if not name:
-            await event.reply(self.strings("no_name"), parse_mode="html")
-            return
-
-        loader = self._get_loader()
-        if loader and await loader.unload(name):
-            saved = [u for u in self.db.get(_DB_OWNER, _DB_KEY_MODS, []) if name not in u.lower()]
-            await self.db.set(_DB_OWNER, _DB_KEY_MODS, saved)
-            await event.reply(self.strings("unloaded").format(name=name), parse_mode="html")
-        else:
-            await event.reply(self.strings("not_found").format(name=name), parse_mode="html")
-
-    @command("reloadmod", required=OWNER)
-    async def reloadmod_cmd(self, event) -> None:
-        name = self.get_args(event).strip().lower()
-        if not name:
-            await event.reply("❌ Укажи имя модуля.", parse_mode="html")
-            return
-
-        loader = self._get_loader()
-        if not loader:
-            return
-
-        path = self._find_module_path(name)
-
-        if path is None:
-            saved_urls: list[str] = self.db.get(_DB_OWNER, _DB_KEY_MODS, [])
-            url = next((u for u in saved_urls if name in u.lower()), None)
-            if not url:
-                await event.reply(self.strings("not_found").format(name=name), parse_mode="html")
-                return
-            m = await event.reply(self.strings("loading").format(name=name), parse_mode="html")
+        for path in sorted(_BUILTIN_MODULES_DIR.glob("*.py")):
+            if path.name.startswith("_"):
+                continue
             try:
-                mod = await loader.load_from_url(url)
-                await m.edit(
-                    self.strings("reloaded").format(name=mod.name, ver=mod.version),
-                    parse_mode="html",
-                )
-            except Exception as exc:
-                await m.edit(self.strings("load_err").format(err=str(exc)), parse_mode="html")
-            return
-
-        m = await event.reply(self.strings("loading").format(name=name), parse_mode="html")
-        try:
-            mod = await loader.load_from_file(path)
-            await m.edit(
-                self.strings("reloaded").format(name=mod.name, ver=mod.version),
-                parse_mode="html",
-            )
-        except ASTSecurityError as exc:
-            await m.edit(self.strings("security_err").format(err=str(exc)), parse_mode="html")
-        except ModuleLoadError as exc:
-            await m.edit(self._fmt_load_err(exc), parse_mode="html")
-        except Exception as exc:
-            await m.edit(self.strings("load_err").format(err=str(exc)), parse_mode="html")
-
-    @command("watchmod", required=OWNER)
-    async def watchmod_cmd(self, event) -> None:
-        enabled = not self.db.get(_DB_OWNER, "watch_enabled", False)
-        await self.db.set(_DB_OWNER, "watch_enabled", enabled)
-        if enabled:
-            self._start_watcher()
-            await event.reply(self.strings("watch_on"), parse_mode="html")
-        else:
-            self._stop_watcher()
-            await event.reply(self.strings("watch_off"), parse_mode="html")
-
-    @command("mods", required=OWNER)
-    async def mods_cmd(self, event) -> None:
-        loader = self._get_loader()
-        if not loader or not loader.modules:
-            await event.reply(self.strings("no_mods"), parse_mode="html")
-            return
-
-        text = self.strings("mods_header")
-        for mod_name, mod in sorted(loader.modules.items()):
-            text += self.strings("mod_line").format(
-                name=mod.name or mod_name,
-                ver=mod.version,
-                desc=mod.description or "—",
-            )
-        await event.reply(text, parse_mode="html")
-
-    @command("dlm", required=OWNER)
-    async def dlm_cmd(self, event) -> None:
-        await self.dlmod_cmd(event)
-
-    @command("lm", required=OWNER)
-    async def lm_cmd(self, event) -> None:
-        await self.loadmod_cmd(event)
-
-    def _start_watcher(self) -> None:
-        self._stop_watcher()
-        self._watch_mtimes = self._scan_mtimes()
-        self._watch_task = asyncio.ensure_future(self._watch_loop())
-        logger.info("Loader: file watcher started")
-
-    def _stop_watcher(self) -> None:
-        if self._watch_task and not self._watch_task.done():
-            self._watch_task.cancel()
-        self._watch_task = None
-
-    def _scan_mtimes(self) -> dict[str, float]:
-        mtimes: dict[str, float] = {}
-        if _USER_MODULES_DIR.exists():
-            for path in _USER_MODULES_DIR.glob("*.py"):
-                if not path.name.startswith("_"):
-                    try:
-                        mtimes[path.name] = path.stat().st_mtime
-                    except OSError:
-                        pass
-        return mtimes
-
-    async def _watch_loop(self) -> None:
-        while True:
-            await asyncio.sleep(2)
-            try:
-                await self._check_changes()
-            except asyncio.CancelledError:
-                break
+                await self._load_from_path(path, is_builtin=True)
             except Exception:
-                logger.exception("Loader: watcher error")
+                logger.exception("Loader: failed to load builtin %s", path.name)
 
-    async def _check_changes(self) -> None:
-        current = self._scan_mtimes()
-        loader  = self._get_loader()
-        if not loader:
+    async def load_all_user(self) -> None:
+        user_dir = Path.home() / ".kitsune" / "modules"
+        if not user_dir.exists():
             return
-        for filename, mtime in current.items():
-            old = self._watch_mtimes.get(filename)
-            if old is None or mtime != old:
-                path = _USER_MODULES_DIR / filename
-                logger.info("Loader: file %s — reloading", filename)
-                await self._auto_reload(loader, path)
-        self._watch_mtimes = current
 
-    async def _auto_reload(self, loader, path: Path) -> None:
+        for path in sorted(user_dir.glob("*.py")):
+            try:
+                await self._load_from_path(path, is_builtin=False)
+            except Exception:
+                logger.exception("Loader: failed to load user module %s", path.name)
+
+    async def load_from_url(self, url: str) -> KitsuneModule:
+        import aiohttp
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+                resp.raise_for_status()
+                source = await resp.text()
+
+        _scan_ast(source, filename=url)
+
+        user_dir = Path.home() / ".kitsune" / "modules"
+        user_dir.mkdir(parents=True, exist_ok=True)
+
+        filename = url.rstrip("/").split("/")[-1]
+        if not filename.endswith(".py"):
+            filename += ".py"
+
+        path = user_dir / filename
+        path.write_text(source, encoding="utf-8")
+
+        return await self._load_from_path(path, is_builtin=False)
+
+    async def load_from_file(self, path: Path) -> KitsuneModule:
+        source = path.read_text(encoding="utf-8")
+        _scan_ast(source, filename=str(path))
+        return await self._load_from_path(path, is_builtin=False)
+
+    async def unload_module(self, name: str) -> bool:
+        mod = self._modules.get(name.lower())
+        if mod is None:
+            return False
+
         try:
-            mod = await loader.load_from_file(path)
-            await self.client.send_message(
-                "me",
-                self.strings("auto_reload").format(name=mod.name),
-                parse_mode="html",
-            )
+            await mod.on_unload()
+        except Exception:
+            logger.exception("Loader: on_unload failed for %s", name)
+
+        for cmd_name in list(self._dispatcher._commands):
+            handler, _ = self._dispatcher._commands[cmd_name]
+            if getattr(handler, "__self__", None) is mod:
+                self._dispatcher.unregister_command(cmd_name)
+
+        self._dispatcher.unregister_watchers_for(mod)
+
+        from ..events import bus
+        bus.unsubscribe_all(mod)
+
+        del self._modules[name.lower()]
+        logger.info("Loader: unloaded %s", name)
+        return True
+
+    async def reload_module(self, name: str) -> KitsuneModule:
+        mod = self._modules.get(name.lower())
+        if mod is None:
+            raise ModuleLoadError(f"Module {name!r} not loaded")
+
+        source_info = getattr(mod, "_source_path", None)
+        source_url = getattr(mod, "_source_url", None)
+
+        await self.unload_module(name)
+
+        if source_url:
+            return await self.load_from_url(source_url)
+        if source_info:
+            return await self._load_from_path(Path(source_info), is_builtin=False)
+
+        raise ModuleLoadError(f"Cannot reload {name!r}: source unknown")
+
+    async def _load_from_path(self, path: Path, *, is_builtin: bool) -> KitsuneModule:
+        source = path.read_text(encoding="utf-8")
+
+        if not is_builtin:
+            _scan_ast(source, filename=str(path))
+
+        module_name = f"kitsune.modules.{path.stem}"
+
+        spec = importlib.util.spec_from_file_location(module_name, path)
+        if spec is None or spec.loader is None:
+            raise ModuleLoadError(f"Cannot create module spec for {path}")
+
+        py_module = importlib.util.module_from_spec(spec)
+        py_module.__loader__ = spec.loader
+        sys.modules[module_name] = py_module
+
+        try:
+            spec.loader.exec_module(py_module)
         except Exception as exc:
-            logger.error("Loader: auto-reload failed for %s — %s", path.name, exc)
-            await self.client.send_message(
-                "me",
-                self.strings("auto_err").format(name=path.stem, err=str(exc)[:300]),
-                parse_mode="html",
-            )
+            del sys.modules[module_name]
+            raise ModuleLoadError(f"Execution failed: {exc}") from exc
 
-    def _get_loader(self):
-        return getattr(self.client, "_kitsune_loader", None)
+        mod_class = self._find_module_class(py_module)
+        if mod_class is None:
+            del sys.modules[module_name]
+            raise ModuleLoadError(f"No KitsuneModule subclass found in {path.name}")
 
-    def _find_module_path(self, name: str) -> Path | None:
-        user_path = _USER_MODULES_DIR / f"{name}.py"
-        if user_path.exists():
-            return user_path
-        from ..core.loader import _BUILTIN_MODULES_DIR
-        builtin_path = _BUILTIN_MODULES_DIR / f"{name}.py"
-        if builtin_path.exists():
-            return builtin_path
+        if mod_class.requires:
+            missing = [r for r in mod_class.requires if r not in self._modules]
+            if missing:
+                del sys.modules[module_name]
+                raise ModuleLoadError(
+                    f"Missing dependencies: {', '.join(missing)}"
+                )
+
+        mod = mod_class(self._client, self._db)
+        mod.tg_id = self._client.tg_id
+        mod._source_path = str(path)
+        mod._is_builtin = is_builtin
+
+        mod._load_config_from_db()
+
+        existing = self._modules.get(mod.name.lower())
+        if existing:
+            await self.unload_module(mod.name)
+
+        await mod.on_load()
+        self._modules[mod.name.lower()] = mod
+        self._register_module(mod)
+
+        from .._types import ModuleLoadedEvent
+        from ..events import bus
+        bus.emit_sync(ModuleLoadedEvent(module_name=mod.name, is_builtin=is_builtin))
+
+        logger.info("Loader: loaded %s v%s (%s)", mod.name, mod.version, path.name)
+        return mod
+
+    def _find_module_class(self, py_module: ModuleType) -> type | None:
+        for obj in vars(py_module).values():
+            if (
+                inspect.isclass(obj)
+                and issubclass(obj, KitsuneModule)
+                and obj is not KitsuneModule
+            ):
+                return obj
         return None
 
-    def _fmt_load_err(self, exc: ModuleLoadError) -> str:
-        err = str(exc)
-        if "requires" in err:
-            deps = err.split("requires")[-1].strip().strip("[]").replace("'", "")
-            return self.strings("requires_err").format(deps=deps)
-        return self.strings("load_err").format(err=err)
+    def _register_module(self, mod: KitsuneModule) -> None:
+        for _, method in inspect.getmembers(mod, predicate=inspect.ismethod):
+            if getattr(method, "_is_command", False):
+                name = method._command_name
+                required = method._required
+                self._dispatcher.register_command(name, method, required)
 
-def _to_raw_url(url: str) -> str:
-    if "raw.githubusercontent.com" in url:
-        return url
-    url = url.replace("https://github.com/", "https://raw.githubusercontent.com/")
-    url = url.replace("/blob/", "/")
-    return url
+                for alias in getattr(method, "_aliases", []):
+                    self._dispatcher.register_command(alias, method, required)
+
+            if getattr(method, "_is_watcher", False):
+                filter_func = method._watcher_filter
+                self._dispatcher.register_watcher(method, filter_func)
