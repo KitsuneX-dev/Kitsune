@@ -383,6 +383,36 @@ _tg_formatter = logging.Formatter(
     fmt="[%(levelname)s] %(name)s: %(message)s\n",
 )
 
+
+class _NetworkNoiseFilter(logging.Filter):
+    """Фильтрует повторяющиеся сетевые ошибки которые восстанавливаются сами."""
+
+    _SUPPRESS_FRAGMENTS = (
+        "Failed to fetch updates",
+        "Sleep for",
+        "Server closed the connection",
+        "Connection reset by peer",
+        "ClientConnectorCertificateError",
+        "ClientConnectorError",
+        "SSLCertVerificationError",
+        "CERTIFICATE_VERIFY_FAILED",
+        "ssl:True",
+        "ssl:default",
+        "ConnectionError",
+        "Cannot connect to host api.telegram.org",
+        "Timeout ctx manager",
+        "TimeoutError",
+    )
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        msg = record.getMessage()
+        # Пропускаем запись (возвращаем False = не логировать)
+        # только если уровень WARNING/ERROR и это известный сетевой шум
+        if record.levelno in (logging.WARNING, logging.ERROR):
+            if any(frag in msg for frag in self._SUPPRESS_FRAGMENTS):
+                return False
+        return True
+
 rotating_handler = RotatingFileHandler(
     filename=str(LOG_FILE),
     mode="a",
@@ -497,5 +527,11 @@ def init() -> None:
 
     for noisy in ("telethon", "pyrogram", "matplotlib", "aiohttp", "aiogram", "httpx"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
+
+    # Подавляем конкретный спам от сетевых ошибок которые самовосстанавливаются
+    _network_noise_filter = _NetworkNoiseFilter()
+    logging.getLogger("aiogram.dispatcher").addFilter(_network_noise_filter)
+    logging.getLogger("telethon.network.connection.connection").addFilter(_network_noise_filter)
+    logging.getLogger("telethon.network.mtprotosender").addFilter(_network_noise_filter)
 
     logging.captureWarnings(True)

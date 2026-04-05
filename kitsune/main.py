@@ -218,16 +218,49 @@ async def _startup(args: argparse.Namespace) -> None:
         try:
             await client.connect()
         except (TimeoutError, OSError, ConnectionError) as exc:
-            print(
-                "\n❌ Не удалось подключиться к Telegram.\n"
-                "   Попробуй настроить прокси в config.toml:\n\n"
-                "      [proxy]\n"
-                "      type = \"SOCKS5\"\n"
-                "      host = \"127.0.0.1\"\n"
-                "      port = 1080\n\n"
-                f"   Детали: {exc}\n"
-            )
-            sys.exit(1)
+            logger.warning("main: direct connection failed (%s), trying RKN bypass…", exc)
+            from .rkn_bypass import find_working_proxy, get_connection_class
+            from telethon.network.connection import ConnectionTcpMTProxyRandomizedIntermediate
+            import asyncio as _asyncio
+
+            proxy_info = _asyncio.get_event_loop().run_until_complete(find_working_proxy()) if not asyncio.get_event_loop().is_running() else None
+            # В async-контексте ищем прокси правильно
+            try:
+                proxy_info = await find_working_proxy()
+            except Exception:
+                proxy_info = None
+
+            if proxy_info:
+                host, port, secret = proxy_info
+                logger.info("main: using MTProto proxy %s:%d for RKN bypass", host, port)
+                client = KitsuneTelegramClient(
+                    str(session_path),
+                    api_id=api_id,
+                    api_hash=api_hash,
+                    connection_retries=10,
+                    retry_delay=3,
+                    auto_reconnect=True,
+                    flood_sleep_threshold=60,
+                    device_model="Kitsune Userbot",
+                    system_version="1.0",
+                    app_version="1.0.0",
+                    lang_code="ru",
+                    proxy=(host, port, secret),
+                    connection=ConnectionTcpMTProxyRandomizedIntermediate,
+                )
+                await client.connect()
+            else:
+                print(
+                    "\n❌ Не удалось подключиться к Telegram.\n"
+                    "   Попробуй настроить прокси в config.toml:\n\n"
+                    "      [proxy]\n"
+                    "      type = \"MTPROTO\"\n"
+                    "      host = \"149.154.175.100\"\n"
+                    "      port = 443\n"
+                    "      secret = \"ee9000000000000000000000000000003900000000000000\"\n\n"
+                    f"   Детали: {exc}\n"
+                )
+                sys.exit(1)
 
         session_size = session_file.stat().st_size if session_file.exists() else 0
         if session_size < 100:

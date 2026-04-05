@@ -717,9 +717,25 @@ class NotifierModule(KitsuneModule):
                         await backup.show_interval_setup(self._bot, int(owner_id))
                         await self.db.set(_DB_OWNER, "backup_interval_asked", True)
 
-        except Exception:
-            logger.exception("Notifier: polling failed — bot may be frozen")
-            await self.client.send_message("me", self.strings("frozen_hint"), parse_mode="html")
+        except Exception as exc:
+            err_str = str(exc).lower()
+            # Сетевые ошибки — это не заморозка, просто нет интернета
+            _network_keywords = (
+                "network", "connection", "ssl", "timeout", "certificate",
+                "connect", "resolve", "reset", "eof", "broken pipe",
+            )
+            is_network = any(kw in err_str for kw in _network_keywords)
+
+            if is_network:
+                logger.warning("Notifier: polling failed due to network error — will retry: %s", exc)
+                # Просто перезапустим через минуту, без уведомления пользователя
+                await asyncio.sleep(60)
+                token = self.db.get(_DB_OWNER, "bot_token", None)
+                if token:
+                    asyncio.ensure_future(self._start_polling(str(token), first_run=False))
+            else:
+                logger.exception("Notifier: polling failed — bot may be frozen")
+                await self.client.send_message("me", self.strings("frozen_hint"), parse_mode="html")
 
     async def _stop_polling(self) -> None:
         if self._polling_task and not self._polling_task.done():
