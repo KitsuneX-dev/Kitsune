@@ -92,7 +92,7 @@ class KitsuneSettingsModule(KitsuneModule):
         await self.db.set(_DB_MAIN, "nonick_users", users)
         try:
             u = await self.client.get_entity(uid)
-            from herokutl.utils import get_display_name
+            from telethon.utils import get_display_name
             name = _esc(get_display_name(u))
         except Exception:
             name = str(uid)
@@ -146,7 +146,7 @@ class KitsuneSettingsModule(KitsuneModule):
         for uid in users:
             try:
                 u = await self.client.get_entity(uid)
-                from herokutl.utils import get_display_name
+                from telethon.utils import get_display_name
                 lines.append(f'▫️ <a href="tg://user?id={uid}">{_esc(get_display_name(u))}</a>')
             except Exception:
                 lines.append(f"▫️ <code>{uid}</code>")
@@ -163,7 +163,7 @@ class KitsuneSettingsModule(KitsuneModule):
         for cid in chats:
             try:
                 c = await self.client.get_entity(int(cid))
-                from herokutl.utils import get_display_name
+                from telethon.utils import get_display_name
                 lines.append(f"▫️ <b>{_esc(get_display_name(c))}</b> <code>{cid}</code>")
             except Exception:
                 lines.append(f"▫️ <code>{cid}</code>")

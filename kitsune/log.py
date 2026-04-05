@@ -292,7 +292,7 @@ class KitsuneLogsHandler(logging.Handler):
 
     async def _show_full_trace(self, call: typing.Any, bot: typing.Any, item: KitsuneException) -> None:
         from . import utils
-        import herokutl.extensions.html as tl_html
+        import telethon.extensions.html as tl_html
         chunks_text = item.message + "\n\n<b>🪐 Full traceback:</b>\n" + item.full_stack
         chunks = list(utils.smart_split(*tl_html.parse(chunks_text), 4096))
         await call.edit(chunks[0])
@@ -525,13 +525,13 @@ def init() -> None:
     root.addHandler(KitsuneLogsHandler([console_handler, rotating_handler], capacity=7000))
     root.setLevel(logging.NOTSET)
 
-    for noisy in ("herokutl", "pyrogram", "matplotlib", "aiohttp", "aiogram", "httpx"):
+    for noisy in ("telethon", "pyrogram", "matplotlib", "aiohttp", "aiogram", "httpx"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
     # Подавляем конкретный спам от сетевых ошибок которые самовосстанавливаются
     _network_noise_filter = _NetworkNoiseFilter()
     logging.getLogger("aiogram.dispatcher").addFilter(_network_noise_filter)
-    logging.getLogger("herokutl.network.connection.connection").addFilter(_network_noise_filter)
-    logging.getLogger("herokutl.network.mtprotosender").addFilter(_network_noise_filter)
+    logging.getLogger("telethon.network.connection.connection").addFilter(_network_noise_filter)
+    logging.getLogger("telethon.network.mtprotosender").addFilter(_network_noise_filter)
 
     logging.captureWarnings(True)

@@ -97,7 +97,7 @@ class WebCore:
     async def _handle_devices(self, request: "aiohttp.web.Request") -> "aiohttp.web.Response":
         devices = []
         try:
-            from herokutl.tl.functions.account import GetAuthorizationsRequest
+            from telethon.tl.functions.account import GetAuthorizationsRequest
             result = await self._client(GetAuthorizationsRequest())
             me = self._client.tg_me
             username = f"@{me.username}" if me and getattr(me, "username", None) else (me.first_name if me else "—")

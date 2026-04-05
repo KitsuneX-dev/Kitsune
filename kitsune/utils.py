@@ -59,7 +59,7 @@ def get_args_raw(message: typing.Any) -> str:
 
 def get_args_html(message: typing.Any) -> str:
     try:
-        from herokutl.extensions import html as tl_html
+        from telethon.extensions import html as tl_html
         import copy
 
         raw_text = getattr(message, "text", "") or getattr(message, "message", "")
@@ -211,10 +211,10 @@ async def asset_channel(
     avatar: str | None = None,
 ) -> tuple[int, bool]:
     import contextlib
-    from herokutl.tl.functions.channels import CreateChannelRequest
-    from herokutl.tl.functions.account import UpdateNotifySettingsRequest
-    from herokutl.tl.types import InputNotifyPeer, InputPeerNotifySettings
-    from herokutl.errors import ChannelsTooMuchError
+    from telethon.tl.functions.channels import CreateChannelRequest
+    from telethon.tl.functions.account import UpdateNotifySettingsRequest
+    from telethon.tl.types import InputNotifyPeer, InputPeerNotifySettings
+    from telethon.errors import ChannelsTooMuchError
 
     async for dialog in client.iter_dialogs():
         if dialog.is_channel and dialog.title == title:
@@ -237,8 +237,8 @@ async def asset_channel(
 
         if archive:
             with contextlib.suppress(Exception):
-                from herokutl.tl.functions.folders import EditPeerFoldersRequest
-                from herokutl.tl.types import InputFolderPeer
+                from telethon.tl.functions.folders import EditPeerFoldersRequest
+                from telethon.tl.types import InputFolderPeer
                 await client(
                     EditPeerFoldersRequest(
                         folder_peers=[
