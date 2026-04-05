@@ -224,7 +224,7 @@ class DatabaseManager:
         return await self._backend.save(snapshot)
 
     async def store_asset(self, message: typing.Any) -> int:
-        from herokutl.tl.types import Message
+        from telethon.tl.types import Message
         if not self._assets_channel:
             raise RuntimeError("Assets channel not available")
         if isinstance(message, Message):

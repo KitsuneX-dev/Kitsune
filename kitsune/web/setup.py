@@ -355,7 +355,7 @@ class SetupServer:
             self._save_config(cfg)
 
             from ..tl_cache import KitsuneTelegramClient
-            from herokutl.sessions import MemorySession
+            from telethon.sessions import MemorySession
             from pathlib import Path
 
             DATA_DIR = Path.home() / ".kitsune"
@@ -369,7 +369,7 @@ class SetupServer:
                 if ptype == "MTPROTO":
                     secret = proxy_cfg.get("secret", "00000000000000000000000000000000")
                     proxy = (str(proxy_cfg["host"]), int(proxy_cfg["port"]), secret)
-                    from herokutl.network import connection as tl_conn
+                    from telethon.network import connection as tl_conn
                     extra["connection"] = tl_conn.ConnectionTcpMTProxyRandomizedIntermediate
                     logger.info("setup: using MTProto proxy → %s:%s", proxy_cfg["host"], proxy_cfg["port"])
                 else:
@@ -423,8 +423,8 @@ class SetupServer:
         try:
             data = await request.json()
             code = str(data["code"]).strip()
-            from herokutl.errors import SessionPasswordNeededError
-            from herokutl.sessions import SQLiteSession
+            from telethon.errors import SessionPasswordNeededError
+            from telethon.sessions import SQLiteSession
             from pathlib import Path
             try:
                 me = await self._client.sign_in(
@@ -451,7 +451,7 @@ class SetupServer:
             return self._err(str(exc))
 
     async def _save_session(self, me: Any) -> None:
-        from herokutl.sessions import SQLiteSession
+        from telethon.sessions import SQLiteSession
         from pathlib import Path
         DATA_DIR = Path.home() / ".kitsune"
         session = SQLiteSession(str(DATA_DIR / "kitsune"))
