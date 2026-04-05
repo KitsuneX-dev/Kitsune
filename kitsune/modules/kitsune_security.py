@@ -5,7 +5,7 @@ import datetime
 import time
 import typing
 
-from telethon.utils import get_display_name
+from herokutl.utils import get_display_name
 
 from ..core.loader import KitsuneModule, command
 from ..core.security import (

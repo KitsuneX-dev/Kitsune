@@ -47,14 +47,14 @@ class SecurityModule(KitsuneModule):
     }
 
     async def on_load(self) -> None:
-        from telethon import events
+        from herokutl import events
         self.client.add_event_handler(
             self._owneradd_callback,
             events.CallbackQuery(pattern=b"kitsunesec_owneradd_")
         )
 
     async def on_unload(self) -> None:
-        from telethon import events
+        from herokutl import events
         with contextlib.suppress(Exception):
             self.client.remove_event_handler(
                 self._owneradd_callback,
@@ -180,7 +180,7 @@ class SecurityModule(KitsuneModule):
             await event.edit(self.strings("no_self"), parse_mode="html")
             return
 
-        from telethon import Button
+        from herokutl import Button
         await event.edit(
             self.strings("confirm_owner").format(name=name, uid=uid),
             parse_mode="html",

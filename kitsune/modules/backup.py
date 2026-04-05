@@ -265,8 +265,8 @@ class BackupModule(KitsuneModule):
                 logger.warning("Backup: saved group_id %s is invalid, recreating", chat_id)
                 await self.db.delete(_DB_OWNER, "group_id")
 
-        from telethon.tl.functions.channels import CreateChannelRequest
-        from telethon.tl.functions.channels import InviteToChannelRequest
+        from herokutl.tl.functions.channels import CreateChannelRequest
+        from herokutl.tl.functions.channels import InviteToChannelRequest
 
         try:
             result = await self.client(CreateChannelRequest(

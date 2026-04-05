@@ -59,8 +59,8 @@ def apply() -> None:
     sys.modules["hikka.utils"]    = utils_shim
 
     try:
-        import telethon
-        sys.modules.setdefault("hikkatl", telethon)
+        import herokutl
+        sys.modules.setdefault("hikkatl", herokutl)
     except ImportError:
         pass
 
