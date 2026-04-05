@@ -110,7 +110,7 @@ class LoaderModule(KitsuneModule):
 
     # ─── команды ──────────────────────────────────────────────────────────
 
-    @command("dlmod", required=OWNER)
+    @command("dlmod", required=OWNER, aliases=["dlm"])
     async def dlmod_cmd(self, event) -> None:
         """.dlmod <название|URL> — скачать и установить модуль."""
         arg = self.get_args(event).strip()
@@ -152,7 +152,7 @@ class LoaderModule(KitsuneModule):
                 parse_mode="html",
             )
 
-    @command("loadmod", required=OWNER)
+    @command("loadmod", required=OWNER, aliases=["lm"])
     async def loadmod_cmd(self, event) -> None:
         """.loadmod — загрузить модуль из .py файла (ответь на файл)."""
         reply = await event.message.get_reply_message()
