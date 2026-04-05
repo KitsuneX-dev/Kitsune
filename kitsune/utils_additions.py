@@ -75,7 +75,7 @@ def get_args_html(message) -> str:
     Требует telethon. Если нет entities — возвращает get_args_raw().
     """
     try:
-        from telethon.extensions import html as tl_html
+        from herokutl.extensions import html as tl_html
 
         raw_text = getattr(message, "text", "") or getattr(message, "message", "")
         entities = getattr(message, "entities", None) or []

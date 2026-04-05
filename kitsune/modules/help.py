@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import inspect
 
-from telethon.extensions import html as tl_html
-from telethon.tl.types import MessageEntityBlockquote
+from herokutl.extensions import html as tl_html
+from herokutl.tl.types import MessageEntityBlockquote
 
 from ..core.loader import KitsuneModule, command, ModuleConfig, ConfigValue
 from ..core.security import OWNER

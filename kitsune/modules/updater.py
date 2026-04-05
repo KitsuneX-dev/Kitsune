@@ -70,7 +70,7 @@ class UpdaterModule(KitsuneModule):
         loader    = getattr(self.client, "_kitsune_loader", None)
         mod_count = len(loader.modules) if loader else 0
 
-        from telethon import events as _events
+        from herokutl import events as _events
         self.client.add_event_handler(self._on_callback, _events.CallbackQuery)
 
         report = self.strings("boot_done").format(

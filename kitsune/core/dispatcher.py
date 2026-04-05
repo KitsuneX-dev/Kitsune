@@ -4,7 +4,7 @@ import asyncio
 import logging
 import typing
 
-from telethon import events
+from herokutl import events
 
 from .rate_limiter import RateLimiter
 from .security import SecurityManager, OWNER, SUDO

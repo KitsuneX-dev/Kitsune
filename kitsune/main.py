@@ -79,7 +79,7 @@ def set_config_key(key: str, value: Any) -> None:
     _save_config(data)
 
 async def _interactive_login(client: Any) -> None:
-    from telethon.errors import (
+    from herokutl.errors import (
         ApiIdInvalidError,
         AuthKeyDuplicatedError,
         FloodWaitError,
@@ -162,7 +162,7 @@ async def _startup(args: argparse.Namespace) -> None:
     session_path = DATA_DIR / "kitsune"
 
     # ── Разбираем прокси из config.toml (ручная настройка пользователем) ──────
-    from telethon.network.connection import (
+    from herokutl.network.connection import (
         ConnectionTcpFull,
         ConnectionTcpMTProxyRandomizedIntermediate,
     )
