@@ -161,22 +161,26 @@ async def _startup(args: argparse.Namespace) -> None:
 
     session_path = DATA_DIR / "kitsune"
 
+    # ── Разбираем прокси из config.toml (ручная настройка пользователем) ──────
     from telethon.network.connection import (
         ConnectionTcpFull,
         ConnectionTcpMTProxyRandomizedIntermediate,
     )
     proxy_cfg  = cfg.get("proxy") or {}
-    proxy      = None
-    connection = ConnectionTcpFull
+    _manual_proxy      = None
+    _manual_connection = None
     if proxy_cfg.get("host") and proxy_cfg.get("port"):
         ptype = str(proxy_cfg.get("type", "MTPROTO")).upper()
         if ptype == "MTPROTO":
-            secret     = proxy_cfg.get("secret", "00000000000000000000000000000000")
-            proxy      = (str(proxy_cfg["host"]), int(proxy_cfg["port"]), secret)
-            connection = ConnectionTcpMTProxyRandomizedIntermediate
-            logger.info("main: MTProto proxy → %s:%s", proxy_cfg["host"], proxy_cfg["port"])
+            _manual_proxy = (
+                str(proxy_cfg["host"]),
+                int(proxy_cfg["port"]),
+                proxy_cfg.get("secret", "0" * 32),
+            )
+            _manual_connection = ConnectionTcpMTProxyRandomizedIntermediate
+            logger.info("main: ручной MTProto прокси → %s:%s", proxy_cfg["host"], proxy_cfg["port"])
         else:
-            logger.warning("main: non-MTProto proxy in config — ignored (use MTProto)")
+            logger.warning("main: прокси в config.toml не MTProto — игнорируется")
 
     from .session_enc import decrypt_session_file
     decrypt_session_file()
@@ -198,73 +202,100 @@ async def _startup(args: argparse.Namespace) -> None:
         client.flood_sleep_threshold = 60
         client.system_version = "1.0"
     else:
-        extra = {"proxy": proxy, "connection": connection} if proxy else {}
+        # ── Фабрика клиента ───────────────────────────────────────────────────
+        def _make_client(
+            proxy: tuple | None = None,
+            connection=ConnectionTcpFull,
+        ) -> "KitsuneTelegramClient":
+            """Создаёт KitsuneTelegramClient с нужными параметрами соединения."""
+            kw: dict = {}
+            if proxy is not None:
+                kw["proxy"]      = proxy
+                kw["connection"] = connection
+            return KitsuneTelegramClient(
+                str(session_path),
+                api_id=api_id,
+                api_hash=api_hash,
+                # Порт 443 — как у herokutl по умолчанию.
+                # Telethon берёт порт из сессии; если сессия новая — из DEFAULT_PORT
+                # библиотеки. Мы явно не передаём порт сюда, он задаётся через
+                # herokutl/telegrambaseclient DEFAULT_PORT = 443.
+                connection_retries=10,
+                retry_delay=3,
+                auto_reconnect=True,
+                flood_sleep_threshold=60,
+                device_model="Kitsune Userbot",
+                system_version="1.0",
+                app_version="1.0.0",
+                lang_code="ru",
+                **kw,
+            )
 
-        client = KitsuneTelegramClient(
-            str(session_path),
-            api_id=api_id,
-            api_hash=api_hash,
-            connection_retries=10,
-            retry_delay=3,
-            auto_reconnect=True,
-            flood_sleep_threshold=60,
-            device_model="Kitsune Userbot",
-            system_version="1.0",
-            app_version="1.0.0",
-            lang_code="ru",
-            **extra,
-        )
-
-        try:
+        # ── Шаг 1: если пользователь задал прокси вручную — используем его ───
+        if _manual_proxy:
+            client = _make_client(_manual_proxy, _manual_connection)
             await client.connect()
-        except (TimeoutError, OSError, ConnectionError) as exc:
-            logger.warning("main: direct connection failed (%s), trying RKN bypass…", exc)
-            from .rkn_bypass import find_working_proxy, get_connection_class
-            from telethon.network.connection import ConnectionTcpMTProxyRandomizedIntermediate
-            import asyncio as _asyncio
 
-            proxy_info = _asyncio.get_event_loop().run_until_complete(find_working_proxy()) if not asyncio.get_event_loop().is_running() else None
-            # В async-контексте ищем прокси правильно
-            try:
-                proxy_info = await find_working_proxy()
-            except Exception:
-                proxy_info = None
+        else:
+            # ── Шаг 2: пробуем прямое подключение на порту 443 ───────────────
+            from .rkn_bypass import (
+                check_direct_connection,
+                find_working_proxy,
+            )
 
-            if proxy_info:
-                host, port, secret = proxy_info
-                logger.info("main: using MTProto proxy %s:%d for RKN bypass", host, port)
-                client = KitsuneTelegramClient(
-                    str(session_path),
-                    api_id=api_id,
-                    api_hash=api_hash,
-                    connection_retries=10,
-                    retry_delay=3,
-                    auto_reconnect=True,
-                    flood_sleep_threshold=60,
-                    device_model="Kitsune Userbot",
-                    system_version="1.0",
-                    app_version="1.0.0",
-                    lang_code="ru",
-                    proxy=(host, port, secret),
-                    connection=ConnectionTcpMTProxyRandomizedIntermediate,
-                )
+            logger.info("main: проверяю прямое соединение с Telegram (порт 443)…")
+            direct_ok = await check_direct_connection(timeout=5.0)
+
+            if direct_ok:
+                logger.info("main: прямое соединение работает — подключаюсь")
+                client = _make_client()
                 await client.connect()
-            else:
-                print(
-                    "\n❌ Не удалось подключиться к Telegram.\n"
-                    "   Попробуй настроить прокси в config.toml:\n\n"
-                    "      [proxy]\n"
-                    "      type = \"MTPROTO\"\n"
-                    "      host = \"149.154.175.100\"\n"
-                    "      port = 443\n"
-                    "      secret = \"ee9000000000000000000000000000003900000000000000\"\n\n"
-                    f"   Детали: {exc}\n"
-                )
-                sys.exit(1)
 
+            else:
+                # ── Шаг 3: ищем рабочий публичный MTProto-прокси ─────────────
+                logger.info("main: прямое соединение недоступно — ищу MTProto-прокси…")
+                proxy_info = await find_working_proxy(timeout=4.0)
+
+                if proxy_info:
+                    p_host, p_port, p_secret = proxy_info
+                    logger.info(
+                        "main: автообход через %s:%d", p_host, p_port
+                    )
+                    client = _make_client(
+                        proxy=(p_host, p_port, p_secret),
+                        connection=ConnectionTcpMTProxyRandomizedIntermediate,
+                    )
+                    await client.connect()
+
+                else:
+                    # Совсем ничего не работает — последняя попытка напрямую,
+                    # вдруг проверка ошиблась (например, таймаут был слишком короткий)
+                    logger.warning(
+                        "main: прокси не найден, пробую подключиться напрямую как крайний вариант"
+                    )
+                    client = _make_client()
+                    try:
+                        await client.connect()
+                    except Exception as exc:
+                        print(
+                            "\n❌ Kitsune не может подключиться к Telegram.\n"
+                            "   Возможные причины:\n"
+                            "   • Telegram заблокирован провайдером и все прокси недоступны\n"
+                            "   • Нет интернета\n\n"
+                            "   Можно задать свой прокси в config.toml:\n\n"
+                            "      [proxy]\n"
+                            "      type   = \"MTPROTO\"\n"
+                            "      host   = \"149.154.175.100\"\n"
+                            "      port   = 443\n"
+                            "      secret = \"ee368b29a8a59bbad9a2f584ea56db7a86\"\n\n"
+                            f"   Детали: {exc}\n"
+                        )
+                        sys.exit(1)
+
+        # ── Проверяем размер файла сессии — если мал, запускаем веб-настройку
         session_size = session_file.stat().st_size if session_file.exists() else 0
         if session_size < 100:
-            logger.info("main: session file too small (%d bytes), launching web setup", session_size)
+            logger.info("main: файл сессии слишком мал (%d байт), запускаю веб-настройку", session_size)
             from .web.setup import SetupServer
             web_port = int(cfg.get("web_port", 8080))
             setup = SetupServer(save_config_fn=_save_config, get_config_fn=_load_raw_config)
@@ -272,7 +303,7 @@ async def _startup(args: argparse.Namespace) -> None:
             await setup.wait_done()
             client = setup.get_client()
         else:
-            logger.info("main: session file OK (%d bytes), skipping auth check", session_size)
+            logger.info("main: файл сессии OK (%d байт)", session_size)
 
     me = await client.get_me()
     client.tg_id = me.id
