@@ -71,7 +71,29 @@ class QuickstartModule(KitsuneModule):
             plat = get_platform()
             text += f"\n\n{self.strings('platform_info').format(platform=plat)}"
 
-            await self.client.send_message("me", text, parse_mode="html")
+            # Отправляем в группу "Kitsune <ник пользователя>"
+            me = await self.client.get_me()
+            group_title = f"Kitsune {me.first_name or ''}"
+            if me.last_name:
+                group_title += f" {me.last_name}"
+
+            # Ищем уже существующую группу с таким названием
+            target = None
+            async for dialog in self.client.iter_dialogs():
+                if dialog.is_group and dialog.title == group_title:
+                    target = dialog.entity
+                    break
+
+            # Если нет — создаём
+            if target is None:
+                from telethon.tl.functions.messages import CreateChatRequest
+                result = await self.client(CreateChatRequest(
+                    users=[],
+                    title=group_title,
+                ))
+                target = result.chats[0]
+
+            await self.client.send_message(target, text, parse_mode="html")
             ls.set(_LS_OWNER, _LS_KEY, True)
             logger.info("Quickstart: приветствие отправлено")
 
@@ -103,7 +125,21 @@ class QuickstartModule(KitsuneModule):
             text = self.strings("welcome")
             plat = get_platform()
             text += f"\n\n{self.strings('platform_info').format(platform=plat)}"
-            await self.client.send_message("me", text, parse_mode="html")
+
+            me = await self.client.get_me()
+            group_title = f"Kitsune {me.first_name or ''}"
+            if me.last_name:
+                group_title += f" {me.last_name}"
+            target = None
+            async for dialog in self.client.iter_dialogs():
+                if dialog.is_group and dialog.title == group_title:
+                    target = dialog.entity
+                    break
+            if target is None:
+                from telethon.tl.functions.messages import CreateChatRequest
+                result = await self.client(CreateChatRequest(users=[], title=group_title))
+                target = result.chats[0]
+            await self.client.send_message(target, text, parse_mode="html")
             ls.set(_LS_OWNER, _LS_KEY, True)
         except Exception as exc:
             await event.reply(f"❌ Ошибка: <code>{exc}</code>", parse_mode="html")
