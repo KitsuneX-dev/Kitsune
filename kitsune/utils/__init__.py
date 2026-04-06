@@ -60,3 +60,114 @@ __all__ = [
     # base
     "escape_html", "chunks", "truncate", "run_sync",
 ]
+
+
+# ─── Совместимость: функции из оригинального utils.py ────────────────────────
+
+import asyncio as _asyncio
+import inspect as _inspect
+import logging as _logging
+import os as _os
+
+_logger = _logging.getLogger(__name__)
+
+# Алиасы платформ для обратной совместимости (from ..utils import IS_TERMUX, IS_DOCKER)
+IS_TERMUX = is_termux()
+IS_DOCKER = is_docker()
+
+
+async def auto_delete(message, delay: float = 5.0) -> None:
+    """Удалить сообщение через delay секунд."""
+    await _asyncio.sleep(delay)
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
+
+class ProgressMessage:
+    """
+    Контекстный менеджер для сообщений с прогресс-баром.
+
+    Использование:
+        async with ProgressMessage(event, "Загружаю...", total=3) as prog:
+            await prog.update(1)
+            ...
+            await prog.done("Готово!")
+    """
+
+    def __init__(self, event, text: str, total: int = 100):
+        self._event = event
+        self._text = text
+        self._total = total
+        self._step = 0
+        self._msg = None
+
+    async def __aenter__(self):
+        self._msg = await self._event.reply(self._text, parse_mode="html")
+        return self
+
+    async def __aexit__(self, *_):
+        pass
+
+    async def update(self, step: int, text: str | None = None) -> None:
+        self._step = step
+        bar = make_progress_bar(step, self._total)
+        label = text or self._text
+        try:
+            await self._msg.edit(f"{label}\n{bar}", parse_mode="html")
+        except Exception:
+            pass
+
+    async def done(self, text: str) -> None:
+        try:
+            await self._msg.edit(text, parse_mode="html")
+        except Exception:
+            pass
+
+
+def make_progress_bar(current: int, total: int, width: int = 10) -> str:
+    filled = int(width * current / max(total, 1))
+    return "█" * filled + "░" * (width - filled) + f" {current}/{total}"
+
+
+def find_caller(stack: list) -> str:
+    """Найти имя вызывающего модуля из стека."""
+    for frame_info in stack:
+        filename = frame_info.filename if hasattr(frame_info, "filename") else frame_info[1]
+        if "kitsune" in filename and "log.py" not in filename and "utils" not in filename:
+            module = _os.path.basename(filename).replace(".py", "")
+            return module
+    return "unknown"
+
+
+async def asset_channel(client, title: str = "Kitsune Assets", *, silent: bool = True):
+    """
+    Получить или создать приватный канал для хранения ассетов.
+    Возвращает (channel_id, created: bool).
+    """
+    try:
+        from telethon.tl.functions.channels import CreateChannelRequest
+        from telethon.tl.types import InputMessagesFilterEmpty
+
+        async for dialog in client.iter_dialogs():
+            if dialog.is_channel and dialog.title == title and dialog.entity.creator:
+                return dialog.entity.id, False
+
+        result = await client(CreateChannelRequest(
+            title=title,
+            about="Kitsune internal asset storage",
+            megagroup=False,
+        ))
+        channel = result.chats[0]
+        return channel.id, True
+    except Exception as e:
+        _logger.warning("asset_channel: не удалось создать канал: %s", e)
+        return None, False
+
+
+__all__ += [
+    "IS_TERMUX", "IS_DOCKER",
+    "auto_delete", "ProgressMessage", "make_progress_bar",
+    "find_caller", "asset_channel",
+]
