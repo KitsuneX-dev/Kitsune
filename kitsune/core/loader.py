@@ -253,8 +253,13 @@ class Loader:
                 continue
             try:
                 await self._load_from_path(path, is_builtin=True)
+            except ModuleLoadError as exc:
+                if "No KitsuneModule subclass" in str(exc):
+                    logger.debug("Loader: skipping %s (no module class)", path.name)
+                else:
+                    logger.warning("Loader: failed to load builtin %s: %s", path.name, exc)
             except Exception:
-                logger.exception("Loader: failed to load builtin %s", path.name)
+                logger.warning("Loader: failed to load builtin %s", path.name, exc_info=True)
 
     async def load_all_user(self) -> None:
         user_dir = Path.home() / ".kitsune" / "modules"

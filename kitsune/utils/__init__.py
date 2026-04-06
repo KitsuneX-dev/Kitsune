@@ -141,7 +141,7 @@ def find_caller(stack: list) -> str:
     return "unknown"
 
 
-async def asset_channel(client, title: str = "Kitsune Assets", *, silent: bool = True):
+async def asset_channel(client, title: str = "Kitsune Assets", *, silent: bool = True, description: str = "", archive: bool = False):
     """
     Получить или создать приватный канал для хранения ассетов.
     Возвращает (channel_id, created: bool).
@@ -156,10 +156,19 @@ async def asset_channel(client, title: str = "Kitsune Assets", *, silent: bool =
 
         result = await client(CreateChannelRequest(
             title=title,
-            about="Kitsune internal asset storage",
+            about=description or "Kitsune internal asset storage",
             megagroup=False,
         ))
         channel = result.chats[0]
+        if archive:
+            try:
+                from telethon.tl.functions.folders import EditPeerFoldersRequest
+                from telethon.tl.types import InputFolderPeer, InputChannel
+                await client(EditPeerFoldersRequest(folder_peers=[
+                    InputFolderPeer(peer=InputChannel(channel.id, channel.access_hash), folder_id=1)
+                ]))
+            except Exception:
+                pass
         return channel.id, True
     except Exception as e:
         _logger.warning("asset_channel: не удалось создать канал: %s", e)
