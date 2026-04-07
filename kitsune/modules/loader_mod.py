@@ -68,7 +68,8 @@ class LoaderModule(KitsuneModule):
         return getattr(self.client, "_kitsune_loader", None)
 
     def _get_user_modules(self) -> dict:
-        return self.db.get(_DB_OWNER, "user_modules", {})
+        data = self.db.get(_DB_OWNER, "user_modules", {})
+        return data if isinstance(data, dict) else {}
 
     async def _save_user_modules(self, mods: dict) -> None:
         await self.db.set(_DB_OWNER, "user_modules", mods)
@@ -213,6 +214,8 @@ class LoaderModule(KitsuneModule):
         ok = await loader.unload_module(name)
         if ok:
             user_mods = self._get_user_modules()
+            if not isinstance(user_mods, dict):
+                user_mods = {}
             user_mods.pop(name, None)
             user_mods.pop(name.lower(), None)
             await self._save_user_modules(user_mods)
