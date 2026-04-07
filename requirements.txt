@@ -1,4 +1,3 @@
-heroku-tl-new>=2.0.0
 TgCrypto-pyrofork
 pyrogram>=2.0.106
 tgcrypto>=1.2.5
