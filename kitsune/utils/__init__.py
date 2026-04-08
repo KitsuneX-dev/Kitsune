@@ -180,3 +180,142 @@ __all__ += [
     "auto_delete", "ProgressMessage", "make_progress_bar",
     "find_caller", "asset_channel",
 ]
+
+
+# ─── smart_split: умное разбиение длинных сообщений (перенесено из Heroku) ───
+#
+# Разбивает длинный HTML-текст на части не ломая теги форматирования и не
+# разрывая слова посередине. Учитывает UTF-16 (как Telegram считает длину).
+#
+# Использование:
+#   from kitsune.utils import smart_split
+#   chunks = list(smart_split(text, entities, length=4096))
+#
+# Автор оригинала: @bsolute (Heroku/Hikka project)
+
+def _copy_tl_entity(entity, **kwargs):
+    """Создаёт копию TL-объекта с изменёнными полями."""
+    d = entity.to_dict()
+    d.pop("_", None)
+    d.update(kwargs)
+    return entity.__class__(**d)
+
+
+def smart_split(
+    text: str,
+    entities: list,
+    length: int = 4096,
+    split_on: tuple = ("\n", " "),
+    min_length: int = 1,
+):
+    """
+    Умное разбиение текста на части с сохранением HTML-форматирования.
+
+    Гарантии:
+    - Ни один графемный кластер (символ) не будет разорван посередине.
+    - HTML-теги (entities) корректно обрезаются и смещаются для каждой части.
+    - Учитывается UTF-16-кодировка (именно так Telegram считает длину строк).
+    - Разбивка происходит по ``split_on`` символам (\\n или пробел), а не в середине слова.
+
+    :param text:        Чистый текст (без HTML).
+    :param entities:    Список форматирующих entity-объектов Telethon.
+    :param length:      Максимальная длина одной части в UTF-16 кодовых единицах (4096 для Telegram).
+    :param split_on:    Символы, по которым предпочтительно делать разбивку.
+    :param min_length:  Минимальная позиция для поиска split_on (не разрывать в самом начале).
+    :return:            Итератор строк с HTML-форматированием.
+
+    Пример::
+
+        from telethon.extensions.html import unparse
+        text, entities = parse("<b>Hello world! ...</b>")
+        for part in smart_split(text, entities):
+            await message.respond(part, parse_mode="html")
+    """
+    import re as _re
+
+    # Ленивый импорт grapheme — не нужен при старте, только при больших текстах
+    try:
+        import grapheme as _grapheme
+        _safe_split_index = _grapheme.safe_split_index
+    except ImportError:
+        # Fallback: просто берём по символам
+        def _safe_split_index(s, idx):
+            return min(idx, len(s))
+
+    try:
+        from telethon.extensions.html import unparse as _unparse
+    except ImportError:
+        # Минимальный fallback если telethon недоступен
+        def _unparse(text, entities):
+            return text
+
+    encoded = text.encode("utf-16le")
+    pending_entities = list(entities)
+    text_offset = 0
+    bytes_offset = 0
+    text_length = len(text)
+    bytes_length = len(encoded)
+
+    while text_offset < text_length:
+        if bytes_offset + length * 2 >= bytes_length:
+            yield _unparse(
+                text[text_offset:],
+                sorted(pending_entities, key=lambda x: (x.offset, -x.length)),
+            )
+            break
+
+        codepoint_count = len(
+            encoded[bytes_offset: bytes_offset + length * 2].decode(
+                "utf-16le", errors="ignore",
+            )
+        )
+
+        search_index = -1
+        for sep in split_on:
+            si = text.rfind(sep, text_offset + min_length, text_offset + codepoint_count)
+            if si != -1:
+                search_index = si
+                break
+
+        if search_index == -1:
+            search_index = text_offset + codepoint_count
+
+        split_index = _safe_split_index(text, search_index)
+
+        split_offset_utf16 = len(text[text_offset:split_index].encode("utf-16le")) // 2
+        exclude = 0
+        while (
+            split_index + exclude < text_length
+            and text[split_index + exclude] in split_on
+        ):
+            exclude += 1
+
+        current_entities = []
+        entities_copy = pending_entities.copy()
+        pending_entities = []
+
+        for entity in entities_copy:
+            eo, el = entity.offset, entity.length
+            if eo < split_offset_utf16 and eo + el > split_offset_utf16 + exclude:
+                current_entities.append(_copy_tl_entity(entity, length=split_offset_utf16 - eo))
+                pending_entities.append(_copy_tl_entity(entity, offset=0, length=eo + el - split_offset_utf16 - exclude))
+            elif eo < split_offset_utf16 < eo + el:
+                current_entities.append(_copy_tl_entity(entity, length=split_offset_utf16 - eo))
+            elif eo < split_offset_utf16:
+                current_entities.append(entity)
+            elif eo + el > split_offset_utf16 + exclude > eo:
+                pending_entities.append(_copy_tl_entity(entity, offset=0, length=eo + el - split_offset_utf16 - exclude))
+            elif eo + el > split_offset_utf16 + exclude:
+                pending_entities.append(_copy_tl_entity(entity, offset=eo - split_offset_utf16 - exclude))
+
+        current_text = text[text_offset:split_index]
+        yield _unparse(
+            current_text,
+            sorted(current_entities, key=lambda x: (x.offset, -x.length)),
+        )
+
+        text_offset = split_index + exclude
+        bytes_offset += len(current_text.encode("utf-16le"))
+
+
+__all__ += ["smart_split"]
