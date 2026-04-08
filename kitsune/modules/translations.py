@@ -3,8 +3,6 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-import aiohttp
-
 from ..core.loader import KitsuneModule, command, ModuleConfig, ConfigValue
 from ..core.security import OWNER
 
@@ -94,6 +92,7 @@ class TranslationsModule(KitsuneModule):
         await event.message.edit("⏳ Загружаю языковой пакет...", parse_mode="html")
 
         try:
+            import aiohttp  # ленивый импорт
             async with aiohttp.ClientSession() as sess:
                 async with sess.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
                     resp.raise_for_status()

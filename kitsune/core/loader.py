@@ -168,10 +168,29 @@ def command(
 
 def watcher(
     filter_func: typing.Callable | None = None,
+    **tags: typing.Any,
 ) -> typing.Callable:
+    """
+    Декоратор для watcher-методов.
+
+    Поддерживает систему тегов (из Heroku) — фильтры прямо в декораторе:
+
+        @watcher(only_pm=True)
+        @watcher(no_channels=True, no_forwards=True)
+        @watcher(regex=r"^привет", only_pm=True)
+        @watcher(contains="скидка", no_channels=True)
+        @watcher(from_id=123456789)
+        @watcher(startswith="/", only_groups=True)
+
+    Полный список тегов — в kitsune.core.dispatcher.ALL_TAGS.
+    При указании нескольких тегов все они должны выполняться одновременно (AND).
+    """
     def decorator(func: typing.Callable) -> typing.Callable:
         func._is_watcher = True
         func._watcher_filter = filter_func
+        # Записываем теги как атрибуты функции — диспетчер читает их через getattr()
+        for tag_name, tag_value in tags.items():
+            setattr(func, tag_name, tag_value)
         return func
     return decorator
 

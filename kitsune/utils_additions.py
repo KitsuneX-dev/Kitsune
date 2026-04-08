@@ -140,7 +140,8 @@ async def answer(
     Логика:
       • Своё сообщение (message.out=True) + нет fwd/via_bot → edit()
       • Чужое сообщение → respond() / reply()
-      • Если передан reply_markup → используй inline (реализуй под свой стек)
+      • Текст длиннее 4096 символов → smart_split на несколько сообщений
+        (если не получается — отправляет как файл .txt)
 
     :param message: telethon Message (или int chat_id — тогда только send).
     :param response: Текст или файло-подобный объект.
@@ -168,6 +169,58 @@ async def answer(
             link_preview=link_preview,
             **kwargs,
         )
+
+    # ── Умное разбиение длинных текстов (smart_split) ────────────────────────
+    if isinstance(response, str) and len(response.encode("utf-16le")) // 2 > 4096:
+        try:
+            from telethon.extensions.html import parse as _tl_parse
+            from .utils import smart_split as _smart_split
+            text, entities = _tl_parse(response)
+            parts = list(_smart_split(text, entities, length=4096))
+        except Exception:
+            parts = []
+
+        if len(parts) > 1:
+            # Отправляем первую часть редактированием/ответом, остальные respond-ом
+            first = parts[0]
+            is_own = (
+                getattr(message, "out", False)
+                and not getattr(message, "via_bot_id", None)
+                and not getattr(message, "fwd_from", None)
+            )
+            try:
+                if is_own:
+                    result = await message.edit(first, parse_mode="html", link_preview=link_preview)
+                else:
+                    result = await message.respond(first, parse_mode="html", link_preview=link_preview)
+                for part in parts[1:]:
+                    await message.respond(part, parse_mode="html", link_preview=False)
+                return result
+            except Exception:
+                pass  # fallback ниже
+
+        # Ничего не получилось — отправляем как файл
+        try:
+            buf = io.BytesIO(response.encode("utf-8"))
+            buf.name = "command_result.txt"
+            peer = getattr(message, "peer_id", None) or getattr(message, "chat_id", None)
+            client = message.client
+            result = await client.send_file(
+                peer,
+                buf,
+                caption="📄 Результат слишком длинный для сообщения",
+                **{k: v for k, v in kwargs.items() if k in ("reply_to",)},
+            )
+            if getattr(message, "out", False):
+                try:
+                    await message.delete()
+                except Exception:
+                    pass
+            return result
+        except Exception:
+            # Последний fallback — обрезаем
+            response = response[:4090] + "…"
+    # ─────────────────────────────────────────────────────────────────────────
 
     # Определяем: редактировать или отвечать
     is_own = (

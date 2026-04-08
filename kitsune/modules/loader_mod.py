@@ -5,8 +5,6 @@ import io
 import logging
 from pathlib import Path
 
-import aiohttp
-
 from ..core.loader import KitsuneModule, command, ModuleConfig, ConfigValue
 from ..core.security import OWNER
 
@@ -86,6 +84,7 @@ class LoaderModule(KitsuneModule):
             ]
             # try full.txt index
             try:
+                import aiohttp  # ленивый импорт
                 async with aiohttp.ClientSession() as sess:
                     async with sess.get(f"{repo}/full.txt", timeout=aiohttp.ClientTimeout(total=10)) as resp:
                         if resp.status == 200:
@@ -99,6 +98,7 @@ class LoaderModule(KitsuneModule):
 
             for url in candidates:
                 try:
+                    import aiohttp  # ленивый импорт
                     async with aiohttp.ClientSession() as sess:
                         async with sess.head(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
                             if resp.status == 200:
@@ -250,6 +250,7 @@ class LoaderModule(KitsuneModule):
             )
             # also send file
             try:
+                import aiohttp  # ленивый импорт
                 async with aiohttp.ClientSession() as sess:
                     async with sess.get(url) as resp:
                         content = await resp.read()

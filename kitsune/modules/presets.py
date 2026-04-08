@@ -6,8 +6,6 @@ import json
 import logging
 from pathlib import Path
 
-import aiohttp
-
 from ..core.loader import KitsuneModule, command, ModuleConfig, ConfigValue
 from ..core.security import OWNER
 
