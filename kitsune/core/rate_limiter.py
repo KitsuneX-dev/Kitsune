@@ -9,13 +9,14 @@ logger = logging.getLogger(__name__)
 
 class TokenBucket:
 
-    __slots__ = ("capacity", "rate", "_tokens", "_last_refill", "_lock")
+    __slots__ = ("capacity", "rate", "_tokens", "_last_refill", "_last_used", "_lock")
 
     def __init__(self, capacity: float = 10.0, rate: float = 1.0) -> None:
         self.capacity = capacity
         self.rate = rate
         self._tokens = capacity
         self._last_refill = time.monotonic()
+        self._last_used = time.monotonic()
         self._lock = asyncio.Lock()
 
     async def consume(self, amount: float = 1.0) -> bool:
@@ -24,6 +25,7 @@ class TokenBucket:
             elapsed = now - self._last_refill
             self._tokens = min(self.capacity, self._tokens + elapsed * self.rate)
             self._last_refill = now
+            self._last_used = now
 
             if self._tokens >= amount:
                 self._tokens -= amount
@@ -33,6 +35,9 @@ class TokenBucket:
     def remaining(self) -> float:
         elapsed = time.monotonic() - self._last_refill
         return min(self.capacity, self._tokens + elapsed * self.rate)
+
+    def idle_seconds(self) -> float:
+        return time.monotonic() - self._last_used
 
 class RateLimiter:
 
@@ -80,11 +85,14 @@ class RateLimiter:
             self._cleanup_task = asyncio.ensure_future(self._cleanup_loop(interval))
 
     async def _cleanup_loop(self, interval: float) -> None:
+        """Удаляет bucket'ы неактивные более 1 часа — исправляет утечку памяти."""
+        _IDLE_TTL = 3600.0  # 1 час
         while True:
             await asyncio.sleep(interval)
+            now = time.monotonic()
             stale = [
                 uid for uid, bucket in self._buckets.items()
-                if bucket.remaining() >= bucket.capacity and uid != self._owner_id
+                if uid != self._owner_id and bucket.idle_seconds() > _IDLE_TTL
             ]
             for uid in stale:
                 del self._buckets[uid]

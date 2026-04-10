@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 import asyncio
@@ -30,18 +29,34 @@ class SQLiteBackend:
     def __init__(self, path: Path) -> None:
         self._path = path
         self._lock = asyncio.Lock()
+        self._conn: sqlite3.Connection | None = None
 
-    def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(str(self._path), timeout=10)
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA synchronous=NORMAL")
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS kitsune_db "
-            "(owner TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, "
-            "PRIMARY KEY (owner, key))"
-        )
-        conn.commit()
-        return conn
+    def _get_conn(self) -> sqlite3.Connection:
+        """Возвращает постоянное соединение, создавая его при необходимости."""
+        if self._conn is None:
+            conn = sqlite3.connect(str(self._path), timeout=10, check_same_thread=False)
+            # Производительность: WAL + кэш + RAM для temp + mmap
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA synchronous=NORMAL")
+            conn.execute("PRAGMA cache_size=-8000")       # 8 МБ page cache
+            conn.execute("PRAGMA temp_store=MEMORY")      # temp таблицы в RAM
+            conn.execute("PRAGMA mmap_size=67108864")     # memory-mapped I/O 64 МБ
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS kitsune_db "
+                "(owner TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, "
+                "PRIMARY KEY (owner, key))"
+            )
+            conn.commit()
+            self._conn = conn
+        return self._conn
+
+    def close(self) -> None:
+        if self._conn:
+            try:
+                self._conn.close()
+            except Exception:
+                pass
+            self._conn = None
 
     async def load(self) -> dict[str, dict[str, JSONValue]]:
         loop = asyncio.get_event_loop()
@@ -49,9 +64,8 @@ class SQLiteBackend:
 
     def _load_sync(self) -> dict[str, dict[str, JSONValue]]:
         try:
-            conn = self._connect()
+            conn = self._get_conn()
             rows = conn.execute("SELECT owner, key, value FROM kitsune_db").fetchall()
-            conn.close()
             result: dict[str, dict[str, JSONValue]] = {}
             for owner, key, raw in rows:
                 result.setdefault(owner, {})[key] = json.loads(raw)
@@ -66,18 +80,29 @@ class SQLiteBackend:
 
     def _save_sync(self, data: dict[str, dict[str, JSONValue]]) -> bool:
         try:
-            conn = self._connect()
-            conn.execute("DELETE FROM kitsune_db")
+            conn = self._get_conn()
             rows = [
                 (owner, key, json.dumps(value, ensure_ascii=False))
                 for owner, sub in data.items()
                 for key, value in sub.items()
             ]
+            # UPSERT вместо DELETE+INSERT — обновляем только изменившиеся записи
             conn.executemany(
-                "INSERT INTO kitsune_db (owner, key, value) VALUES (?, ?, ?)", rows
+                "INSERT INTO kitsune_db (owner, key, value) VALUES (?, ?, ?) "
+                "ON CONFLICT(owner, key) DO UPDATE SET value=excluded.value",
+                rows,
             )
+            # Удаляем строки которых больше нет в data
+            if rows:
+                placeholders = ",".join("(?,?)" for _ in rows)
+                params = [v for owner, key, _ in rows for v in (owner, key)]
+                conn.execute(
+                    f"DELETE FROM kitsune_db WHERE (owner, key) NOT IN ({placeholders})",
+                    params,
+                )
+            else:
+                conn.execute("DELETE FROM kitsune_db")
             conn.commit()
-            conn.close()
             return True
         except Exception:
             logger.exception("SQLite: failed to save database")
@@ -241,7 +266,11 @@ class DatabaseManager:
             return False
         async with self._lock:
             snapshot = dict(self._data)
-        return await self._backend.save(snapshot)
+        result = await self._backend.save(snapshot)
+        # Закрываем постоянное соединение при завершении
+        if isinstance(self._backend, SQLiteBackend):
+            self._backend.close()
+        return result
 
     async def store_asset(self, message: typing.Any) -> int:
         from telethon.tl.types import Message
