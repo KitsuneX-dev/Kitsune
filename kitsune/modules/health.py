@@ -4,7 +4,11 @@ from __future__ import annotations
 import asyncio
 import time
 
-import psutil
+try:
+    import psutil
+    _PSUTIL = True
+except ImportError:
+    _PSUTIL = False
 
 from ..core.loader import KitsuneModule, command
 from ..core.security import OWNER
@@ -86,7 +90,7 @@ class HealthModule(KitsuneModule):
             cpu = 0.0
 
         try:
-            disk = psutil.disk_usage("/")
+            disk = psutil.disk_usage("/") if _PSUTIL else None
             disk_used  = disk.used  // 1024 // 1024 // 1024
             disk_total = disk.total // 1024 // 1024 // 1024
             disk_pct   = disk.percent
@@ -135,6 +139,8 @@ class HealthModule(KitsuneModule):
         cpu_limit = self.db.get(_DB_OWNER, "cpu_limit", _DEFAULT_CPU_LIMIT)
 
         try:
+            if not _PSUTIL:
+                return
             mem = psutil.virtual_memory()
             cpu = psutil.cpu_percent(interval=1)
         except Exception:

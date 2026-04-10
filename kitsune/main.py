@@ -178,10 +178,13 @@ async def _startup(args: argparse.Namespace) -> None:
         else:
             logger.warning("main: non-MTProto proxy in config — ignored (use MTProto)")
 
-    from .session_enc import decrypt_session_file
+    from .session_enc import decrypt_session_file, _fix_session_permissions, _ensure_dir_writable
+    _ensure_dir_writable()
     decrypt_session_file()
 
     session_file = Path(str(session_path) + ".session")
+    if session_file.exists():
+        _fix_session_permissions()
     need_setup = (not api_id or not api_hash or not session_file.exists())
 
     if need_setup:
