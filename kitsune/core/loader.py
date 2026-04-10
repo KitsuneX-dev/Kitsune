@@ -171,6 +171,12 @@ def watcher(
         return func
     return decorator
 
+# Опасные атрибуты/имена которые не должны использоваться напрямую
+_BLOCKED_ATTRS: frozenset[str] = frozenset({
+    "__import__", "__loader__", "__builtins__",
+    "system", "popen", "Popen", "call", "run",
+})
+
 class _ASTScanner(ast.NodeVisitor):
 
     def __init__(self) -> None:
@@ -191,6 +197,7 @@ class _ASTScanner(ast.NodeVisitor):
         self.generic_visit(node)
 
     def visit_Call(self, node: ast.Call) -> None:
+        # Прямой __import__("subprocess")
         if isinstance(node.func, ast.Name) and node.func.id == "__import__":
             if node.args and isinstance(node.args[0], ast.Constant):
                 root = str(node.args[0].value).split(".")[0]
@@ -198,6 +205,46 @@ class _ASTScanner(ast.NodeVisitor):
                     self.errors.append(
                         f"Blocked __import__: {node.args[0].value} (line {node.lineno})"
                     )
+            else:
+                # __import__(переменная) — динамический импорт, блокируем
+                self.errors.append(
+                    f"Blocked dynamic __import__ call (line {node.lineno})"
+                )
+
+        # getattr(builtins, "__import__") — обход через getattr
+        if isinstance(node.func, ast.Name) and node.func.id == "getattr":
+            if len(node.args) >= 2 and isinstance(node.args[1], ast.Constant):
+                attr = str(node.args[1].value)
+                if attr in _BLOCKED_ATTRS:
+                    self.errors.append(
+                        f"Blocked getattr access to {attr!r} (line {node.lineno})"
+                    )
+
+        # eval("__import__('subprocess')") — exec/eval с строковым аргументом
+        if isinstance(node.func, ast.Name) and node.func.id in ("eval", "exec"):
+            if node.args and isinstance(node.args[0], ast.Constant):
+                src = str(node.args[0].value)
+                for blocked in _BLOCKED_IMPORTS:
+                    if blocked in src:
+                        self.errors.append(
+                            f"Blocked {node.func.id}() containing {blocked!r} (line {node.lineno})"
+                        )
+                        break
+            else:
+                # eval(переменная) — потенциально опасно, предупреждаем
+                self.errors.append(
+                    f"Blocked dynamic eval/exec call (line {node.lineno})"
+                )
+
+        self.generic_visit(node)
+
+    def visit_Attribute(self, node: ast.Attribute) -> None:
+        # os.system, os.popen и аналоги
+        if node.attr in _BLOCKED_ATTRS:
+            if isinstance(node.value, ast.Name) and node.value.id in _BLOCKED_IMPORTS:
+                self.errors.append(
+                    f"Blocked attribute access: {node.value.id}.{node.attr} (line {node.lineno})"
+                )
         self.generic_visit(node)
 
 def _scan_ast(source: str, filename: str = "<module>") -> None:
@@ -237,33 +284,41 @@ class Loader:
     def get_module(self, name: str) -> KitsuneModule | None:
         return self._modules.get(name.lower())
 
+    async def _load_one_builtin(self, path: Path) -> None:
+        try:
+            await self._load_from_path(path, is_builtin=True)
+        except ModuleLoadError as exc:
+            if "No KitsuneModule subclass" in str(exc):
+                logger.debug("Loader: skipping %s (no module class)", path.name)
+            else:
+                logger.warning("Loader: failed to load builtin %s: %s", path.name, exc)
+        except Exception:
+            logger.warning("Loader: failed to load builtin %s", path.name, exc_info=True)
+
+    async def _load_one_user(self, path: Path) -> None:
+        try:
+            await self._load_from_path(path, is_builtin=False)
+        except Exception:
+            logger.exception("Loader: failed to load user module %s", path.name)
+
     async def load_all_builtin(self) -> None:
         if not _BUILTIN_MODULES_DIR.exists():
             return
 
-        for path in sorted(_BUILTIN_MODULES_DIR.glob("*.py")):
-            if path.name.startswith("_"):
-                continue
-            try:
-                await self._load_from_path(path, is_builtin=True)
-            except ModuleLoadError as exc:
-                if "No KitsuneModule subclass" in str(exc):
-                    logger.debug("Loader: skipping %s (no module class)", path.name)
-                else:
-                    logger.warning("Loader: failed to load builtin %s: %s", path.name, exc)
-            except Exception:
-                logger.warning("Loader: failed to load builtin %s", path.name, exc_info=True)
+        paths = [
+            p for p in sorted(_BUILTIN_MODULES_DIR.glob("*.py"))
+            if not p.name.startswith("_")
+        ]
+        # Параллельная загрузка независимых модулей — быстрее при старте
+        await asyncio.gather(*[self._load_one_builtin(p) for p in paths])
 
     async def load_all_user(self) -> None:
         user_dir = Path.home() / ".kitsune" / "modules"
         if not user_dir.exists():
             return
 
-        for path in sorted(user_dir.glob("*.py")):
-            try:
-                await self._load_from_path(path, is_builtin=False)
-            except Exception:
-                logger.exception("Loader: failed to load user module %s", path.name)
+        paths = sorted(user_dir.glob("*.py"))
+        await asyncio.gather(*[self._load_one_user(p) for p in paths])
 
     async def load_from_url(self, url: str) -> KitsuneModule:
         import aiohttp

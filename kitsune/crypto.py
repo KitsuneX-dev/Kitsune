@@ -4,6 +4,7 @@ import base64
 import hashlib
 import hmac
 import os
+import struct
 from pathlib import Path
 
 KEY_ENV  = "KITSUNE_KEY"
@@ -11,11 +12,20 @@ KEY_PATH = Path.home() / ".kitsune" / "kitsune.key"
 MAGIC    = b"KBAK1:"
 
 _FERNET_AVAILABLE = False
+_AES_GCM_AVAILABLE = False
+
 try:
     from cryptography.fernet import Fernet as _Fernet, InvalidToken as _InvalidToken
     _FERNET_AVAILABLE = True
 except ImportError:
     pass
+
+if not _FERNET_AVAILABLE:
+    try:
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM as _AESGCM
+        _AES_GCM_AVAILABLE = True
+    except ImportError:
+        pass
 
 
 def _load_or_create_key() -> bytes:
@@ -40,7 +50,35 @@ def _load_or_create_key() -> bytes:
     return key
 
 
+def _aes_gcm_encrypt(data: bytes, key: bytes) -> bytes:
+    """AES-256-GCM шифрование. Заменяет небезопасный XOR-fallback."""
+    raw_key = base64.urlsafe_b64decode(key + b"==")
+    # Деривируем 32-байтный ключ через SHA-256
+    aes_key = hashlib.sha256(raw_key).digest()
+    nonce = os.urandom(12)  # 96-битный nonce для GCM
+    aesgcm = _AESGCM(aes_key)
+    ciphertext = aesgcm.encrypt(nonce, data, None)
+    # Формат: 4 байта длины nonce + nonce + ciphertext
+    return struct.pack(">I", len(nonce)) + nonce + ciphertext
+
+
+def _aes_gcm_decrypt(data: bytes, key: bytes) -> bytes:
+    """AES-256-GCM расшифровка."""
+    raw_key = base64.urlsafe_b64decode(key + b"==")
+    aes_key = hashlib.sha256(raw_key).digest()
+    nonce_len = struct.unpack(">I", data[:4])[0]
+    nonce = data[4:4 + nonce_len]
+    ciphertext = data[4 + nonce_len:]
+    aesgcm = _AESGCM(aes_key)
+    return aesgcm.decrypt(nonce, ciphertext, None)
+
+
 def _xor_encrypt(data: bytes, key: bytes) -> bytes:
+    """
+    XOR-fallback — используется только если cryptography вообще не установлена.
+    HMAC защищает от подделки, но XOR с фиксированным ключом уязвим
+    к known-plaintext при наличии двух бэкапов. Устанавливай cryptography!
+    """
     raw_key = base64.urlsafe_b64decode(key + b"==")
     digest   = hashlib.sha256(raw_key).digest()
     result   = bytearray(len(data))
@@ -68,6 +106,9 @@ def encrypt(data: bytes) -> bytes:
     key = _load_or_create_key()
     if _FERNET_AVAILABLE:
         return MAGIC + _Fernet(key).encrypt(data)
+    if _AES_GCM_AVAILABLE:
+        return MAGIC + b"AESGCM1:" + _aes_gcm_encrypt(data, key)
+    # Последний fallback — XOR+HMAC (небезопасен для множественных бэкапов)
     return MAGIC + b"XOR1:" + _xor_encrypt(data, key)
 
 
@@ -78,6 +119,8 @@ def decrypt(data: bytes) -> bytes:
     key     = _load_or_create_key()
     if payload.startswith(b"XOR1:"):
         return _xor_decrypt(payload[5:], key)
+    if payload.startswith(b"AESGCM1:"):
+        return _aes_gcm_decrypt(payload[8:], key)
     if _FERNET_AVAILABLE:
         return _Fernet(key).decrypt(payload)
     raise RuntimeError(

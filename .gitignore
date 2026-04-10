@@ -1,39 +1,57 @@
+# Python
 __pycache__/
+**/__pycache__/
 *.py[cod]
 *.pyo
 *.pyd
-*.so
-*.egg
-*.egg-info/
-dist/
-build/
-.eggs/
+.Python
 
+# Virtual environments
 venv/
 .venv/
 env/
-ENV/
+.env/
 
+# Session & keys (НИКОГДА не коммитить)
 *.session
-*.session-journal
 *.session.enc
-*.db
-*.db-wal
-*.db-shm
-kitsune-*.json
-config.toml
-*.log
-*.kbak
+*.session-journal
+*.key
 kitsune.key
 
+# Database
+*.db
+*.db-shm
+*.db-wal
+
+# Logs
+*.log
+logs/
+
+# Config с секретами
+# config.toml — намеренно НЕ исключён (содержит шаблон без секретов)
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
 .idea/
 .vscode/
 *.swp
 *.swo
-.DS_Store
 
-.mypy_cache/
-.ruff_cache/
+# Build / dist
+build/
+dist/
+*.egg-info/
+*.egg
+
+# pytest
 .pytest_cache/
-htmlcov/
 .coverage
+htmlcov/
+
+# mypy
+.mypy_cache/
