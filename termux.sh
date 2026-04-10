@@ -81,6 +81,9 @@ FAILED_PKGS=()
 while IFS= read -r pkg || [[ -n "$pkg" ]]; do
     [[ -z "$pkg" || "${pkg:0:1}" == "#" ]] && continue
     [[ "$pkg" == telethon* ]] && continue
+    # aiogram и pydantic устанавливаются отдельно ниже с fallback
+    [[ "$pkg" == aiogram* ]] && continue
+    [[ "$pkg" == pydantic* ]] && continue
     if pip_install "$pkg"; then
         true
     else
@@ -96,8 +99,28 @@ else
 fi
 
 step "aiogram + pydantic"
-pip_install "pydantic>=2.7.0" && ok "pydantic установлен" || warn "pydantic не установился"
-pip_install "aiogram>=3.7.0"  && ok "aiogram установлен"  || warn "aiogram не установился — бот-нотификатор будет недоступен"
+# pydantic — пробуем новую, если не получится — старую совместимую
+if pip_install "pydantic>=2.7.0"; then
+    ok "pydantic установлен"
+elif pip install --prefer-binary --no-cache-dir -q "pydantic" 2>/dev/null; then
+    ok "pydantic установлен (последняя доступная версия)"
+elif pip install --prefer-binary --no-cache-dir -q "pydantic==1.10.21" 2>/dev/null; then
+    ok "pydantic 1.x установлен (совместимый fallback)"
+    warn "pydantic версии 1.x — нотификатор может работать ограниченно"
+else
+    warn "pydantic не установился"
+fi
+
+# aiogram — пробуем новую, затем старую
+if pip_install "aiogram>=3.7.0"; then
+    ok "aiogram установлен"
+elif pip install --prefer-binary --no-cache-dir -q "aiogram" 2>/dev/null; then
+    ok "aiogram установлен (последняя доступная версия)"
+elif pip install --prefer-binary --no-cache-dir -q "aiogram==3.7.0" 2>/dev/null; then
+    ok "aiogram 3.7.0 установлен"
+else
+    warn "aiogram не установился — бот-нотификатор будет недоступен"
+fi
 
 step "Hydrogram"
 pip_install "hydrogram" && pip_install "tgcrypto" && \
