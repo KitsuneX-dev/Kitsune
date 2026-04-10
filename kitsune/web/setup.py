@@ -442,7 +442,19 @@ class SetupServer:
     async def _api_2fa(self, request: web.Request) -> web.Response:
         try:
             data = await request.json()
-            me = await self._client.sign_in(password=data["password"])
+            password = str(data.get("password", "")).strip()
+            if not password:
+                return self._err("Пароль не может быть пустым")
+
+            from telethon.errors import PasswordHashInvalidError, FloodWaitError
+
+            try:
+                me = await self._client.sign_in(password=password)
+            except PasswordHashInvalidError:
+                return web.json_response({"ok": False, "error": "Неверный пароль. Попробуй ещё раз.", "wrong_password": True})
+            except FloodWaitError as e:
+                return web.json_response({"ok": False, "error": f"Слишком много попыток. Подожди {e.seconds} секунд.", "flood": True})
+
             await self._save_session(me)
             self._done.set()
             return web.json_response({"ok": True, "message": f"👤 {me.first_name}  |  id: {me.id}"})
