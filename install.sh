@@ -125,9 +125,14 @@ ok "Зависимости установлены"
 
 "$PIP" install --no-cache-dir hydrogram tgcrypto --quiet 2>/dev/null && ok "Hydrogram установлен" || warn "Hydrogram не удалось установить, продолжаю без него"
 
-step "Директория данных"
+step "Директория данных и права"
 mkdir -p "$HOME/.kitsune/modules" "$HOME/.kitsune/logs"
-ok "Директории созданы: ~/.kitsune/"
+chmod 755 "$HOME/.kitsune"
+chmod 755 "$HOME/.kitsune/modules"
+chmod 755 "$HOME/.kitsune/logs"
+[[ -f "$HOME/.kitsune/kitsune.session" ]]     && chmod 644 "$HOME/.kitsune/kitsune.session"     || true
+[[ -f "$HOME/.kitsune/kitsune.session.enc" ]] && chmod 600 "$HOME/.kitsune/kitsune.session.enc" || true
+ok "Директории созданы, права выставлены: ~/.kitsune/"
 
 step "Автозапуск"
 if $IS_TERMUX; then
