@@ -25,10 +25,14 @@ step "Базовые зависимости"
 pkg install -y git python libjpeg-turbo openssl libffi zlib 2>/dev/null || true
 ok "Базовые пакеты установлены"
 
-step "psutil для Android"
-pkg install -y python-psutil 2>/dev/null || \
-    pip install psutil --no-build-isolation --no-cache-dir -q 2>/dev/null || \
-    warn "psutil не установился — мониторинг ресурсов будет недоступен"
+step "Нативные Python-пакеты (без компиляции)"
+pkg install -y python-psutil 2>/dev/null && ok "psutil установлен (нативный)" || warn "psutil недоступен — мониторинг ресурсов отключён"
+pkg install -y python-cryptography 2>/dev/null && ok "cryptography установлена (нативная)" || {
+    warn "python-cryptography через pkg недоступен — пробую pip..."
+    pip install cryptography --no-build-isolation --prefer-binary --no-cache-dir -q 2>/dev/null && \
+        ok "cryptography установлена (pip)" || \
+        warn "cryptography не установилась — шифрование бэкапов будет использовать встроенный fallback"
+}
 
 step "Переменные окружения для сборки"
 ARCH=$(uname -m)
@@ -42,7 +46,7 @@ ok "LDFLAGS / CFLAGS настроены (arch: $ARCH)"
 
 step "Pillow"
 pip install Pillow --upgrade --no-cache-dir -q 2>/dev/null && ok "Pillow установлен" || \
-    warn "Pillow не установился — изображения могут не работать"
+    warn "Pillow не установился"
 
 step "Клонирование репозитория"
 INSTALL_DIR="$HOME/Kitsune"
@@ -58,38 +62,27 @@ cd "$INSTALL_DIR"
 ok "Репозиторий готов: $INSTALL_DIR"
 
 step "Python зависимости"
-if [[ -f "requirements-termux.txt" ]]; then
-    pip install --no-cache-dir -r requirements-termux.txt \
-        --no-warn-script-location --disable-pip-version-check \
-        --upgrade -q
-    ok "Зависимости установлены (termux)"
-else
-    pip install --no-cache-dir -r requirements.txt \
-        --no-warn-script-location --disable-pip-version-check \
-        --upgrade -q 2>/dev/null || \
+REQ_FILE="requirements-termux.txt"
+[[ ! -f "$REQ_FILE" ]] && REQ_FILE="requirements.txt"
+
+pip install --no-cache-dir --prefer-binary -r "$REQ_FILE" \
+    --no-warn-script-location --disable-pip-version-check \
+    --upgrade -q 2>/dev/null || \
     warn "Некоторые зависимости не установились"
-fi
+ok "Зависимости установлены"
 
 step "Hydrogram"
-pip install hydrogram tgcrypto --no-cache-dir -q 2>/dev/null && \
-    ok "Hydrogram установлен" || \
-    warn "Hydrogram не установился — продолжаю без него"
+pip install hydrogram tgcrypto --no-cache-dir --prefer-binary -q 2>/dev/null && \
+    ok "Hydrogram установлен" || warn "Hydrogram не установился — продолжаю без него"
 
-step "Директории данных"
+step "Директории и права"
 mkdir -p "$HOME/.kitsune/modules" "$HOME/.kitsune/logs"
 chmod 755 "$HOME/.kitsune"
 chmod 755 "$HOME/.kitsune/modules"
 chmod 755 "$HOME/.kitsune/logs"
-ok "Директории созданы и права выставлены"
-
-step "Права на сессию"
-if [[ -f "$HOME/.kitsune/kitsune.session" ]]; then
-    chmod 644 "$HOME/.kitsune/kitsune.session"
-    ok "Права сессии выставлены (644)"
-fi
-if [[ -f "$HOME/.kitsune/kitsune.session.enc" ]]; then
-    chmod 600 "$HOME/.kitsune/kitsune.session.enc"
-fi
+[[ -f "$HOME/.kitsune/kitsune.session" ]] && chmod 644 "$HOME/.kitsune/kitsune.session" || true
+[[ -f "$HOME/.kitsune/kitsune.session.enc" ]] && chmod 600 "$HOME/.kitsune/kitsune.session.enc" || true
+ok "Директории созданы, права выставлены"
 
 step "Автозапуск"
 if [[ -z "${NO_AUTOSTART:-}" ]]; then

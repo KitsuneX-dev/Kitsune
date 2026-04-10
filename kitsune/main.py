@@ -19,7 +19,14 @@ BASE_DIR = (
 BASE_PATH   = Path(BASE_DIR)
 CONFIG_PATH = BASE_PATH / "config.toml"
 DATA_DIR    = Path.home() / ".kitsune"
-DATA_DIR.mkdir(parents=True, exist_ok=True)
+try:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    import os as _os, stat as _stat
+    _mode = _stat.S_IMODE(DATA_DIR.stat().st_mode)
+    if not (_mode & _stat.S_IWUSR):
+        _os.chmod(DATA_DIR, 0o755)
+except Exception:
+    pass
 
 logger = logging.getLogger(__name__)
 
@@ -178,13 +185,14 @@ async def _startup(args: argparse.Namespace) -> None:
         else:
             logger.warning("main: non-MTProto proxy in config — ignored (use MTProto)")
 
-    from .session_enc import decrypt_session_file, _fix_session_permissions, _ensure_dir_writable
-    _ensure_dir_writable()
+    from .session_enc import decrypt_session_file, _fix_session_permissions, _ensure_data_dir, _fix_db_readonly
+    _ensure_data_dir()
     decrypt_session_file()
 
     session_file = Path(str(session_path) + ".session")
     if session_file.exists():
         _fix_session_permissions()
+        _fix_db_readonly()
     need_setup = (not api_id or not api_hash or not session_file.exists())
 
     if need_setup:
