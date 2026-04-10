@@ -160,14 +160,34 @@ class DatabaseManager:
 
         try:
             from .. import utils
-            self._assets_channel, _ = await utils.asset_channel(
-                self._client,
-                "kitsune-assets",
-                "🦊 Your Kitsune assets are stored here",
-                archive=True,
-            )
-        except Exception:
-            logger.warning("Database: Could not get/create assets channel")
+            from telethon.errors import ChannelsTooMuchError, FloodWaitError
+            import asyncio as _aio
+
+            for _attempt in range(3):
+                try:
+                    self._assets_channel, _ = await utils.asset_channel(
+                        self._client,
+                        "kitsune-assets",
+                        "🦊 Your Kitsune assets are stored here",
+                        archive=True,
+                    )
+                    break
+                except ChannelsTooMuchError:
+                    logger.warning(
+                        "Database: Too many channels on account — assets channel skipped. "
+                        "Delete unused channels to enable asset storage."
+                    )
+                    break
+                except FloodWaitError as _e:
+                    logger.debug("Database: FloodWait %ds before creating assets channel", _e.seconds)
+                    await _aio.sleep(min(_e.seconds, 10))
+                except Exception:
+                    if _attempt < 2:
+                        await _aio.sleep(2)
+                    else:
+                        raise
+        except Exception as _exc:
+            logger.debug("Database: assets channel unavailable (%s) — asset storage disabled", _exc)
 
     def get(
         self,
