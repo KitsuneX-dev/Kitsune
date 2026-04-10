@@ -119,8 +119,13 @@ class SettingsModule(KitsuneModule):
         from ..version import __version_str__
         from ..utils import IS_TERMUX, IS_DOCKER
 
-        mem = psutil.virtual_memory()
-        cpu = psutil.cpu_percent(interval=0.2)
+        try:
+            import psutil as _ps
+            mem = _ps.virtual_memory()
+            cpu = _ps.cpu_percent(interval=0.2)
+        except ImportError:
+            mem = None
+            cpu = 0.0
 
         env_tag = (
             "Termux" if IS_TERMUX
@@ -137,7 +142,7 @@ class SettingsModule(KitsuneModule):
             self.strings("info_line").format(key="Python",   val=sys.version.split()[0]),
             self.strings("info_line").format(key="Среда",    val=env_tag),
             self.strings("info_line").format(key="Модули",   val=mod_count),
-            self.strings("info_line").format(key="ОЗУ",      val=f"{mem.used // 1024 // 1024} / {mem.total // 1024 // 1024} МБ"),
+            self.strings("info_line").format(key="ОЗУ",      val=f"{(mem.used // 1024 // 1024) if mem else 0} / {(mem.total // 1024 // 1024) if mem else 0} МБ"),
             self.strings("info_line").format(key="CPU",      val=f"{cpu:.1f}%"),
         ]
         await event.reply("".join(lines), parse_mode="html")
