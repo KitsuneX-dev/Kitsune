@@ -323,13 +323,37 @@ class SetupServer:
         site = web.TCPSite(self._runner, host, port)
         await site.start()
         url = f"http://127.0.0.1:{port}"
+        # Определяем среду
+        import os as _os
+        is_termux = bool(_os.environ.get("PREFIX", "").find("com.termux") != -1)
+
+        # В Termux пробуем получить LAN IP чтобы открыть с телефона
+        lan_url = url
+        if is_termux:
+            try:
+                import socket as _socket
+                with _socket.socket(_socket.AF_INET, _socket.SOCK_DGRAM) as _s:
+                    _s.connect(("8.8.8.8", 80))
+                    _lan_ip = _s.getsockname()[0]
+                lan_url = f"http://{_lan_ip}:{port}"
+            except Exception:
+                pass
+
         print(f"\n{'━' * 42}")
-        print(f"  🌐  Открой в браузере: \033[1;36m{url}\033[0m")
+        if is_termux:
+            print(f"  🌐  Открой в браузере на телефоне:")
+            print(f"      \033[1;36m{lan_url}\033[0m")
+            print(f"  💡  Или на ПК в локальной сети: {lan_url}")
+        else:
+            print(f"  🌐  Открой в браузере: \033[1;36m{url}\033[0m")
         print(f"{'━' * 42}\n")
-        try:
-            webbrowser.open(url)
-        except Exception:
-            pass
+
+        # Открываем браузер только НЕ в Termux (там это не работает)
+        if not is_termux:
+            try:
+                webbrowser.open(url)
+            except Exception:
+                pass
 
     async def wait_done(self) -> None:
         await self._done.wait()

@@ -148,35 +148,67 @@ class NotifierModule(KitsuneModule):
 
     @command("setbot", required=OWNER)
     async def setbot_cmd(self, event) -> None:
-        arg = self.get_args(event).strip().lstrip("@")
+        arg = self.get_args(event).strip()
+
+        # Пользователь передал сам токен (содержит ':')
+        if re.match(r"^\d{8,}:[A-Za-z0-9_-]{35,}$", arg):
+            token = arg
+            m = await event.reply("🔍 Проверяю токен...", parse_mode="html")
+            try:
+                import aiohttp as _aiohttp
+                async with _aiohttp.ClientSession() as _sess:
+                    async with _sess.get(
+                        f"https://api.telegram.org/bot{token}/getMe",
+                        timeout=_aiohttp.ClientTimeout(total=10),
+                    ) as _resp:
+                        _data = await _resp.json()
+                if not _data.get("ok"):
+                    await m.edit(
+                        f"❌ Токен недействителен: {_data.get('description', 'неизвестная ошибка')}",
+                        parse_mode="html",
+                    )
+                    return
+                bot_username = _data["result"]["username"]
+                await self._stop_polling()
+                await self.db.set(_DB_OWNER, "bot_token", token)
+                await self.db.set(_DB_OWNER, "bot_username", bot_username)
+                self._save_token_to_config(token)
+                asyncio.ensure_future(self._start_polling(token, first_run=False))
+                await m.edit(f"✅ Теперь использую бота <b>@{bot_username}</b>.", parse_mode="html")
+            except Exception as exc:
+                await m.edit(f"❌ Ошибка: <code>{exc}</code>", parse_mode="html")
+            return
+
+        # Иначе — username бота
+        arg = arg.lstrip("@")
         if not arg:
             await event.reply(
-                "❌ Укажи username: <code>.setbot @kitsune_123456_bot</code>",
+                "❌ Укажи username или токен:\n"
+                "<code>.setbot @kitsune_123456_bot</code>\n"
+                "<code>.setbot 123456:TOKEN_FROM_BOTFATHER</code>",
                 parse_mode="html",
             )
             return
 
-        m = await event.reply("🔍 Получаю токен...", parse_mode="html")
+        m = await event.reply("🔍 Получаю токен через @BotFather...", parse_mode="html")
         try:
             token = await self._get_token_for_bot(arg)
             if not token:
                 await m.edit(
-                    f"❌ Не удалось получить токен для @{arg}.\nУбедись что этот бот принадлежит тебе.",
+                    f"❌ Не удалось получить токен для @{arg}.\n"
+                    f"Убедись что этот бот принадлежит тебе.\n\n"
+                    f"💡 Можно передать токен напрямую:\n"
+                    f"<code>.setbot ТОКЕН_ИЗ_BOTFATHER</code>",
                     parse_mode="html",
                 )
                 return
 
             await self._stop_polling()
-
             await self.db.set(_DB_OWNER, "bot_token", token)
             await self.db.set(_DB_OWNER, "bot_username", arg)
             self._save_token_to_config(token)
-
             asyncio.ensure_future(self._start_polling(token, first_run=False))
-            await m.edit(
-                f"✅ Теперь использую бота <b>@{arg}</b>.",
-                parse_mode="html",
-            )
+            await m.edit(f"✅ Теперь использую бота <b>@{arg}</b>.", parse_mode="html")
         except Exception as exc:
             await m.edit(f"❌ Ошибка: <code>{exc}</code>", parse_mode="html")
 
@@ -264,14 +296,43 @@ class NotifierModule(KitsuneModule):
         import re as _re
         username = username.lstrip("@")
         try:
-            async with self.client.conversation("@BotFather", timeout=20) as conv:
-                await conv.send_message(f"@{username}")
+            async with self.client.conversation("@BotFather", timeout=40) as conv:
+                # Шаг 1: /mybots — показывает список ботов пользователя
+                await conv.send_message("/mybots")
+                resp = await conv.get_response()
+
+                # Шаг 2: выбираем нужного бота по кнопке или текстом
+                buttons = _extract_buttons(resp)
+                target_btn = None
+                for b in buttons:
+                    if username.lower() in b.lower():
+                        target_btn = b
+                        break
+
+                if target_btn:
+                    await conv.send_message(target_btn)
+                else:
+                    await conv.send_message(f"@{username}")
                 menu_resp = await conv.get_response()
+
+                # Ищем токен сразу в ответе
                 token_text = menu_resp.text or ""
                 m = _re.search(r"(\d{8,}:[A-Za-z0-9_-]{35,})", token_text)
                 if m:
                     return m.group(1)
-                await conv.send_message("/token")
+
+                # Шаг 3: ищем кнопку "API Token" или "Edit Bot" меню
+                menu_buttons = _extract_buttons(menu_resp)
+                api_btn = None
+                for b in menu_buttons:
+                    if "token" in b.lower() or "api" in b.lower():
+                        api_btn = b
+                        break
+
+                if api_btn:
+                    await conv.send_message(api_btn)
+                else:
+                    await conv.send_message("/token")
                 token_resp = await conv.get_response()
                 token_text2 = token_resp.text or ""
                 m2 = _re.search(r"(\d{8,}:[A-Za-z0-9_-]{35,})", token_text2)
@@ -281,29 +342,61 @@ class NotifierModule(KitsuneModule):
             return None
 
     async def _find_existing_bot(self, tg_id: int) -> tuple[str | None, str | None]:
+        """
+        Ищет существующего бота Kitsune для данного tg_id через @BotFather.
+        Перебирает все боты пользователя — не только те с паттерном kitsune_*.
+        Возвращает (token, username) или (None, None).
+        """
         try:
-            async with self.client.conversation("@BotFather", timeout=20) as conv:
+            async with self.client.conversation("@BotFather", timeout=40) as conv:
                 await conv.send_message("/mybots")
                 resp = await conv.get_response()
+
+                # Сначала пробуем найти по паттерну kitsune в тексте
                 text = resp.text or ""
-
                 pattern = rf"kitsune_{tg_id}[a-z0-9_]*_bot"
-                match   = re.search(pattern, text, re.IGNORECASE)
-                if not match:
-                    return None, None
+                match = re.search(pattern, text, re.IGNORECASE)
 
-                username = match.group(0)
+                # Если не нашли в тексте — смотрим кнопки
+                candidates = []
+                if match:
+                    candidates.append(match.group(0))
 
-                await conv.send_message(f"@{username}")
-                await conv.get_response()
+                buttons = _extract_buttons(resp)
+                for b in buttons:
+                    b_clean = b.lstrip("@").lower()
+                    if f"kitsune_{tg_id}" in b_clean or "kitsune" in b_clean:
+                        uname = b.lstrip("@")
+                        if uname not in candidates:
+                            candidates.append(uname)
 
-                await conv.send_message("/token")
-                token_resp = await conv.get_response()
-                token_text = token_resp.text or ""
+                for username in candidates:
+                    try:
+                        # Выбираем бота через кнопку или текст
+                        btn_found = None
+                        for b in buttons:
+                            if username.lower() in b.lower():
+                                btn_found = b
+                                break
+                        await conv.send_message(btn_found or f"@{username}")
+                        menu_resp = await conv.get_response()
 
-                token_match = re.search(r"(\d{8,}:[A-Za-z0-9_-]{35,})", token_text)
-                if token_match:
-                    return token_match.group(1), username
+                        # Ищем токен сразу
+                        m = re.search(r"(\d{8,}:[A-Za-z0-9_-]{35,})", menu_resp.text or "")
+                        if m:
+                            return m.group(1), username
+
+                        # Нажимаем кнопку API Token или /token
+                        menu_btns = _extract_buttons(menu_resp)
+                        api_btn = next((b for b in menu_btns if "token" in b.lower() or "api" in b.lower()), None)
+                        await conv.send_message(api_btn or "/token")
+                        token_resp = await conv.get_response()
+                        token_match = re.search(r"(\d{8,}:[A-Za-z0-9_-]{35,})", token_resp.text or "")
+                        if token_match:
+                            return token_match.group(1), username
+                    except Exception as e:
+                        logger.debug("Notifier: _find_existing_bot inner failed for %s: %s", username, e)
+                        continue
 
         except Exception as exc:
             logger.debug("Notifier: _find_existing_bot failed — %s", exc)
