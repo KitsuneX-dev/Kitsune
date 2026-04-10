@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import logging
 import typing
 from pathlib import Path
@@ -19,27 +20,51 @@ async def send_file(
     force_telethon: bool = False,
 ) -> typing.Any:
     hydro = _hydro(client)
+
+    # Сохраняем позицию буфера ДО попытки отправки,
+    # чтобы при fallback на Telethon сбросить его обратно
+    buf_start: int = 0
+    if hasattr(file, "seek") and hasattr(file, "tell"):
+        try:
+            buf_start = file.tell()
+        except Exception:
+            buf_start = 0
+
     if hydro and not force_telethon:
         try:
+            # Для BytesIO-буфера сначала resolve peer через get_chat,
+            # чтобы Hydrogram успел закэшировать entity
+            if hasattr(file, "read"):
+                try:
+                    await hydro.get_chat(chat_id)
+                except Exception:
+                    pass
+
             pm = "html" if parse_mode.lower() == "html" else None
-            if hasattr(file, "read") or isinstance(file, (str, Path)):
-                result = await hydro.send_document(
-                    chat_id=chat_id,
-                    document=file,
-                    caption=caption,
-                    parse_mode=pm,
-                )
-            else:
-                result = await hydro.send_document(
-                    chat_id=chat_id,
-                    document=file,
-                    caption=caption,
-                    parse_mode=pm,
-                )
+            result = await hydro.send_document(
+                chat_id=chat_id,
+                document=file,
+                caption=caption,
+                parse_mode=pm,
+            )
             logger.debug("hydro_media: sent via Hydrogram")
             return result
         except Exception as exc:
             logger.warning("hydro_media: Hydrogram send failed (%s), falling back to Telethon", exc)
+            # Сбрасываем позицию буфера перед fallback
+            if hasattr(file, "seek"):
+                try:
+                    file.seek(buf_start)
+                except Exception:
+                    pass
+
+    # Fallback: Telethon
+    # Убеждаемся что буфер читается с начала (или с сохранённой позиции)
+    if hasattr(file, "seek"):
+        try:
+            file.seek(buf_start)
+        except Exception:
+            pass
 
     return await client.send_file(
         chat_id,
@@ -47,6 +72,7 @@ async def send_file(
         caption=caption,
         parse_mode=parse_mode,
     )
+
 
 async def download_media(
     client: typing.Any,
@@ -57,7 +83,6 @@ async def download_media(
     hydro = _hydro(client)
     if hydro and not force_telethon and getattr(message, "file", None):
         try:
-            import io
             buf = io.BytesIO()
             file_id = _get_hydro_file_id(message)
             if file_id:
@@ -71,6 +96,7 @@ async def download_media(
             logger.warning("hydro_media: Hydrogram download failed (%s), falling back to Telethon", exc)
 
     return await message.download_media(bytes)
+
 
 def _get_hydro_file_id(message: typing.Any) -> str | None:
     media = getattr(message, "media", None)
