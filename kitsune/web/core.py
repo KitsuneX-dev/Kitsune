@@ -58,7 +58,10 @@ class WebCore:
         from ..version import __version_str__
         mem  = psutil.virtual_memory()
         disk = psutil.disk_usage("/")
-        cpu  = psutil.cpu_percent(interval=0.2)
+        try:
+            cpu = psutil.cpu_percent(interval=0.2)
+        except PermissionError:
+            cpu = 0.0
         loader    = getattr(self._client, "_kitsune_loader", None)
         mod_count = len(loader.modules) if loader else 0
         data = {
