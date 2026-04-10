@@ -1,20 +1,10 @@
-"""
-kitsune/utils/args.py — парсинг аргументов команд.
-
-Содержит функции для извлечения аргументов из сообщения Telegram.
-"""
 
 from __future__ import annotations
 
 import shlex
 import typing
 
-
 def get_args(message: typing.Any) -> list[str]:
-    """
-    Получить аргументы команды как список токенов.
-    Поддерживает кавычки: .cmd "hello world" foo → ["hello world", "foo"]
-    """
     raw = get_args_raw(message)
     if not raw:
         return []
@@ -23,18 +13,14 @@ def get_args(message: typing.Any) -> list[str]:
     except ValueError:
         return list(filter(None, raw.split()))
 
-
 def get_args_raw(message: typing.Any) -> str:
-    """Получить аргументы команды как сырую строку."""
     text = getattr(message, "text", None) or getattr(message, "message", "")
     if not text:
         return ""
     parts = text.split(maxsplit=1)
     return parts[1] if len(parts) > 1 else ""
 
-
 def get_args_html(message: typing.Any) -> str:
-    """Получить аргументы с сохранением HTML-форматирования (entities)."""
     try:
         from telethon.extensions import html as tl_html
         import copy
@@ -72,14 +58,7 @@ def get_args_html(message: typing.Any) -> str:
     except Exception:
         return get_args_raw(message)
 
-
 def split_args(message: typing.Any, n: int = 1) -> tuple[list[str], str]:
-    """
-    Разбить аргументы на первые n токенов и остаток.
-
-    split_args(msg, 1) при тексте ".cmd foo bar baz"
-    → (["foo"], "bar baz")
-    """
     raw  = get_args_raw(message)
     head = raw.split(maxsplit=n)
     if not head:

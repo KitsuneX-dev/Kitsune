@@ -11,7 +11,6 @@ logger = logging.getLogger(__name__)
 
 _Handler = typing.Callable[[KitsuneEvent], typing.Awaitable[None]]
 
-
 class EventBus:
 
     def __init__(self) -> None:
@@ -70,6 +69,5 @@ class EventBus:
             loop.create_task(self.emit(event))
         except RuntimeError:
             pass
-
 
 bus: EventBus = EventBus()

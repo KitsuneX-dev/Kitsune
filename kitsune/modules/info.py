@@ -15,7 +15,6 @@ def _esc(s: str) -> str:
     return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 class InfoModule(KitsuneModule):
-    """Информация об аккаунте и UserBot."""
 
     name        = "KitsuneInfo"
     description = "Информация о UserBot с кастомизацией"
@@ -102,7 +101,6 @@ class InfoModule(KitsuneModule):
             return "?.?.?"
 
     def _get_git_info(self) -> tuple:
-        """Открываем repo ОДИН раз -> (build, branch, upd)."""
         try:
             import git
             from ..version import branch as vbranch
@@ -168,7 +166,6 @@ class InfoModule(KitsuneModule):
 
     @command("info", required=OWNER)
     async def info_cmd(self, event) -> None:
-        """.info — показать информацию о UserBot."""
         import asyncio as _asyncio
         loop = _asyncio.get_event_loop()
 
@@ -203,7 +200,6 @@ class InfoModule(KitsuneModule):
 
     @command("setinfo", required=OWNER)
     async def setinfo_cmd(self, event) -> None:
-        """.setinfo <текст> — установить кастомный текст info."""
         args = self.get_args(event)
         if not args:
             await event.reply(self.strings("setinfo_no_args"), parse_mode="html")
@@ -214,7 +210,6 @@ class InfoModule(KitsuneModule):
 
     @command("resetinfo", required=OWNER)
     async def resetinfo_cmd(self, event) -> None:
-        """.resetinfo — сбросить кастомный текст info."""
         self.config["custom_message"] = None
         await self.db.set(_DB_OWNER, "custom_message", None)
         await event.reply("✅ Info-сообщение сброшено.", parse_mode="html")

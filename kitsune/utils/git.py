@@ -1,6 +1,3 @@
-"""
-kitsune/utils/git.py — Git-утилиты для обновления Kitsune.
-"""
 
 from __future__ import annotations
 
@@ -11,27 +8,19 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-_REPO_PATH = Path(__file__).parent.parent.parent  # корень репозитория
-
+_REPO_PATH = Path(__file__).parent.parent.parent
 
 def get_repo_path() -> Path:
-    """Возвращает корневой путь репозитория Kitsune."""
     return _REPO_PATH
 
-
 def get_git_repo() -> typing.Any:
-    """
-    Возвращает git.Repo объект или None если git/gitpython не доступны.
-    """
     try:
         import git
         return git.Repo(_REPO_PATH)
     except Exception:
         return None
 
-
 def get_current_commit(short: bool = True) -> str | None:
-    """Возвращает хэш текущего коммита (7 символов если short=True)."""
     repo = get_git_repo()
     if repo is None:
         return None
@@ -41,9 +30,7 @@ def get_current_commit(short: bool = True) -> str | None:
     except Exception:
         return None
 
-
 def get_current_branch() -> str | None:
-    """Возвращает название текущей ветки."""
     repo = get_git_repo()
     if repo is None:
         return None
@@ -54,9 +41,7 @@ def get_current_branch() -> str | None:
     except Exception:
         return None
 
-
 def get_remote_commit(branch: str | None = None) -> str | None:
-    """Возвращает хэш последнего коммита в remote/origin."""
     repo = get_git_repo()
     if repo is None:
         return None
@@ -70,21 +55,14 @@ def get_remote_commit(branch: str | None = None) -> str | None:
     except Exception:
         return None
 
-
 def has_updates() -> bool:
-    """True если remote опережает local."""
     local  = get_current_commit(short=False)
     remote = get_remote_commit()
     if not local or not remote:
         return False
     return not remote.startswith(local[:7])
 
-
 def get_changelog(n: int = 5) -> list[dict]:
-    """
-    Возвращает последние n коммитов как список словарей:
-    {"sha": "abc1234", "message": "...", "author": "...", "date": "..."}
-    """
     repo = get_git_repo()
     if repo is None:
         return []

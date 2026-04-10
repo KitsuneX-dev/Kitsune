@@ -1,13 +1,3 @@
-"""
-kitsune/configurator.py — интерактивный конфигуратор для терминала.
-
-Запускается при первом старте (если нет config.toml) или вручную
-через флаг --configure.
-
-Правильно работает как в TTY (с цветами и ANSI), так и в
-non-TTY окружении (Docker без терминала, Heroku dyno) — в этом
-случае убирает ANSI-последовательности перед выводом.
-"""
 
 from __future__ import annotations
 
@@ -16,32 +6,21 @@ import string
 import sys
 import typing
 
-
-# ─── TTY-совместимый вывод ───────────────────────────────────────────────────
-
 def _is_tty() -> bool:
     return sys.stdout.isatty() and sys.stdin.isatty()
-
 
 def _strip_ansi(text: str) -> str:
     return re.sub(r"\033\[[0-9;]*m", "", text)
 
-
 def tty_print(text: str, tty: bool | None = None) -> None:
-    """Вывести текст — с цветами в TTY, без ANSI в pipe/Docker."""
     if tty is None:
         tty = _is_tty()
     print(text if tty else _strip_ansi(text))
 
-
 def tty_input(prompt: str, tty: bool | None = None) -> str:
-    """Запросить ввод — с цветами в TTY, без ANSI в pipe."""
     if tty is None:
         tty = _is_tty()
     return input(prompt if tty else _strip_ansi(prompt))
-
-
-# ─── Цвета ───────────────────────────────────────────────────────────────────
 
 try:
     from colorama import Fore, Style, init as _cinit
@@ -56,24 +35,16 @@ try:
 except ImportError:
     _C = _M = _G = _Y = _R = _W = _Z = ""
 
-
-# ─── Валидация ────────────────────────────────────────────────────────────────
-
 def _valid_api_id(value: str) -> bool:
     return value.strip().isdigit() and int(value.strip()) > 0
-
 
 def _valid_api_hash(value: str) -> bool:
     v = value.strip()
     return len(v) == 32 and all(c in string.hexdigits for c in v)
 
-
 def _valid_phone(value: str) -> bool:
     v = value.strip().replace(" ", "").replace("-", "")
     return v.startswith("+") and v[1:].isdigit() and 7 <= len(v) <= 16
-
-
-# ─── Запрос конкретного поля ──────────────────────────────────────────────────
 
 def _ask(
     prompt: str,
@@ -82,10 +53,6 @@ def _ask(
     default: str = "",
     tty: bool = True,
 ) -> str:
-    """
-    Запрашивает значение с валидацией.
-    При secret=True использует getpass (скрывает ввод).
-    """
     while True:
         try:
             if secret:
@@ -109,16 +76,7 @@ def _ask(
 
         return value
 
-
-# ─── Главный конфигуратор ─────────────────────────────────────────────────────
-
 def api_config(tty: bool | None = None) -> dict:
-    """
-    Интерактивно запрашивает API-данные и возвращает словарь конфига.
-
-    Вызывается из main.py при первом запуске если нет config.toml.
-    Возвращает dict с ключами: api_id, api_hash, phone.
-    """
     if tty is None:
         tty = _is_tty()
 
@@ -159,12 +117,7 @@ def api_config(tty: bool | None = None) -> dict:
         "phone":    phone.strip(),
     }
 
-
 def configure_proxy(tty: bool | None = None) -> dict | None:
-    """
-    Интерактивно настраивает прокси.
-    Возвращает dict или None если прокси не нужен.
-    """
     if tty is None:
         tty = _is_tty()
 

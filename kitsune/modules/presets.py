@@ -13,7 +13,6 @@ logger = logging.getLogger(__name__)
 
 _DB_OWNER = "kitsune.presets"
 
-# Наборы модулей для быстрой установки
 PRESETS: dict[str, dict] = {
     "fun": {
         "title": "🎮 Развлечения",
@@ -58,9 +57,7 @@ PRESETS: dict[str, dict] = {
     },
 }
 
-
 class PresetsModule(KitsuneModule):
-    """Наборы модулей для быстрой установки."""
 
     name        = "presets"
     description = "Наборы модулей"
@@ -84,7 +81,6 @@ class PresetsModule(KitsuneModule):
         "no_file":          "❌ Ответь на файл JSON с пресетом или прикрепи его.",
         "bad_file":         "❌ Неверный формат файла пресета.",
         "no_args":          "Использование: <code>.presets</code> или <code>.presets &lt;набор&gt;</code>",
-        # folder commands
         "folder_usage":     "Использование: <code>.addtofolder &lt;папка&gt; &lt;модуль&gt;</code>",
         "folder_added":     "✅ Модуль <code>{mod}</code> добавлен в папку <code>{folder}</code>.",
         "folder_already":   "ℹ️ Модуль уже в папке <code>{folder}</code>.",
@@ -97,15 +93,12 @@ class PresetsModule(KitsuneModule):
         "fl_empty":         "❌ В папке <code>{folder}</code> нет модулей с известным URL.",
         "fl_done":          "📁 Файл пресета папки <b>{folder}</b> отправлен.\n"
                             "Установить: <code>.loadpreset</code> (ответь на файл)",
-        # aliases
         "no_aliases":       "ℹ️ Нет сохранённых алиасов.",
         "aliases_saved":    "✅ Загружено алиасов: {count}",
         "aliases_file":     "📄 Файл алиасов отправлен.",
         "al_usage":         "❌ Нет алиасов для экспорта.",
         "la_bad":           "❌ Неверный формат файла алиасов.",
     }
-
-    # ─── helpers ──────────────────────────────────────────────────────────
 
     def _get_loader(self):
         return getattr(self.client, "_kitsune_loader", None)
@@ -130,11 +123,8 @@ class PresetsModule(KitsuneModule):
         import asyncio
         asyncio.ensure_future(self.db.set(_DB_OWNER, "folders", folders))
 
-    # ─── presets ──────────────────────────────────────────────────────────
-
     @command("presets", required=OWNER)
     async def presets_cmd(self, event) -> None:
-        """.presets [название] — показать наборы модулей или установить набор."""
         arg = self.get_args(event).strip().lower()
 
         if not arg:
@@ -177,9 +167,6 @@ class PresetsModule(KitsuneModule):
             parse_mode="html",
         )
 
-        # Ask for confirmation via second .presets <name> confirm
-        # Simple approach: auto-install after showing info
-        # Actually let's install immediately with progress
         await asyncio.sleep(2)
         loader = self._get_loader()
         if not loader:
@@ -217,7 +204,6 @@ class PresetsModule(KitsuneModule):
 
     @command("loadpreset", required=OWNER)
     async def loadpreset_cmd(self, event) -> None:
-        """.loadpreset — установить пресет из JSON-файла (ответь на файл)."""
         reply = await event.message.get_reply_message()
         msg = reply if (reply and reply.file) else (event.message if event.message.file else None)
 
@@ -258,11 +244,8 @@ class PresetsModule(KitsuneModule):
             parse_mode="html",
         )
 
-    # ─── folder commands ───────────────────────────────────────────────────
-
     @command("addtofolder", required=OWNER)
     async def addtofolder_cmd(self, event) -> None:
-        """.addtofolder <папка> <модуль> — добавить модуль в папку пресетов."""
         args = self.get_args(event).split()
         if len(args) < 2:
             await event.message.edit(self.strings("folder_usage"), parse_mode="html")
@@ -299,7 +282,6 @@ class PresetsModule(KitsuneModule):
 
     @command("removefromfolder", required=OWNER)
     async def removefromfolder_cmd(self, event) -> None:
-        """.removefromfolder <папка> <модуль> — удалить модуль из папки."""
         args = self.get_args(event).split()
         if len(args) < 2:
             await event.message.edit(self.strings("rm_usage"), parse_mode="html")
@@ -337,7 +319,6 @@ class PresetsModule(KitsuneModule):
 
     @command("folderload", required=OWNER)
     async def folderload_cmd(self, event) -> None:
-        """.folderload <папка> — экспортировать папку как JSON-файл пресета."""
         args = self.get_args(event).split()
         if not args:
             await event.message.edit(self.strings("fl_usage"), parse_mode="html")
@@ -380,11 +361,8 @@ class PresetsModule(KitsuneModule):
         )
         await event.message.delete()
 
-    # ─── alias commands ────────────────────────────────────────────────────
-
     @command("aliasload", required=OWNER)
     async def aliasload_cmd(self, event) -> None:
-        """.aliasload — экспортировать алиасы в JSON-файл."""
         dispatcher = self._get_dispatcher()
         if not dispatcher:
             return
@@ -410,7 +388,6 @@ class PresetsModule(KitsuneModule):
 
     @command("loadaliases", required=OWNER)
     async def loadaliases_cmd(self, event) -> None:
-        """.loadaliases — загрузить алиасы из JSON-файла (ответь на файл)."""
         reply = await event.message.get_reply_message()
         msg = reply if (reply and reply.file) else (event.message if event.message.file else None)
 
@@ -443,7 +420,6 @@ class PresetsModule(KitsuneModule):
                     if not hasattr(dispatcher, "_aliases"):
                         dispatcher._aliases = {}
                     dispatcher._aliases[alias] = f"{cmd} {rest}" if rest else cmd
-                    # register alias as command
                     handler, required = dispatcher._commands[cmd]
                     dispatcher.register_command(alias, handler, required)
                     loaded += 1

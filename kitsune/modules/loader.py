@@ -24,14 +24,11 @@ _BLOCKED_IMPORTS: frozenset[str] = frozenset({
 
 _BUILTIN_MODULES_DIR = Path(__file__).parent.parent / "modules"
 
-
 class ModuleLoadError(Exception):
     pass
 
-
 class ASTSecurityError(ModuleLoadError):
     pass
-
 
 class ConfigValue:
 
@@ -57,7 +54,6 @@ class ConfigValue:
                 raise
         else:
             self.value = raw_value
-
 
 class ModuleConfig:
 
@@ -93,7 +89,6 @@ class ModuleConfig:
 
     def get_config_value(self, key: str) -> ConfigValue:
         return self._config[key]
-
 
 class KitsuneModule:
 
@@ -150,7 +145,6 @@ class KitsuneModule:
                 except Exception:
                     pass
 
-
 def command(
     name: str | None = None,
     *,
@@ -165,7 +159,6 @@ def command(
         return func
     return decorator
 
-
 def watcher(
     filter_func: typing.Callable | None = None,
 ) -> typing.Callable:
@@ -174,7 +167,6 @@ def watcher(
         func._watcher_filter = filter_func
         return func
     return decorator
-
 
 class _ASTScanner(ast.NodeVisitor):
 
@@ -205,7 +197,6 @@ class _ASTScanner(ast.NodeVisitor):
                     )
         self.generic_visit(node)
 
-
 def _scan_ast(source: str, filename: str = "<module>") -> None:
     try:
         tree = ast.parse(source, filename=filename)
@@ -219,7 +210,6 @@ def _scan_ast(source: str, filename: str = "<module>") -> None:
         raise ASTSecurityError(
             "Security scan failed:\n" + "\n".join(f"  • {e}" for e in scanner.errors)
         )
-
 
 class Loader:
 

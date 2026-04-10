@@ -172,7 +172,6 @@ class BackupModule(KitsuneModule):
                 await prog.done(f"❌ Ошибка: <code>{exc}</code>")
 
     async def _initial_backup_after_setup(self) -> None:
-        """Создаёт группу KitsuneBackup и делает первый бэкап сразу после настройки."""
         try:
             await asyncio.sleep(2)
             dest = await self._ensure_backup_dest()

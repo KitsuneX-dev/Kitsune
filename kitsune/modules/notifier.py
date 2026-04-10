@@ -719,7 +719,6 @@ class NotifierModule(KitsuneModule):
 
         except Exception as exc:
             err_str = str(exc).lower()
-            # Сетевые ошибки — это не заморозка, просто нет интернета
             _network_keywords = (
                 "network", "connection", "ssl", "timeout", "certificate",
                 "connect", "resolve", "reset", "eof", "broken pipe",
@@ -728,7 +727,6 @@ class NotifierModule(KitsuneModule):
 
             if is_network:
                 logger.warning("Notifier: polling failed due to network error — will retry: %s", exc)
-                # Просто перезапустим через минуту, без уведомления пользователя
                 await asyncio.sleep(60)
                 token = self.db.get(_DB_OWNER, "bot_token", None)
                 if token:

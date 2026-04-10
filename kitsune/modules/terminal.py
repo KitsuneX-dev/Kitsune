@@ -16,7 +16,6 @@ _MAX_OUTPUT   = 3500
 _HEADER_SHELL = "🖥 <b>Terminal</b>"
 _HEADER_SUDO  = "🔐 <b>Terminal (sudo)</b>"
 
-
 class TerminalModule(KitsuneModule):
     name        = "terminal"
     description = "Shell command execution"

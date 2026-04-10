@@ -3,7 +3,6 @@ from __future__ import annotations
 import typing
 from dataclasses import dataclass, field
 
-
 @dataclass
 class CommandMeta:
     name: str
@@ -11,13 +10,11 @@ class CommandMeta:
     required: int
     module_name: str = ""
 
-
 @dataclass
 class WatcherMeta:
     handler: typing.Callable
     filter_func: typing.Optional[typing.Callable]
     module_name: str = ""
-
 
 @dataclass
 class ModuleInfo:
@@ -30,21 +27,17 @@ class ModuleInfo:
     is_builtin: bool = False
     source_url: str = ""
 
-
 class KitsuneEvent:
     pass
-
 
 @dataclass
 class ModuleLoadedEvent(KitsuneEvent):
     module_name: str
     is_builtin: bool
 
-
 @dataclass
 class ModuleUnloadedEvent(KitsuneEvent):
     module_name: str
-
 
 @dataclass
 class ConfigChangedEvent(KitsuneEvent):
@@ -53,12 +46,10 @@ class ConfigChangedEvent(KitsuneEvent):
     old_value: typing.Any
     new_value: typing.Any
 
-
 @dataclass
 class PrefixChangedEvent(KitsuneEvent):
     old_prefix: str
     new_prefix: str
-
 
 @dataclass
 class SecurityChangedEvent(KitsuneEvent):

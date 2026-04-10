@@ -10,9 +10,7 @@ logger = logging.getLogger(__name__)
 
 _DB_OWNER = "kitsune.rkn"
 
-
 class RKNBypassModule(KitsuneModule):
-    """Обход блокировок РКН для Telegram без VPN."""
 
     name        = "RKNBypass"
     description = "Обход блокировок РКН (MTProto прокси)"
@@ -60,8 +58,6 @@ class RKNBypassModule(KitsuneModule):
         "ssl_enabled":  "✅ Обход SSL РКН-фильтрации для Bot API — <b>уже включён по умолчанию</b>.",
     }
 
-    # ─── helpers ──────────────────────────────────────────────────────────
-
     def _load_config(self) -> dict:
         from pathlib import Path
         try:
@@ -82,11 +78,8 @@ class RKNBypassModule(KitsuneModule):
         except Exception as exc:
             logger.warning("RKNBypass: could not save config — %s", exc)
 
-    # ─── команды ──────────────────────────────────────────────────────────
-
     @command("rkn", required=OWNER)
     async def rkn_cmd(self, event) -> None:
-        """.rkn — проверить подключение и найти обходной прокси если нужно."""
         await event.message.edit(self.strings("checking"), parse_mode="html")
 
         from ..rkn_bypass import test_connection, find_working_proxy
@@ -113,7 +106,6 @@ class RKNBypassModule(KitsuneModule):
 
     @command("setproxy", required=OWNER)
     async def setproxy_cmd(self, event) -> None:
-        """.setproxy host port secret — установить MTProto прокси."""
         args = self.get_args(event).split()
         if len(args) < 3:
             await event.message.edit(self.strings("set_usage"), parse_mode="html")
@@ -138,7 +130,6 @@ class RKNBypassModule(KitsuneModule):
 
     @command("clearproxy", required=OWNER)
     async def clearproxy_cmd(self, event) -> None:
-        """.clearproxy — убрать прокси (прямое подключение)."""
         cfg = self._load_config()
         cfg.pop("proxy", None)
         self._save_config(cfg)
@@ -146,7 +137,6 @@ class RKNBypassModule(KitsuneModule):
 
     @command("proxyinfo", required=OWNER)
     async def proxyinfo_cmd(self, event) -> None:
-        """.proxyinfo — показать текущий прокси."""
         cfg = self._load_config()
         proxy = cfg.get("proxy")
         if not proxy or not proxy.get("host"):
@@ -165,7 +155,6 @@ class RKNBypassModule(KitsuneModule):
 
     @command("checkcon", required=OWNER)
     async def checkcon_cmd(self, event) -> None:
-        """.checkcon — проверить прямое соединение с Telegram."""
         await event.message.edit("🔍 Проверяю...", parse_mode="html")
 
         from ..rkn_bypass import test_connection

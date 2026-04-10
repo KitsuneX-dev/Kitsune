@@ -8,7 +8,6 @@ from urllib.parse import urlparse
 logger = logging.getLogger(__name__)
 
 class ListGalleryHelper:
-    """Оборачивает список URL и позволяет итерироваться по нему циклически."""
 
     def __init__(self, urls: typing.List[str]):
         self.urls = urls
@@ -25,23 +24,6 @@ class ListGalleryHelper:
         return len(self.urls)
 
 class Gallery:
-    """
-    Mixin — добавь к своему InlineManager / InlineCore.
-
-    Требует чтобы в классе были:
-      self.bot          — aiogram Bot instance
-      self._units       — dict для хранения активных unit'ов
-      self._custom_map  — dict callback_data -> handler
-      self._me          — Telegram user_id владельца
-      self._rand(n)     — генерация случайной строки длиной n
-      self.generate_markup(buttons) — генерация InlineKeyboardMarkup
-      self._invoke_unit(unit_id, message) — отправка inline через bot
-      self._delete_unit_message(call, unit_id) — удаление сообщения
-
-    Пример подключения:
-        class InlineManager(Gallery, ...):
-            ...
-    """
 
     async def gallery(
         self,
@@ -57,22 +39,6 @@ class Gallery:
         gif: bool = False,
         silent: bool = False,
     ) -> typing.Union[bool, "InlineMessage"]:
-        """
-        Отправить inline-галерею в чат.
-
-        :param message: Сообщение-триггер (telethon/pyrogram Message или chat_id int).
-        :param next_handler: Callable возвращающий URL следующего фото,
-                             или список URL.
-        :param caption: Подпись — строка, список строк или callable.
-        :param force_me: Только владелец может листать.
-        :param always_allow: Доп. пользователи, которым разрешено листать.
-        :param ttl: Через сколько секунд галерея устаревает (False = не устаревает).
-        :param on_unload: Callback при закрытии галереи.
-        :param preload: Сколько фото загружать заранее.
-        :param gif: True если контент — GIF/видео.
-        :param silent: Не показывать «Открываю галерею...».
-        :return: InlineMessage при успехе, False при ошибке.
-        """
         if always_allow is None:
             always_allow = []
 
@@ -156,7 +122,6 @@ class Gallery:
         return m
 
     def _make_page_handler(self, unit_id: str):
-        """Возвращает coroutine-handler для btn_call_data."""
         async def handler(call, page):
             await self._gallery_page(call, page, unit_id=unit_id)
         return handler
@@ -165,7 +130,6 @@ class Gallery:
         self,
         handler: typing.Union[ListGalleryHelper, callable, str, list],
     ) -> typing.Union[str, typing.List[str], bool]:
-        """Получить URL(ы) из handler'а."""
         if isinstance(handler, str):
             return handler
         if isinstance(handler, list):
@@ -179,7 +143,6 @@ class Gallery:
         return False
 
     async def _preload_photos(self, unit_id: str):
-        """Фоновая догрузка фотографий."""
         if unit_id not in self._units:
             return
 
@@ -201,7 +164,6 @@ class Gallery:
             asyncio.ensure_future(self._preload_photos(unit_id))
 
     def _get_caption(self, unit_id: str) -> str:
-        """Получить подпись для текущего фото."""
         caption = self._units[unit_id].get("caption", "")
         idx = self._units[unit_id]["current_index"]
 
@@ -218,7 +180,6 @@ class Gallery:
         return caption if isinstance(caption, str) else ""
 
     def _is_gif(self, unit_id: str, url: str) -> bool:
-        """Определить GIF/видео по флагу или расширению."""
         if self._units[unit_id].get("gif", False):
             return True
         try:
@@ -228,7 +189,6 @@ class Gallery:
             return False
 
     def _gallery_markup(self, unit_id: str):
-        """Сгенерировать клавиатуру для галереи."""
         unit = self._units[unit_id]
         idx = unit["current_index"]
         total = len(unit["photos"])
@@ -274,7 +234,6 @@ class Gallery:
         page: typing.Union[int, str],
         unit_id: typing.Optional[str] = None,
     ):
-        """Обработчик нажатий на кнопки галереи."""
         if unit_id not in self._units:
             await call.answer("Галерея устарела", show_alert=True)
             return
@@ -348,10 +307,6 @@ class Gallery:
             asyncio.ensure_future(self._preload_photos(unit_id))
 
     async def _gallery_inline_handler(self, inline_query):
-        """
-        Обработчик inline-запроса от бота — вызывается когда бот получает
-        inline query с unit_id галереи. Регистрируй в своём InlineCore.
-        """
         for unit in self._units.copy().values():
             if (
                 inline_query.from_user.id == self._me

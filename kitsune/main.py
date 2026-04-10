@@ -227,7 +227,6 @@ async def _startup(args: argparse.Namespace) -> None:
             import asyncio as _asyncio
 
             proxy_info = _asyncio.get_event_loop().run_until_complete(find_working_proxy()) if not asyncio.get_event_loop().is_running() else None
-            # В async-контексте ищем прокси правильно
             try:
                 proxy_info = await find_working_proxy()
             except Exception:

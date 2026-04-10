@@ -1,12 +1,3 @@
-"""
-kitsune/modules/quickstart.py — онбординг при первой установке.
-
-Отправляет приветственное сообщение в Избранное (Saved Messages)
-при первом запуске и показывает краткий гайд по использованию.
-
-Флаг "уже показано" хранится в LocalStorage, а не в БД —
-чтобы сбросить конфиг не сбросил онбординг.
-"""
 
 from __future__ import annotations
 
@@ -20,7 +11,6 @@ logger = logging.getLogger(__name__)
 
 _LS_OWNER = "kitsune.quickstart"
 _LS_KEY   = "shown"
-
 
 class QuickstartModule(KitsuneModule):
     name        = "quickstart"
@@ -56,14 +46,12 @@ class QuickstartModule(KitsuneModule):
         await self._maybe_show_welcome()
 
     async def _maybe_show_welcome(self) -> None:
-        """Показывает приветствие один раз при первом запуске."""
         try:
             from .._local_storage import get_storage
             ls = get_storage()
             if ls.get(_LS_OWNER, _LS_KEY):
                 return
 
-            # Небольшая задержка — ждём пока все модули загрузятся
             import asyncio
             await asyncio.sleep(3)
 
@@ -71,20 +59,17 @@ class QuickstartModule(KitsuneModule):
             plat = get_platform()
             text += f"\n\n{self.strings('platform_info').format(platform=plat)}"
 
-            # Отправляем в группу "Kitsune <ник пользователя>"
             me = await self.client.get_me()
             group_title = f"Kitsune {me.first_name or ''}"
             if me.last_name:
                 group_title += f" {me.last_name}"
 
-            # Ищем уже существующую группу с таким названием
             target = None
             async for dialog in self.client.iter_dialogs():
                 if dialog.is_group and dialog.title == group_title:
                     target = dialog.entity
                     break
 
-            # Если нет — создаём
             if target is None:
                 from telethon.tl.functions.messages import CreateChatRequest
                 result = await self.client(CreateChatRequest(
@@ -102,7 +87,6 @@ class QuickstartModule(KitsuneModule):
 
     @command("quickstart", required=OWNER)
     async def quickstart_cmd(self, event) -> None:
-        """Показать или сбросить онбординг."""
         args = self.get_args(event).strip().lower()
 
         if args == "reset":
@@ -114,7 +98,6 @@ class QuickstartModule(KitsuneModule):
                 await event.reply(f"❌ Ошибка: <code>{exc}</code>", parse_mode="html")
             return
 
-        # Показать снова вручную
         try:
             from .._local_storage import get_storage
             ls = get_storage()

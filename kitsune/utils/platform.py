@@ -1,6 +1,3 @@
-"""
-kitsune/utils/platform.py — определение платформы и окружения.
-"""
 
 from __future__ import annotations
 
@@ -9,7 +6,6 @@ import platform
 import sys
 from pathlib import Path
 
-
 def is_docker() -> bool:
     return (
         os.path.exists("/.dockerenv")
@@ -17,17 +13,14 @@ def is_docker() -> bool:
         or _cgroup("docker")
     )
 
-
 def is_termux() -> bool:
     return (
         "com.termux" in os.environ.get("PREFIX", "")
         or Path("/data/data/com.termux").exists()
     )
 
-
 def is_heroku() -> bool:
     return "DYNO" in os.environ
-
 
 def _cgroup(kw: str) -> bool:
     try:
@@ -35,9 +28,7 @@ def _cgroup(kw: str) -> bool:
     except Exception:
         return False
 
-
 def get_platform_name() -> str:
-    """Читаемое название текущей платформы."""
     if is_docker():   return "Docker"
     if is_termux():   return "Termux"
     if is_heroku():   return "Heroku"
@@ -45,7 +36,7 @@ def get_platform_name() -> str:
     system = platform.system()
     if system == "Linux":
         try:
-            import distro  # type: ignore
+            import distro
             name = distro.name(pretty=True)
             if name:
                 return name
@@ -58,11 +49,9 @@ def get_platform_name() -> str:
         return f"Windows {platform.release()}"
     return system or "Unknown"
 
-
 def get_python_version() -> str:
     v = sys.version_info
     return f"{v.major}.{v.minor}.{v.micro}"
-
 
 def get_arch() -> str:
     return platform.machine() or "unknown"

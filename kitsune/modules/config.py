@@ -19,7 +19,6 @@ def _esc(s: str) -> str:
     return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 def _fmt_value(value) -> str:
-    """Форматирует значение для HTML."""
     if value is None or value == "":
         return "<code>None</code>"
     if isinstance(value, bool):
@@ -35,7 +34,6 @@ def _chunks(lst: list, n: int) -> list:
     return [lst[i:i + n] for i in range(0, len(lst), n)]
 
 class ConfigModule(KitsuneModule):
-    """Интерактивный конфигуратор модулей Kitsune."""
 
     name        = "Config"
     description = "Интерактивная настройка параметров модулей"
@@ -381,7 +379,6 @@ class ConfigModule(KitsuneModule):
 
     @command("config", required=OWNER)
     async def config_cmd(self, event) -> None:
-        """.config — интерактивная настройка модулей."""
         inline = self._inline()
         if not inline or not inline._bot:
             await event.message.edit(self.strings("no_inline"), parse_mode="html")
@@ -389,13 +386,11 @@ class ConfigModule(KitsuneModule):
 
         args   = self.get_args(event).strip()
 
-        # Редактируем сообщение-команду сразу, чтобы не удалялось
         await event.message.edit("⚙️ <b>Загрузка...</b>", parse_mode="html")
         await self._screen_choose_category(event.message)
 
     @command("fconfig", required=OWNER)
     async def fconfig_cmd(self, event) -> None:
-        """.fconfig <модуль> <параметр> <значение> — быстрая установка без UI."""
         args = self.get_args(event).split(maxsplit=2)
         if len(args) < 3:
             await event.message.edit(self.strings("fconfig_args"), parse_mode="html")

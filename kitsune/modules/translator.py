@@ -7,9 +7,7 @@ from ..core.security import OWNER
 
 logger = logging.getLogger(__name__)
 
-
 class TranslatorModule(KitsuneModule):
-    """Переводчик текста через Telegram."""
 
     name        = "translator"
     description = "Перевод текста"
@@ -40,40 +38,29 @@ class TranslatorModule(KitsuneModule):
         "usage":       "Использование: <code>.tr [язык] [текст]</code>\nПример: <code>.tr en Привет мир</code>",
     }
 
-    # ─── helpers ──────────────────────────────────────────────────────────
-
     @staticmethod
     def _parse_args(raw: str) -> tuple[str | None, str | None]:
-        """Разбирает аргументы команды tr.
-        Возвращает (lang, text) — lang=None если не указан явно.
-        """
         if not raw:
             return None, None
 
         parts = raw.split(maxsplit=1)
         first = parts[0]
 
-        # lang = 2-символьный код или подобный
         if len(first) <= 5 and first.isalpha():
             lang = first.lower()
             text = parts[1] if len(parts) > 1 else None
             return lang, text
 
-        # первый токен — не код языка, значит это весь текст
         return None, raw
-
-    # ─── команды ──────────────────────────────────────────────────────────
 
     @command("tr", required=OWNER)
     async def tr_cmd(self, event) -> None:
-        """.tr [язык] [текст] — перевести текст или ответ на сообщение."""
         raw = self.get_args(event).strip()
         lang, text = self._parse_args(raw)
 
         if lang is None:
             lang = self.config["default_lang"]
 
-        # если текст не указан — берём из reply
         entities = []
         if not text:
             reply = await event.message.get_reply_message()

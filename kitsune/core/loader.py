@@ -24,14 +24,11 @@ _BLOCKED_IMPORTS: frozenset[str] = frozenset({
 
 _BUILTIN_MODULES_DIR = Path(__file__).parent.parent / "modules"
 
-
 class ModuleLoadError(Exception):
     pass
 
-
 class ASTSecurityError(ModuleLoadError):
     pass
-
 
 class ConfigValue:
 
@@ -57,7 +54,6 @@ class ConfigValue:
                 raise
         else:
             self.value = raw_value
-
 
 class ModuleConfig:
 
@@ -93,7 +89,6 @@ class ModuleConfig:
 
     def get_config_value(self, key: str) -> ConfigValue:
         return self._config[key]
-
 
 class KitsuneModule:
 
@@ -150,7 +145,6 @@ class KitsuneModule:
                 except Exception:
                     pass
 
-
 def command(
     name: str | None = None,
     *,
@@ -165,35 +159,17 @@ def command(
         return func
     return decorator
 
-
 def watcher(
     filter_func: typing.Callable | None = None,
     **tags: typing.Any,
 ) -> typing.Callable:
-    """
-    Декоратор для watcher-методов.
-
-    Поддерживает систему тегов (из Heroku) — фильтры прямо в декораторе:
-
-        @watcher(only_pm=True)
-        @watcher(no_channels=True, no_forwards=True)
-        @watcher(regex=r"^привет", only_pm=True)
-        @watcher(contains="скидка", no_channels=True)
-        @watcher(from_id=123456789)
-        @watcher(startswith="/", only_groups=True)
-
-    Полный список тегов — в kitsune.core.dispatcher.ALL_TAGS.
-    При указании нескольких тегов все они должны выполняться одновременно (AND).
-    """
     def decorator(func: typing.Callable) -> typing.Callable:
         func._is_watcher = True
         func._watcher_filter = filter_func
-        # Записываем теги как атрибуты функции — диспетчер читает их через getattr()
         for tag_name, tag_value in tags.items():
             setattr(func, tag_name, tag_value)
         return func
     return decorator
-
 
 class _ASTScanner(ast.NodeVisitor):
 
@@ -224,7 +200,6 @@ class _ASTScanner(ast.NodeVisitor):
                     )
         self.generic_visit(node)
 
-
 def _scan_ast(source: str, filename: str = "<module>") -> None:
     try:
         tree = ast.parse(source, filename=filename)
@@ -238,7 +213,6 @@ def _scan_ast(source: str, filename: str = "<module>") -> None:
         raise ASTSecurityError(
             "Security scan failed:\n" + "\n".join(f"  • {e}" for e in scanner.errors)
         )
-
 
 class Loader:
 
