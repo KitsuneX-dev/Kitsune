@@ -10,9 +10,7 @@ logger = logging.getLogger(__name__)
 
 _DB_NOTIFIER = "kitsune.notifier"
 
-
 class InlineStuffModule(KitsuneModule):
-    """Управление inline-ботом Kitsune."""
 
     name        = "InlineStuff"
     description = "Смена бота / токена для уведомлений"
@@ -36,17 +34,12 @@ class InlineStuffModule(KitsuneModule):
         ),
     }
 
-    # ─── helpers ──────────────────────────────────────────────────────────
-
     def _get_notifier(self):
         loader = getattr(self.client, "_kitsune_loader", None)
         return loader.modules.get("notifier") if loader else None
 
-    # ─── команды ──────────────────────────────────────────────────────────
-
     @command("ch_bot_token", required=OWNER)
     async def ch_bot_token_cmd(self, event) -> None:
-        """.ch_bot_token <TOKEN> — установить токен inline-бота."""
         token = self.get_args(event).strip()
         if not token:
             await event.message.edit(self.strings("no_args"), parse_mode="html")
@@ -61,7 +54,6 @@ class InlineStuffModule(KitsuneModule):
 
     @command("ch_kitsune_bot", required=OWNER)
     async def ch_kitsune_bot_cmd(self, event) -> None:
-        """.ch_kitsune_bot <@username> — установить юзернейм inline-бота."""
         username = self.get_args(event).strip().lstrip("@")
         if not username:
             await event.message.edit(self.strings("no_args_bot"), parse_mode="html")
@@ -71,16 +63,14 @@ class InlineStuffModule(KitsuneModule):
             await event.message.edit(self.strings("bot_invalid"), parse_mode="html")
             return
 
-        # check if it's actually a bot
         try:
             entity = await self.client.get_entity(f"@{username}")
             if not getattr(entity, "bot", False):
                 await event.message.edit(self.strings("bot_occupied"), parse_mode="html")
                 return
         except Exception:
-            pass  # not found = probably free
+            pass
 
         await self.db.set(_DB_NOTIFIER, "custom_bot", username)
-        # clear old token so it gets re-obtained
         await self.db.set(_DB_NOTIFIER, "bot_token", None)
         await event.message.edit(self.strings("bot_updated"), parse_mode="html")

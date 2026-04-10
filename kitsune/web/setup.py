@@ -21,8 +21,8 @@ _HTML = """<!DOCTYPE html>
 
 body {
   font-family: 'Segoe UI', system-ui, sans-serif;
-  background: #0a0a12;
-  color: #c8b8f0;
+  background:
+  color:
   min-height: 100vh;
   display: flex;
   align-items: center;
@@ -37,7 +37,7 @@ body {
 .card {
   width: 100%;
   max-width: 440px;
-  background: #12121e;
+  background:
   border: 1px solid rgba(140,90,255,0.2);
   border-radius: 20px;
   padding: 40px 36px;
@@ -50,7 +50,7 @@ h1 {
   text-align: center;
   font-size: 1.4rem;
   font-weight: 700;
-  color: #e0d0ff;
+  color:
   margin-bottom: 4px;
   letter-spacing: 0.5px;
 }
@@ -58,7 +58,7 @@ h1 {
 .sub {
   text-align: center;
   font-size: 0.8rem;
-  color: #6a5a8a;
+  color:
   margin-bottom: 28px;
 }
 
@@ -72,11 +72,11 @@ h1 {
 .dot {
   width: 8px; height: 8px;
   border-radius: 50%;
-  background: #2a2040;
+  background:
   transition: all .3s;
 }
-.dot.active { background: #a060ff; box-shadow: 0 0 8px #a060ff; }
-.dot.done   { background: #6030cc; }
+.dot.active { background:
+.dot.done   { background:
 
 .step { display: none; animation: fadeIn .25s ease; }
 .step.active { display: block; }
@@ -89,14 +89,14 @@ h1 {
 .step-title {
   font-size: 0.95rem;
   font-weight: 600;
-  color: #d0b8ff;
+  color:
   margin-bottom: 20px;
 }
 
 label {
   display: block;
   font-size: 0.78rem;
-  color: #8070a8;
+  color:
   margin-bottom: 5px;
   margin-top: 14px;
 }
@@ -104,38 +104,38 @@ label {
 input {
   width: 100%;
   padding: 11px 14px;
-  background: #1c1830;
+  background:
   border: 1px solid rgba(140,90,255,0.2);
   border-radius: 9px;
-  color: #e0d0ff;
+  color:
   font-size: 0.9rem;
   outline: none;
   transition: border .2s, box-shadow .2s;
 }
 
 input:focus {
-  border-color: #8050e0;
+  border-color:
   box-shadow: 0 0 0 3px rgba(128,80,224,0.15);
 }
 
-input::placeholder { color: #3d3060; }
+input::placeholder { color:
 
 .hint {
   font-size: 0.75rem;
-  color: #5a4880;
+  color:
   margin-top: 6px;
 }
-.hint a { color: #9060e0; text-decoration: none; }
+.hint a { color:
 .hint a:hover { text-decoration: underline; }
 
 button {
   width: 100%;
   margin-top: 22px;
   padding: 13px;
-  background: linear-gradient(135deg, #7030d0, #a050f0);
+  background: linear-gradient(135deg,
   border: none;
   border-radius: 10px;
-  color: #fff;
+  color:
   font-size: 0.95rem;
   font-weight: 600;
   cursor: pointer;
@@ -156,7 +156,7 @@ button:disabled { opacity: .35; cursor: not-allowed; box-shadow: none; }
   border: 1px solid rgba(200,50,80,0.25);
   border-radius: 8px;
   font-size: 0.82rem;
-  color: #e07090;
+  color:
 }
 
 .done-wrap { text-align: center; padding: 10px 0; }
@@ -164,12 +164,12 @@ button:disabled { opacity: .35; cursor: not-allowed; box-shadow: none; }
 .done-title {
   font-size: 1.25rem;
   font-weight: 700;
-  color: #d0b8ff;
+  color:
   margin-bottom: 8px;
 }
 .done-sub {
   font-size: 0.85rem;
-  color: #6a5a8a;
+  color:
 }
 .done-info {
   margin-top: 18px;
@@ -178,7 +178,7 @@ button:disabled { opacity: .35; cursor: not-allowed; box-shadow: none; }
   border: 1px solid rgba(120,60,255,0.2);
   border-radius: 10px;
   font-size: 0.85rem;
-  color: #b090e8;
+  color:
 }
 </style>
 </head>

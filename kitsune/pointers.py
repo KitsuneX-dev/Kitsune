@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import typing
 
-
 class Pointer:
 
     def __init__(
@@ -29,7 +28,6 @@ class Pointer:
     def __repr__(self) -> str:
         return f"Pointer({self._owner!r}, {self._key!r}) = {self.get()!r}"
 
-
 class BoolPointer(Pointer):
 
     def __init__(self, db: typing.Any, owner: str, key: str, default: bool = False) -> None:
@@ -42,7 +40,6 @@ class BoolPointer(Pointer):
         new_val = not self.get()
         await self.set(new_val)
         return new_val
-
 
 class ListPointer(Pointer):
 
@@ -75,7 +72,6 @@ class ListPointer(Pointer):
 
     def __iter__(self):
         return iter(self.get())
-
 
 class IntPointer(Pointer):
 

@@ -12,9 +12,7 @@ logger = logging.getLogger(__name__)
 
 _DB_OWNER = "kitsune.loader"
 
-
 class LoaderModule(KitsuneModule):
-    """Загрузка, выгрузка и управление модулями."""
 
     name        = "Loader"
     description = "Управление модулями"
@@ -60,8 +58,6 @@ class LoaderModule(KitsuneModule):
         "repos_list":       "📋 <b>Репозитории:</b>\n{list}",
     }
 
-    # ─── helpers ──────────────────────────────────────────────────────────
-
     def _loader(self):
         return getattr(self.client, "_kitsune_loader", None)
 
@@ -72,19 +68,16 @@ class LoaderModule(KitsuneModule):
         await self.db.set(_DB_OWNER, "user_modules", mods)
 
     async def _find_in_repos(self, name: str) -> str | None:
-        """Ищет модуль в репозиториях, возвращает URL или None."""
         repos = [self.config["MODULES_REPO"]] + (self.config["ADDITIONAL_REPOS"] or [])
 
         for repo in repos:
             repo = repo.rstrip("/")
-            # try direct URL
             candidates = [
                 f"{repo}/{name}.py",
                 f"{repo}/{name.lower()}.py",
             ]
-            # try full.txt index
             try:
-                import aiohttp  # ленивый импорт
+                import aiohttp
                 async with aiohttp.ClientSession() as sess:
                     async with sess.get(f"{repo}/full.txt", timeout=aiohttp.ClientTimeout(total=10)) as resp:
                         if resp.status == 200:
@@ -98,7 +91,7 @@ class LoaderModule(KitsuneModule):
 
             for url in candidates:
                 try:
-                    import aiohttp  # ленивый импорт
+                    import aiohttp
                     async with aiohttp.ClientSession() as sess:
                         async with sess.head(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
                             if resp.status == 200:
@@ -108,11 +101,8 @@ class LoaderModule(KitsuneModule):
 
         return None
 
-    # ─── команды ──────────────────────────────────────────────────────────
-
     @command("dlmod", required=OWNER, aliases=["dlm"])
     async def dlmod_cmd(self, event) -> None:
-        """.dlmod <название|URL> — скачать и установить модуль."""
         arg = self.get_args(event).strip()
         if not arg:
             await event.message.edit(self.strings("no_args"), parse_mode="html")
@@ -126,7 +116,6 @@ class LoaderModule(KitsuneModule):
         if not loader:
             return
 
-        # direct URL
         if arg.startswith("http"):
             url = arg.replace("/blob/", "/raw/")
         else:
@@ -154,7 +143,6 @@ class LoaderModule(KitsuneModule):
 
     @command("loadmod", required=OWNER, aliases=["lm"])
     async def loadmod_cmd(self, event) -> None:
-        """.loadmod — загрузить модуль из .py файла (ответь на файл)."""
         reply = await event.message.get_reply_message()
         msg = reply if (reply and reply.file) else (event.message if event.message.file else None)
 
@@ -175,7 +163,6 @@ class LoaderModule(KitsuneModule):
         if not loader:
             return
 
-        # write to user modules dir and load
         user_dir = Path.home() / ".kitsune" / "modules"
         user_dir.mkdir(parents=True, exist_ok=True)
 
@@ -200,7 +187,6 @@ class LoaderModule(KitsuneModule):
 
     @command("unloadmod", required=OWNER)
     async def unloadmod_cmd(self, event) -> None:
-        """.unloadmod <название> — выгрузить модуль."""
         name = self.get_args(event).strip()
         if not name:
             await event.message.edit(self.strings("no_args"), parse_mode="html")
@@ -226,7 +212,6 @@ class LoaderModule(KitsuneModule):
 
     @command("ml", required=OWNER)
     async def ml_cmd(self, event) -> None:
-        """.ml <название> — показать файл/ссылку модуля."""
         name = self.get_args(event).strip()
         if not name:
             await event.message.edit(self.strings("no_args"), parse_mode="html")
@@ -248,9 +233,8 @@ class LoaderModule(KitsuneModule):
                 self.strings("ml_info").format(name=mod.name, url=url),
                 parse_mode="html",
             )
-            # also send file
             try:
-                import aiohttp  # ленивый импорт
+                import aiohttp
                 async with aiohttp.ClientSession() as sess:
                     async with sess.get(url) as resp:
                         content = await resp.read()
@@ -283,7 +267,6 @@ class LoaderModule(KitsuneModule):
 
     @command("clearmodules", required=OWNER)
     async def clearmodules_cmd(self, event) -> None:
-        """.clearmodules — выгрузить все пользовательские модули."""
         loader = self._loader()
         if not loader:
             return
@@ -294,7 +277,6 @@ class LoaderModule(KitsuneModule):
 
         await self._save_user_modules({})
 
-        # also delete files from user module dir
         user_dir = Path.home() / ".kitsune" / "modules"
         if user_dir.exists():
             import shutil
@@ -308,7 +290,6 @@ class LoaderModule(KitsuneModule):
 
     @command("addrepo", required=OWNER)
     async def addrepo_cmd(self, event) -> None:
-        """.addrepo <URL> — добавить репозиторий модулей."""
         url = self.get_args(event).strip().rstrip("/")
         if not url or not url.startswith("http"):
             await event.message.edit(self.strings("repo_invalid"), parse_mode="html")
@@ -328,7 +309,6 @@ class LoaderModule(KitsuneModule):
 
     @command("delrepo", required=OWNER)
     async def delrepo_cmd(self, event) -> None:
-        """.delrepo <URL> — удалить репозиторий."""
         url = self.get_args(event).strip().rstrip("/")
         if not url:
             await event.message.edit(self.strings("repo_invalid"), parse_mode="html")

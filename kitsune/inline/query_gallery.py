@@ -1,21 +1,3 @@
-"""
-kitsune/inline/query_gallery.py — галерея через inline query в любом чате.
-
-В отличие от обычной gallery (которая отправляется в текущий чат),
-query_gallery позволяет пользователю вставить галерею в любой чат
-через @bot_name запрос.
-
-Использование:
-    # Регистрируем набор фотографий под ключом
-    await inline.register_query_gallery(
-        key="cats",
-        items=["https://...jpg", "https://...jpg"],
-        title="🐱 Котики",
-    )
-
-    # Теперь пользователь может написать @bot cats в любом чате
-    # и вставить галерею туда
-"""
 
 from __future__ import annotations
 
@@ -26,20 +8,10 @@ import uuid
 
 logger = logging.getLogger(__name__)
 
-_QUERY_TTL = 60 * 60 * 6  # 6 часов
-
+_QUERY_TTL = 60 * 60 * 6
 
 class QueryGallery:
-    """
-    Mixin — регистрация inline-галерей доступных через @bot query.
 
-    Требует в классе:
-        self._query_galleries — dict (инициализируется ниже)
-        self.generate_markup(buttons)
-        self._rand(n)
-    """
-
-    # Словарь key → данные галереи
     _query_galleries: dict[str, dict] = {}
 
     def register_query_gallery(
@@ -52,19 +24,6 @@ class QueryGallery:
         gif: bool = False,
         ttl: int = _QUERY_TTL,
     ) -> None:
-        """
-        Зарегистрировать набор медиа под ключом.
-
-        После регистрации пользователь может написать @bot <key>
-        в любом чате и выбрать медиа для вставки.
-
-        :param key:     Ключ поиска (что пишет пользователь после @bot).
-        :param items:   Список URL медиафайлов.
-        :param title:   Заголовок в списке inline-результатов.
-        :param caption: Подпись(и) к медиа.
-        :param gif:     True если медиа — GIF/видео.
-        :param ttl:     Через сколько секунд галерея устаревает.
-        """
         self._query_galleries[key.lower()] = {
             "key":     key.lower(),
             "items":   list(items),
@@ -76,21 +35,13 @@ class QueryGallery:
         logger.debug("QueryGallery: registered key=%r (%d items)", key, len(items))
 
     def unregister_query_gallery(self, key: str) -> bool:
-        """Удалить зарегистрированную галерею."""
         return self._query_galleries.pop(key.lower(), None) is not None
 
     async def _handle_query_gallery(self, inline_query: typing.Any) -> bool:
-        """
-        Обрабатывает inline query если он совпадает с зарегистрированным ключом.
-        Возвращает True если запрос был обработан.
-
-        Вызывается из _on_inline_query в InlineManager ПЕРЕД стандартной обработкой.
-        """
         q = inline_query.query.strip().lower()
         if not q:
             return False
 
-        # Удаляем протухшие
         now = time.time()
         expired = [k for k, v in self._query_galleries.items() if v["expires"] < now]
         for k in expired:
@@ -125,7 +76,7 @@ class QueryGallery:
             return False
 
         results = []
-        for i, (url, cap) in enumerate(zip(items[:50], captions)):  # Telegram лимит 50
+        for i, (url, cap) in enumerate(zip(items[:50], captions)):
             result_id = str(uuid.uuid4())
             common = {
                 "id":          result_id,

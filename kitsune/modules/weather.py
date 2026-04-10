@@ -36,19 +36,15 @@ _CONDITION_CODES: dict[int, str] = {
     392: "⛈ Гроза со снегом", 395: "⛈ Гроза с сильным снегом",
 }
 
-
 def _wind_direction(degrees: int) -> str:
     idx = round(degrees / 22.5) % 16
     return _WIND_DIRS[idx]
 
-
 def _c_to_f(c: float) -> float:
     return round(c * 9 / 5 + 32, 1)
 
-
 def _kmh_to_ms(kmh: float) -> float:
     return round(kmh / 3.6, 1)
-
 
 def _parse_weather(data: dict, unit: str) -> str:
     current = data["current_condition"][0]
@@ -112,7 +108,6 @@ def _parse_weather(data: dict, unit: str) -> str:
         f"📅 <b>Прогноз на 3 дня:</b>\n{forecast_block}"
     )
     return text
-
 
 class WeatherModule(KitsuneModule):
     name        = "weather"

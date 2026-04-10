@@ -1,18 +1,3 @@
-"""
-kitsune/secure/customtl.py
-
-Переопределяет два класса herokutl для работы через unix-сокет proxy-демона:
-
-  MTProtoState  — отключает шифрование на стороне клиента.
-                  Шифрование берёт на себя proxy-демон (как в Heroku).
-                  Используется ТОЛЬКО в Docker/server-деплое с patcher.py.
-
-  ConnectionTcpFull — добавляет set_unix_socket() и переопределяет _connect()
-                      для подключения через локальный unix-сокет.
-
-⚠️  Эти классы НЕ используются при обычном запуске.
-    Они активируются только через secure/patcher.py когда поднят proxy-демон.
-"""
 
 import asyncio
 import logging
@@ -27,21 +12,10 @@ from herokutl.tl.types import BadMsgNotification, BadServerSalt
 
 logger = logging.getLogger(__name__)
 
-# Допустимые дельты по времени MTProto-сообщений (в секундах)
 _MSG_TOO_NEW_DELTA = 30
 _MSG_TOO_OLD_DELTA = 300
 
-
 class MTProtoState(_MTProtoStateBase):
-    """
-    MTProtoState без шифрования исходящих пакетов.
-
-    encrypt_message_data() возвращает данные как есть —
-    реальное шифрование делает proxy-демон на другом конце unix-сокета.
-
-    decrypt_message_data() разбирает сырой MTProto-пакет вручную,
-    проверяя только временны́е метки и дублирующиеся msg_id.
-    """
 
     def encrypt_message_data(self, data: bytes) -> bytes:
         logger.debug("MTProtoState: пропускаем шифрование (proxy-демон шифрует сам)")
@@ -70,7 +44,7 @@ class MTProtoState(_MTProtoStateBase):
             return None
 
         remote_sequence = reader.read_int()
-        reader.read_int()  # message_data_length (не нужен, читаем далее через tgread_object)
+        reader.read_int()
         obj = reader.tgread_object()
 
         if obj.CONSTRUCTOR_ID not in (
@@ -96,15 +70,7 @@ class MTProtoState(_MTProtoStateBase):
 
         return TLMessage(remote_msg_id, remote_sequence, obj)
 
-
 class ConnectionTcpFull(_ConnectionTcpFullBase):
-    """
-    TCP-Full соединение с поддержкой unix-сокета.
-
-    set_unix_socket(path) — сохраняет путь к сокету.
-    _connect()            — подключается через asyncio.open_unix_connection
-                            вместо обычного TCP.
-    """
 
     def set_unix_socket(self, unix_socket_path: str) -> None:
         self._unix_socket_path: str = unix_socket_path
@@ -113,7 +79,6 @@ class ConnectionTcpFull(_ConnectionTcpFullBase):
     async def _connect(self, timeout=None, ssl=None) -> None:
         path = getattr(self, "_unix_socket_path", None)
         if path is None:
-            # Путь не задан — обычное TCP-соединение
             await super()._connect(timeout=timeout, ssl=ssl)
             return
 

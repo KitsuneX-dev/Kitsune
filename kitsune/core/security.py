@@ -34,7 +34,6 @@ DEFAULT_PERMISSIONS = OWNER
 _CACHE_TTL = 60.0
 _DB_KEY    = "kitsune.security"
 
-
 class SecurityManager:
 
     def __init__(self, client: typing.Any, db: typing.Any) -> None:

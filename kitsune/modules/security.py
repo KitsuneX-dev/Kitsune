@@ -10,7 +10,6 @@ logger = logging.getLogger(__name__)
 
 _DB_KEY = "kitsune.security"
 
-
 class SecurityModule(KitsuneModule):
     name        = "security"
     description = "Access rights management"

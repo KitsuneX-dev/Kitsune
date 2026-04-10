@@ -13,7 +13,6 @@ DATA_DIR     = Path.home() / ".kitsune"
 SESSION_PATH = DATA_DIR / "kitsune.session"
 ENC_PATH     = DATA_DIR / "kitsune.session.enc"
 
-
 def _ensure_dir_writable() -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     try:
@@ -22,7 +21,6 @@ def _ensure_dir_writable() -> None:
             DATA_DIR.chmod(0o755)
     except Exception:
         pass
-
 
 def _fix_session_permissions() -> None:
     try:
@@ -33,7 +31,6 @@ def _fix_session_permissions() -> None:
                 logger.info("session_enc: fixed session file permissions → 644")
     except Exception:
         pass
-
 
 def encrypt_session_file() -> bool:
     if not SESSION_PATH.exists():
@@ -49,7 +46,6 @@ def encrypt_session_file() -> bool:
     except Exception:
         logger.exception("session_enc: failed to encrypt session")
         return False
-
 
 def decrypt_session_file() -> bool:
     if not ENC_PATH.exists():
@@ -68,10 +64,8 @@ def decrypt_session_file() -> bool:
         logger.exception("session_enc: failed to decrypt session")
         return False
 
-
 def is_encrypted() -> bool:
     return ENC_PATH.exists() and not SESSION_PATH.exists()
-
 
 def session_ready() -> bool:
     if SESSION_PATH.exists():

@@ -369,7 +369,6 @@ class InlineManager:
             logger.exception("InlineManager._on_inline_query failed")
 
     async def _on_chosen_inline(self, result: "ChosenInlineResult") -> None:
-        """Пользователь выбрал inline результат — проверяем input-кнопки."""
         q = result.query.strip()
 
         if not q:

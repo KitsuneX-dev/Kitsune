@@ -6,10 +6,8 @@ import typing
 
 ConfigAllowedTypes = typing.Union[tuple, list, str, int, float, bool, None]
 
-
 class ValidationError(Exception):
     pass
-
 
 class Validator:
 
@@ -22,7 +20,6 @@ class Validator:
         self.validate = validator
         self.doc = doc or "any value"
         self.internal_id = _internal_id
-
 
 class Boolean(Validator):
 
@@ -48,7 +45,6 @@ class Boolean(Validator):
         raise ValidationError(
             f"Value «{value}» is not boolean. Use: true/false, 1/0, yes/no, on/off"
         )
-
 
 class Integer(Validator):
 
@@ -98,7 +94,6 @@ class Integer(Validator):
 
         return value
 
-
 class Float(Validator):
 
     def __init__(
@@ -140,7 +135,6 @@ class Float(Validator):
             raise ValidationError(f"Value {value} is greater than maximum ({maximum})")
 
         return value
-
 
 class String(Validator):
 
@@ -188,7 +182,6 @@ class String(Validator):
 
         return value
 
-
 class RegExp(Validator):
 
     def __init__(
@@ -221,7 +214,6 @@ class RegExp(Validator):
             raise ValidationError(f"«{value}» does not match pattern {regex}")
         return str(value)
 
-
 class Choice(Validator):
 
     def __init__(self, possible_values: typing.List[ConfigAllowedTypes], /):
@@ -243,7 +235,6 @@ class Choice(Validator):
             options = " / ".join(str(v) for v in possible_values)
             raise ValidationError(f"«{value}» is not valid. Choose from: {options}")
         return value
-
 
 class MultiChoice(Validator):
 
@@ -271,7 +262,6 @@ class MultiChoice(Validator):
                 raise ValidationError(f"«{item}» is not valid. Choose from: {options}")
 
         return list(set(value))
-
 
 class Series(Validator):
 
@@ -341,7 +331,6 @@ class Series(Validator):
 
         return value
 
-
 class Link(Validator):
 
     def __init__(self):
@@ -361,7 +350,6 @@ class Link(Validator):
         except Exception:
             raise ValidationError(f"«{value}» is not a valid URL (http/https)")
         return str(value)
-
 
 class TelegramID(Validator):
 
@@ -388,7 +376,6 @@ class TelegramID(Validator):
 
         return value
 
-
 class Hidden(Validator):
 
     def __init__(self, validator: typing.Optional[Validator] = None):
@@ -409,7 +396,6 @@ class Hidden(Validator):
         validator: Validator,
     ) -> ConfigAllowedTypes:
         return validator.validate(value)
-
 
 class Union(Validator):
 

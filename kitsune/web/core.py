@@ -15,7 +15,6 @@ try:
 except ImportError:
     WEB_AVAILABLE = False
 
-
 class WebCore:
     def __init__(self, client: typing.Any, db: typing.Any) -> None:
         self._client  = client
@@ -143,7 +142,6 @@ class WebCore:
 
         return aiohttp.web.Response(text='{"ok":true}', content_type="application/json")
 
-
 def _build_html(*, name: str, uid: int, username: str, version: str) -> str:
     return f"""<!DOCTYPE html>
 <html lang="ru">
@@ -154,9 +152,9 @@ def _build_html(*, name: str, uid: int, username: str, version: str) -> str:
 <style>
 *,*::before,*::after{{box-sizing:border-box;margin:0;padding:0}}
 :root{{
-  --bg:#080810;--surface:#0e0e1a;--surface2:#13131f;--border:rgba(130,80,255,0.15);
-  --accent:#8c4fff;--accent2:#a06aff;--text:#d4c4f0;--muted:#5a4a78;--green:#4ade80;
-  --red:#f87171;--yellow:#fbbf24;
+  --bg:
+  --accent:
+  --red:
 }}
 body{{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);
   min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;
@@ -168,12 +166,12 @@ body{{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var
   padding:20px 24px;display:flex;align-items:center;gap:14px;
   border-bottom:1px solid rgba(130,80,255,0.08);
 }}
-.logo-box{{width:44px;height:44px;background:linear-gradient(135deg,#6020c0,#9040e0);
+.logo-box{{width:44px;height:44px;background:linear-gradient(135deg,
   border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:1.4rem;
   box-shadow:0 0 20px rgba(120,60,255,0.3);flex-shrink:0;
 }}
 .title-group{{flex:1}}
-.title-group h1{{font-size:1.1rem;font-weight:700;color:#e8d8ff;letter-spacing:.2px}}
+.title-group h1{{font-size:1.1rem;font-weight:700;color:
 .title-group small{{font-size:.72rem;color:var(--muted);margin-top:1px;display:block}}
 .badge{{display:inline-flex;align-items:center;gap:5px;background:rgba(74,222,128,.1);
   border:1px solid rgba(74,222,128,.2);border-radius:20px;padding:4px 10px;
@@ -207,7 +205,7 @@ body{{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var
 }}
 .row:hover{{background:rgba(130,80,255,.05)}}
 .row-label{{font-size:.8rem;color:var(--muted)}}
-.row-value{{font-size:.84rem;color:#d8c8f8;font-weight:500;text-align:right}}
+.row-value{{font-size:.84rem;color:
 
 .divider{{height:1px;background:var(--border);margin:16px 0}}
 
@@ -218,13 +216,13 @@ body{{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var
 .stat-item{{display:flex;flex-direction:column;gap:5px}}
 .stat-head{{display:flex;justify-content:space-between;font-size:.78rem}}
 .stat-name{{color:var(--muted)}}
-.stat-val{{color:#c8b0f0;font-weight:500}}
+.stat-val{{color:
 .bar-bg{{height:5px;background:rgba(130,80,255,.1);border-radius:3px;overflow:hidden}}
 .bar-fill{{height:100%;border-radius:3px;transition:width .6s cubic-bezier(.4,0,.2,1);
-  background:linear-gradient(90deg,#6020c0,#9040e0);box-shadow:0 0 6px rgba(140,80,240,.4);
+  background:linear-gradient(90deg,
 }}
-.bar-warn{{background:linear-gradient(90deg,#c07020,#e09040)}}
-.bar-crit{{background:linear-gradient(90deg,#c02020,#e04040)}}
+.bar-warn{{background:linear-gradient(90deg,
+.bar-crit{{background:linear-gradient(90deg,
 
 .device-list{{display:flex;flex-direction:column;gap:8px}}
 .device-card{{background:var(--surface2);border:1px solid var(--border);border-radius:12px;
@@ -232,7 +230,7 @@ body{{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var
 }}
 .device-card:hover{{border-color:rgba(130,80,255,.3)}}
 .device-card.current{{border-color:rgba(130,80,255,.4);background:rgba(130,80,255,.05)}}
-.device-name{{font-size:.84rem;color:#d8c8f8;font-weight:600;display:flex;align-items:center;gap:6px}}
+.device-name{{font-size:.84rem;color:
 .device-meta{{font-size:.74rem;color:var(--muted);margin-top:4px;display:flex;gap:12px;flex-wrap:wrap}}
 .chip{{display:inline-flex;align-items:center;padding:1px 7px;border-radius:10px;font-size:.68rem;}}
 .chip-current{{background:rgba(74,222,128,.1);color:var(--green);border:1px solid rgba(74,222,128,.2)}}

@@ -12,28 +12,22 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-
 def escape_html(text: typing.Any) -> str:
     return html.escape(str(text))
 
-
 def chunks(text: str, size: int) -> list[str]:
     return [text[i : i + size] for i in range(0, len(text), size)]
-
 
 def smart_split(text: str, entities: list, max_len: int = 4096) -> typing.Generator[str, None, None]:
     for chunk in chunks(text, max_len):
         yield chunk
 
-
 def truncate(text: str, max_len: int = 512, suffix: str = "…") -> str:
     return text if len(text) <= max_len else text[: max_len - len(suffix)] + suffix
-
 
 async def run_sync(func: typing.Callable, *args: typing.Any, **kwargs: typing.Any) -> typing.Any:
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(None, lambda: func(*args, **kwargs))
-
 
 def get_args(message: typing.Any) -> list[str]:
     text = getattr(message, "text", None) or getattr(message, "message", "")
@@ -48,14 +42,12 @@ def get_args(message: typing.Any) -> list[str]:
     except ValueError:
         return list(filter(None, raw.split()))
 
-
 def get_args_raw(message: typing.Any) -> str:
     text = getattr(message, "text", None) or getattr(message, "message", "")
     if not text:
         return ""
     parts = text.split(maxsplit=1)
     return parts[1] if len(parts) > 1 else ""
-
 
 def get_args_html(message: typing.Any) -> str:
     try:
@@ -99,7 +91,6 @@ def get_args_html(message: typing.Any) -> str:
         logger.debug("get_args_html failed", exc_info=True)
         return get_args_raw(message)
 
-
 def get_chat_id(message: typing.Any) -> typing.Optional[int]:
     if isinstance(message, int):
         return message
@@ -119,7 +110,6 @@ def get_chat_id(message: typing.Any) -> typing.Optional[int]:
         return getattr(chat, "id", None)
 
     return getattr(message, "chat_id", None)
-
 
 async def answer(
     message: typing.Any,
@@ -162,7 +152,6 @@ async def answer(
         response, parse_mode=parse_mode, link_preview=link_preview, **kwargs
     )
 
-
 async def answer_file(
     message: typing.Any,
     file: typing.Union[str, bytes, io.IOBase],
@@ -201,7 +190,6 @@ async def answer_file(
             await message.delete()
 
     return result
-
 
 async def asset_channel(
     client: typing.Any,
@@ -258,7 +246,6 @@ async def asset_channel(
     except Exception as exc:
         raise RuntimeError(f"Could not create asset channel {title!r}: {exc}") from exc
 
-
 def find_caller(stack: list[inspect.FrameInfo]) -> typing.Callable | None:
     for frame_info in stack:
         frame = frame_info.frame
@@ -275,7 +262,6 @@ def find_caller(stack: list[inspect.FrameInfo]) -> typing.Callable | None:
             return method
     return None
 
-
 def is_serializable(value: typing.Any) -> bool:
     import json
     try:
@@ -283,7 +269,6 @@ def is_serializable(value: typing.Any) -> bool:
         return True
     except (TypeError, ValueError):
         return False
-
 
 async def auto_delete(message: typing.Any, delay: float | None = None) -> None:
     import contextlib
@@ -306,7 +291,6 @@ async def auto_delete(message: typing.Any, delay: float | None = None) -> None:
     with contextlib.suppress(Exception):
         await message.delete()
 
-
 def progress_bar(current: int | float, total: int | float, width: int = 12) -> str:
     if total <= 0:
         pct = 0.0
@@ -319,7 +303,6 @@ def progress_bar(current: int | float, total: int | float, width: int = 12) -> s
     bar = "█" * filled + "░" * empty
     percent = int(pct * 100)
     return f"{bar}  {percent}%"
-
 
 class ProgressMessage:
 
@@ -372,7 +355,6 @@ class ProgressMessage:
         with contextlib.suppress(Exception):
             await self._msg.edit(text, parse_mode="html")
 
-
 def detect_environment() -> dict[str, bool]:
     import contextlib
     import platform
@@ -392,7 +374,6 @@ def detect_environment() -> dict[str, bool]:
         "windows": platform.system() == "Windows",
         "macos": platform.system() == "Darwin",
     }
-
 
 ENV = detect_environment()
 IS_TERMUX = ENV["termux"]

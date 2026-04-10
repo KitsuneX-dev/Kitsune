@@ -19,7 +19,6 @@ LOG_FILE = LOG_DIR / "kitsune.log"
 
 _orig_getlines = linecache.getlines
 
-
 def _patched_getlines(filename: str, module_globals=None) -> list[str]:
     try:
         if filename.startswith("<") and filename.endswith(">"):
@@ -31,9 +30,7 @@ def _patched_getlines(filename: str, module_globals=None) -> list[str]:
         pass
     return _orig_getlines(filename, module_globals)
 
-
 linecache.getlines = _patched_getlines
-
 
 def _override_text(exc: Exception) -> str | None:
     try:
@@ -43,7 +40,6 @@ def _override_text(exc: Exception) -> str | None:
     except ImportError:
         pass
     return None
-
 
 class KitsuneException:
 
@@ -128,7 +124,6 @@ class KitsuneException:
 
         return cls(message=error_text, full_stack=full_stack, sysinfo=(exc_type, exc_value, tb))
 
-
 class TelegramChannelHandler(logging.Handler):
 
     def __init__(self, client: typing.Any, channel_id: int, level: int = logging.WARNING) -> None:
@@ -192,7 +187,6 @@ class TelegramChannelHandler(logging.Handler):
                         f"<code>{utils.escape_html(combined)}</code>",
                         parse_mode="html",
                     )
-
 
 class KitsuneLogsHandler(logging.Handler):
 
@@ -374,7 +368,6 @@ class KitsuneLogsHandler(logging.Handler):
     def setLevel(self, level: int) -> None:
         self.lvl = level
 
-
 _main_formatter = logging.Formatter(
     fmt="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
@@ -383,9 +376,7 @@ _tg_formatter = logging.Formatter(
     fmt="[%(levelname)s] %(name)s: %(message)s\n",
 )
 
-
 class _NetworkNoiseFilter(logging.Filter):
-    """Фильтрует повторяющиеся сетевые ошибки которые восстанавливаются сами."""
 
     _SUPPRESS_FRAGMENTS = (
         "Failed to fetch updates",
@@ -406,8 +397,6 @@ class _NetworkNoiseFilter(logging.Filter):
 
     def filter(self, record: logging.LogRecord) -> bool:
         msg = record.getMessage()
-        # Пропускаем запись (возвращаем False = не логировать)
-        # только если уровень WARNING/ERROR и это известный сетевой шум
         if record.levelno in (logging.WARNING, logging.ERROR):
             if any(frag in msg for frag in self._SUPPRESS_FRAGMENTS):
                 return False
@@ -424,7 +413,6 @@ rotating_handler = RotatingFileHandler(
 rotating_handler.setFormatter(_main_formatter)
 
 _tg_channel_handler: TelegramChannelHandler | None = None
-
 
 async def setup_tg_logging(client: typing.Any) -> None:
     global _tg_channel_handler
@@ -452,7 +440,6 @@ async def setup_tg_logging(client: typing.Any) -> None:
 
     except Exception:
         logging.getLogger(__name__).exception("log: failed to set up TG channel logging")
-
 
 async def _send_startup_banner(client: typing.Any, channel_id: int) -> None:
     import contextlib
@@ -528,7 +515,6 @@ def init() -> None:
     for noisy in ("telethon", "pyrogram", "matplotlib", "aiohttp", "aiogram", "httpx"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
-    # Подавляем конкретный спам от сетевых ошибок которые самовосстанавливаются
     _network_noise_filter = _NetworkNoiseFilter()
     logging.getLogger("aiogram.dispatcher").addFilter(_network_noise_filter)
     logging.getLogger("telethon.network.connection.connection").addFilter(_network_noise_filter)

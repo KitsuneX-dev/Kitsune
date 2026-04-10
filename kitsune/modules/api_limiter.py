@@ -13,8 +13,6 @@ logger = logging.getLogger(__name__)
 
 _DB_OWNER = "kitsune.api_limiter"
 
-# Системные запросы Telethon (фоновая синхронизация, keep-alive, апдейты)
-# Они выполняются автоматически и НЕ должны учитываться в лимите.
 _SYSTEM_REQUESTS: frozenset[str] = frozenset({
     "GetChannelDifferenceRequest",
     "GetDifferenceRequest",
@@ -38,7 +36,6 @@ _SYSTEM_REQUESTS: frozenset[str] = frozenset({
     "DestroyAuthKeyRequest",
 })
 
-# Только эти группы реально могут вызвать флудвейт от действий пользователя
 _MONITORED_MODULES: frozenset[str] = frozenset({
     "messages",
     "account",
@@ -48,9 +45,7 @@ _MONITORED_MODULES: frozenset[str] = frozenset({
     "stickers",
 })
 
-
 class APILimiterModule(KitsuneModule):
-    """Защита от спама в Telegram API — предотвращает флудвейты."""
 
     name        = "APILimiter"
     description = "Защита Telegram API от превышения лимитов"
@@ -96,8 +91,6 @@ class APILimiterModule(KitsuneModule):
     async def on_unload(self) -> None:
         self._uninstall()
 
-    # ─── install / uninstall ──────────────────────────────────────────────
-
     async def _install(self) -> None:
         if self._installed:
             return
@@ -113,15 +106,12 @@ class APILimiterModule(KitsuneModule):
             if limiter.config["enabled"] and time.perf_counter() > limiter._suspend_until:
                 req_name = type(request).__name__
 
-                # Пропускаем системные запросы — они не являются признаком спама
                 if req_name not in _SYSTEM_REQUESTS:
                     req_module = getattr(type(request), "__module__", "") or ""
-                    # Учитываем только запросы из мониторируемых групп API
                     if any(f".{mod}." in req_module for mod in _MONITORED_MODULES):
                         now = time.perf_counter()
                         limiter._ratelimiter.append((req_name, now))
 
-                        # Удаляем устаревшие записи
                         window = float(limiter.config["time_sample"])
                         limiter._ratelimiter = [
                             (n, t) for n, t in limiter._ratelimiter
@@ -135,7 +125,6 @@ class APILimiterModule(KitsuneModule):
                                 "APILimiter: %d user requests in %ss — pausing for %ds",
                                 len(limiter._ratelimiter), window, pause,
                             )
-                            # Уведомляем через бота
                             try:
                                 loader = getattr(limiter.client, "_kitsune_loader", None)
                                 notifier = loader.modules.get("notifier") if loader else None
@@ -175,11 +164,8 @@ class APILimiterModule(KitsuneModule):
         self._installed = False
         logger.info("APILimiter: uninstalled")
 
-    # ─── команды ──────────────────────────────────────────────────────────
-
     @command("suspend_api_protect", required=OWNER)
     async def suspend_cmd(self, event) -> None:
-        """.suspend_api_protect <секунды> — временно отключить защиту API."""
         arg = self.get_args(event).strip()
         if not arg.isdigit():
             await event.message.edit(
@@ -197,7 +183,6 @@ class APILimiterModule(KitsuneModule):
 
     @command("api_fw_protection", required=OWNER)
     async def toggle_cmd(self, event) -> None:
-        """.api_fw_protection — включить/выключить защиту API."""
         current = self.config["enabled"]
         self.config["enabled"] = not current
         await self.db.set(_DB_OWNER, "enabled", not current)

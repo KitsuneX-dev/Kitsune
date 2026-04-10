@@ -8,7 +8,6 @@ logger = logging.getLogger(__name__)
 
 _SHIM_APPLIED = False
 
-
 def apply() -> None:
     global _SHIM_APPLIED
     if _SHIM_APPLIED:

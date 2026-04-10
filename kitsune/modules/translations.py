@@ -17,9 +17,7 @@ SUPPORTED_LANGUAGES = {
     "de": "🇩🇪 Deutsch",
 }
 
-
 class TranslationsModule(KitsuneModule):
-    """Управление языком интерфейса."""
 
     name        = "translations"
     description = "Язык интерфейса"
@@ -37,23 +35,17 @@ class TranslationsModule(KitsuneModule):
         "cur_lang":          "🌐 Текущий язык: <b>{lang}</b>\n\nДоступные встроенные языки:\n{avail}",
     }
 
-    # ─── helpers ──────────────────────────────────────────────────────────
-
     def _available(self) -> str:
         lines = []
         for code, label in SUPPORTED_LANGUAGES.items():
             lines.append(f"  <code>{code}</code> — {label}")
-        # also list custom packs from langpacks dir
         for p in sorted(_LANG_DIR.glob("*.yml")):
             if p.stem not in SUPPORTED_LANGUAGES:
                 lines.append(f"  <code>{p.stem}</code> — custom")
         return "\n".join(lines)
 
-    # ─── команды ──────────────────────────────────────────────────────────
-
     @command("setlang", required=OWNER)
     async def setlang_cmd(self, event) -> None:
-        """.setlang [код] — установить язык интерфейса."""
         lang = self.get_args(event).strip().lower()
 
         if not lang:
@@ -82,7 +74,6 @@ class TranslationsModule(KitsuneModule):
 
     @command("dllangpack", required=OWNER)
     async def dllangpack_cmd(self, event) -> None:
-        """.dllangpack <url> — загрузить языковой пакет из URL."""
         url = self.get_args(event).strip()
 
         if not url or not url.startswith("http"):
@@ -92,13 +83,12 @@ class TranslationsModule(KitsuneModule):
         await event.message.edit("⏳ Загружаю языковой пакет...", parse_mode="html")
 
         try:
-            import aiohttp  # ленивый импорт
+            import aiohttp
             async with aiohttp.ClientSession() as sess:
                 async with sess.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
                     resp.raise_for_status()
                     content = await resp.text()
 
-            # determine filename from url
             filename = url.rstrip("/").split("/")[-1]
             if not filename.endswith(".yml"):
                 filename += ".yml"
@@ -106,7 +96,6 @@ class TranslationsModule(KitsuneModule):
             dest = _LANG_DIR / filename
             dest.write_text(content, encoding="utf-8")
 
-            # auto-set the lang to the downloaded pack name
             lang_code = dest.stem
             await self.db.set(_DB_OWNER, "lang", lang_code)
 

@@ -1,12 +1,3 @@
-"""
-kitsune/web/ssh_tunnel.py — SSH-туннелирование для публичного доступа к веб-UI.
-
-Поднимает SSH-туннель через бесплатные сервисы (serveo.net, localhost.run)
-чтобы сделать локальный веб-интерфейс Kitsune доступным из интернета —
-без VPS и без настройки роутера.
-
-Автоматически пробует сервисы по очереди и переключается при сбое.
-"""
 
 from __future__ import annotations
 
@@ -17,7 +8,6 @@ import typing
 
 logger = logging.getLogger(__name__)
 
-# Список SSH-туннель-сервисов: (команда, regex для URL)
 _TUNNEL_SERVICES: list[tuple[str, str]] = [
     (
         "ssh -o StrictHostKeyChecking=no -o ConnectTimeout=15 "
@@ -31,16 +21,9 @@ _TUNNEL_SERVICES: list[tuple[str, str]] = [
     ),
 ]
 
-_RECONNECT_DELAY = 10  # секунд до переподключения при обрыве
-
+_RECONNECT_DELAY = 10
 
 class SSHTunnel:
-    """
-    Поднимает и поддерживает SSH-туннель.
-
-    При обрыве автоматически пробует следующий сервис.
-    URL туннеля передаётся в change_url_callback при смене.
-    """
 
     def __init__(
         self,
@@ -61,19 +44,16 @@ class SSHTunnel:
         return self._tunnel_url
 
     async def start(self) -> None:
-        """Запустить туннель (не блокирует)."""
         self._stopped = False
         self._task = asyncio.ensure_future(self._run_loop())
 
     async def stop(self) -> None:
-        """Остановить туннель."""
         self._stopped = True
         if self._task and not self._task.done():
             self._task.cancel()
         await self._kill_process()
 
     async def wait_url(self, timeout: float = 30.0) -> str | None:
-        """Ждать появления URL туннеля."""
         try:
             await asyncio.wait_for(self._url_available.wait(), timeout=timeout)
         except asyncio.TimeoutError:
@@ -81,7 +61,6 @@ class SSHTunnel:
         return self._tunnel_url
 
     async def _run_loop(self) -> None:
-        """Основной цикл: пробует сервисы по очереди, перезапускает при сбое."""
         while not self._stopped:
             cmd_template, url_pattern = _TUNNEL_SERVICES[self._service_idx % len(_TUNNEL_SERVICES)]
             cmd = cmd_template.format(port=self._port)

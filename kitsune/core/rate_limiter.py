@@ -7,7 +7,6 @@ import typing
 
 logger = logging.getLogger(__name__)
 
-
 class TokenBucket:
 
     __slots__ = ("capacity", "rate", "_tokens", "_last_refill", "_lock")
@@ -34,7 +33,6 @@ class TokenBucket:
     def remaining(self) -> float:
         elapsed = time.monotonic() - self._last_refill
         return min(self.capacity, self._tokens + elapsed * self.rate)
-
 
 class RateLimiter:
 

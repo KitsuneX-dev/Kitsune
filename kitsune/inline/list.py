@@ -1,18 +1,3 @@
-"""
-kitsune/inline/list.py — пагинированные текстовые списки.
-
-Позволяет показывать длинные списки постранично прямо в Telegram
-через inline-сообщение с кнопками ◀️ / ▶️.
-
-Использование:
-    items = ["Строка 1", "Строка 2", ...]
-    await inline.list(
-        message=event,
-        items=items,
-        title="📋 <b>Список модулей</b>",
-        page_size=10,
-    )
-"""
 
 from __future__ import annotations
 
@@ -23,20 +8,9 @@ import typing
 
 logger = logging.getLogger(__name__)
 
-_UNIT_TTL = 60 * 60 * 12  # 12 часов
-
+_UNIT_TTL = 60 * 60 * 12
 
 class InlineList:
-    """
-    Mixin для InlineManager.
-
-    Требует в классе:
-        self._units          — dict активных unit'ов
-        self._rand(n)        — генерация случайной строки
-        self.generate_markup(buttons) — генерация InlineKeyboardMarkup
-        self._invoke_unit(unit_id, message) — отправка через бота
-        self.edit(call, text, reply_markup) — редактирование сообщения
-    """
 
     async def list(
         self,
@@ -51,24 +25,9 @@ class InlineList:
         on_unload: typing.Optional[typing.Callable] = None,
         silent: bool = False,
     ) -> typing.Union[bool, typing.Any]:
-        """
-        Отправить пагинированный список.
-
-        :param message:      Сообщение-триггер.
-        :param items:        Список строк или async callable, возвращающий список.
-        :param title:        Заголовок над списком (HTML).
-        :param page_size:    Записей на страницу.
-        :param force_me:     Только владелец может листать.
-        :param always_allow: Доп. пользователи с доступом к листанию.
-        :param ttl:          Через сколько секунд список устаревает.
-        :param on_unload:    Callback при закрытии.
-        :param silent:       Не показывать «Загружаю...».
-        :return:             Объект сообщения или False при ошибке.
-        """
         if always_allow is None:
             always_allow = []
 
-        # Получаем элементы
         if callable(items) and asyncio.iscoroutinefunction(items):
             try:
                 resolved = await items()
@@ -112,7 +71,6 @@ class InlineList:
 
         text, markup = self._build_list_page(unit_id)
 
-        # Временно подменяем unit чтобы _invoke_unit отправил нужный текст
         self._units[unit_id]["_pending_text"]   = text
         self._units[unit_id]["_pending_markup"]  = markup
 
@@ -132,14 +90,13 @@ class InlineList:
         return m
 
     def _build_list_page(self, unit_id: str) -> tuple[str, list]:
-        """Строит текст и разметку для текущей страницы."""
         unit      = self._units[unit_id]
         items     = unit["items"]
         page      = unit["current_page"]
         size      = unit["page_size"]
         title     = unit["title"]
 
-        total_pages = max(1, -(-len(items) // size))  # ceil division
+        total_pages = max(1, -(-len(items) // size))
         page        = max(0, min(page, total_pages - 1))
         unit["current_page"] = page
 
@@ -186,7 +143,6 @@ class InlineList:
 
         unit = self._units[unit_id]
 
-        # Проверка доступа
         caller_id = getattr(call, "from_user", None)
         caller_id = caller_id.id if caller_id else 0
         owner_id  = getattr(self, "_me", 0) or getattr(self._client, "tg_id", 0)
@@ -223,7 +179,6 @@ class InlineList:
             logger.exception("InlineList: ошибка обновления страницы")
             await call.answer("❌ Ошибка", show_alert=True)
 
-    # Вспомогательный метод, необходимый для _invoke_unit в InlineManager
     def _get_pending_list_content(self, unit_id: str) -> tuple[str, list]:
         unit  = self._units.get(unit_id, {})
         text  = unit.pop("_pending_text",  "")

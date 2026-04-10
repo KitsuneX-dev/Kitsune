@@ -15,8 +15,6 @@ logger = logging.getLogger(__name__)
 
 _FLOOD_REPLY = "⏳ <b>Too fast. Please wait a moment.</b>"
 
-# ── Система тегов (перенесено из Heroku) ──────────────────────────────────────
-# Полный список тегов для декоратора @watcher(only_pm=True, no_forwards=True, ...)
 ALL_TAGS = [
     "no_commands", "only_commands", "out", "in_", "only_messages", "editable",
     "no_media", "only_media", "only_photos", "only_videos", "only_audios",
@@ -26,7 +24,6 @@ ALL_TAGS = [
     "no_mention", "mention", "only_reply", "only_forwards",
     "startswith", "endswith", "contains", "regex", "filter", "from_id", "chat_id",
 ]
-
 
 def _mime_type(message: Message) -> str:
     if not isinstance(message, Message):
@@ -38,7 +35,6 @@ def _mime_type(message: Message) -> str:
     if doc:
         return getattr(doc, "mime_type", "") or ""
     return getattr(media, "mime_type", "") or ""
-
 
 def _get_chat_id(message: Message) -> int:
     chat_id = getattr(message, "chat_id", None)
@@ -55,9 +51,7 @@ def _get_chat_id(message: Message) -> int:
         return peer.user_id
     return 0
 
-
 def _check_tag(tag: str, func: typing.Callable, m: Message) -> bool:
-    """Возвращает True если сообщение должно быть ПРОПУЩЕНО (тег не выполнен)."""
     mapping: dict[str, typing.Callable[[], bool]] = {
         "out":           lambda: bool(getattr(m, "out", True)),
         "in_":           lambda: not getattr(m, "out", True),
@@ -105,17 +99,14 @@ def _check_tag(tag: str, func: typing.Callable, m: Message) -> bool:
     if tag not in mapping:
         return False
     if not getattr(func, tag, False):
-        return False  # Тег не выставлен — ничего не блокируем
+        return False
     try:
         return not mapping[tag]()
     except Exception:
         return False
 
-
 def _should_skip_watcher(func: typing.Callable, message: Message) -> bool:
-    """Возвращает True если watcher нужно пропустить из-за тегов."""
     return any(_check_tag(tag, func, message) for tag in ALL_TAGS)
-
 
 class CommandDispatcher:
 
@@ -188,9 +179,6 @@ class CommandDispatcher:
         text: str = (message.raw_text or message.text or "").strip()
 
         if text.startswith(self._prefix):
-            # ── Экранирование двойным префиксом (из Heroku) ──────────────────
-            # "..команда" → редактирует сообщение в ".команда", команда не выполняется.
-            # Удобно когда нужно написать что-то начинающееся с префикса.
             if (
                 is_own
                 and len(text) > len(self._prefix) * 2
@@ -202,7 +190,6 @@ class CommandDispatcher:
                 except Exception:
                     pass
                 return
-            # ─────────────────────────────────────────────────────────────────
 
             raw = text[len(self._prefix):]
             parts = raw.split(maxsplit=1)
@@ -238,25 +225,20 @@ class CommandDispatcher:
             if not allowed:
                 return
 
-            # Команды запускаются через ensure_future — не блокируют обработку следующих сообщений
             asyncio.ensure_future(self._safe_call(handler, event, cmd_name))
             return
 
         if is_own:
             for filter_func, handler in list(self._watchers):
-                # ── Пользовательский фильтр (обратная совместимость) ─────────
                 try:
                     if filter_func is not None and not filter_func(message):
                         continue
                 except Exception:
                     continue
 
-                # ── Система тегов (перенесена из Heroku) ─────────────────────
                 if _should_skip_watcher(handler, message):
                     continue
 
-                # Watcher'ы запускаются через ensure_future параллельно —
-                # длинные watcher'ы не задерживают обработку следующих сообщений
                 asyncio.ensure_future(
                     self._safe_call(handler, event, f"watcher:{handler.__name__}")
                 )

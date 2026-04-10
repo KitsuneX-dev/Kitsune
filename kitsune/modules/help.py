@@ -8,9 +8,7 @@ from telethon.tl.types import MessageEntityBlockquote
 from ..core.loader import KitsuneModule, command, ModuleConfig, ConfigValue
 from ..core.security import OWNER
 
-
 class HelpModule(KitsuneModule):
-    """Список команд и модулей."""
 
     name        = "help"
     description = "Список команд и модулей"
@@ -53,16 +51,8 @@ class HelpModule(KitsuneModule):
         "no_mod":     "❌ Модуль <code>{name}</code> не найден.",
     }
 
-    # ─── helpers ──────────────────────────────────────────────────────────
-
     @staticmethod
     async def _edit_collapsed(message, html_text: str) -> None:
-        """Редактировать сообщение с blockquote, которые свёрнуты по умолчанию.
-
-        Telethon парсит <blockquote expandable> как обычную цитату (collapsed=None),
-        игнорируя атрибут expandable. Этот метод парсит HTML, а затем вручную
-        выставляет collapsed=True на все MessageEntityBlockquote.
-        """
         text, entities = tl_html.parse(html_text)
         for e in entities:
             if isinstance(e, MessageEntityBlockquote):
@@ -88,11 +78,8 @@ class HelpModule(KitsuneModule):
                 out.append(m._command_name)
         return sorted(out)
 
-    # ─── команды ──────────────────────────────────────────────────────────
-
     @command("help", required=OWNER)
     async def help_cmd(self, event) -> None:
-        """.help [модуль] — список всех модулей или детали модуля."""
         args = self.get_args(event).strip()
         loader = self._loader()
 
@@ -200,7 +187,6 @@ class HelpModule(KitsuneModule):
 
     @command("helphide", required=OWNER)
     async def helphide_cmd(self, event) -> None:
-        """.helphide <модуль> — скрыть/показать модуль в .help."""
         args = self.get_args(event).strip().lower()
         if not args:
             await event.message.edit("❌ Укажи имя модуля.", parse_mode="html")
