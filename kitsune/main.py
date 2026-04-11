@@ -305,6 +305,10 @@ async def _startup(args: argparse.Namespace) -> None:
     if not args.no_hydrogram:
         hydro = await _start_hydrogram(api_id, api_hash, str(session_path))
         client.hydrogram = hydro
+        if hydro:
+            from .core.hydro_bridge import setup_hydrogram_bridge
+            await setup_hydrogram_bridge(hydro, client, dispatcher, db)
+            logger.info("main: HydrogramBridge active — single dispatcher for both clients")
 
     db = DatabaseManager(client)
     await db.init()
