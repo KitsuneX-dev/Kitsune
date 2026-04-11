@@ -205,31 +205,17 @@ class CommandDispatcher:
             handler, required = entry
 
             # Co-owner выполняет команду от лица основного аккаунта:
-            # удаляем его сообщение и отправляем фейковое от основного клиента,
-            # чтобы все event.edit / event.reply шли от нас.
+            # подменяем sender_id и привязываем клиент — никаких новых сообщений.
             if is_co_owner:
-                try:
-                    # Отправляем команду от своего лица в тот же чат
-                    sent = await self._client.send_message(
-                        message.chat_id,
-                        text,
-                        reply_to=message.reply_to_msg_id,
-                    )
-                    # Удаляем оригинальное сообщение co-owner
-                    try:
-                        await message.delete()
-                    except Exception:
-                        pass
-                    # Создаём event на основе нашего сообщения
-                    new_event = events.NewMessage.Event(sent)
-                    new_event._client = self._client
-                    event = new_event
-                    message = sent
-                    is_own = True
-                    is_co_owner = False
-                except Exception:
-                    logger.exception("Dispatcher: failed to proxy co_owner message for .%s", cmd_name)
-                    return
+                # Патчим message так, чтобы он выглядел как исходящий от нас
+                message._sender_id = self._client.tg_id
+                message.out = True
+                # Привязываем основной клиент к message и event,
+                # чтобы edit/reply/respond шли от нашего аккаунта
+                message._client = self._client
+                event._client = self._client
+                is_own = True
+                is_co_owner = False
 
             # Sudo-пользователи (не co-owner) не могут выполнять OWNER-команды
             if not is_own and not is_co_owner and required >= OWNER:
