@@ -11,21 +11,21 @@ KEY_ENV  = "KITSUNE_KEY"
 KEY_PATH = Path.home() / ".kitsune" / "kitsune.key"
 MAGIC    = b"KBAK1:"
 
-_FERNET_AVAILABLE = False
+# Импортируем оба независимо — приоритет: AES-GCM > Fernet > XOR
 _AES_GCM_AVAILABLE = False
+_FERNET_AVAILABLE  = False
+
+try:
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM as _AESGCM
+    _AES_GCM_AVAILABLE = True
+except ImportError:
+    pass
 
 try:
     from cryptography.fernet import Fernet as _Fernet, InvalidToken as _InvalidToken
     _FERNET_AVAILABLE = True
 except ImportError:
     pass
-
-if not _FERNET_AVAILABLE:
-    try:
-        from cryptography.hazmat.primitives.ciphers.aead import AESGCM as _AESGCM
-        _AES_GCM_AVAILABLE = True
-    except ImportError:
-        pass
 
 
 def _load_or_create_key() -> bytes:
@@ -36,10 +36,8 @@ def _load_or_create_key() -> bytes:
     if KEY_PATH.exists():
         return KEY_PATH.read_bytes().strip()
 
-    if _FERNET_AVAILABLE:
-        key = _Fernet.generate_key()
-    else:
-        key = base64.urlsafe_b64encode(os.urandom(32))
+    # Генерируем ключ совместимый с обоими бэкендами
+    key = base64.urlsafe_b64encode(os.urandom(32))
 
     KEY_PATH.parent.mkdir(parents=True, exist_ok=True)
     KEY_PATH.write_bytes(key)
@@ -51,9 +49,8 @@ def _load_or_create_key() -> bytes:
 
 
 def _aes_gcm_encrypt(data: bytes, key: bytes) -> bytes:
-    """AES-256-GCM шифрование. Заменяет небезопасный XOR-fallback."""
+    """AES-256-GCM шифрование. Приоритетный метод."""
     raw_key = base64.urlsafe_b64decode(key + b"==")
-    # Деривируем 32-байтный ключ через SHA-256
     aes_key = hashlib.sha256(raw_key).digest()
     nonce = os.urandom(12)  # 96-битный nonce для GCM
     aesgcm = _AESGCM(aes_key)
@@ -104,12 +101,11 @@ def _xor_decrypt(data: bytes, key: bytes) -> bytes:
 
 def encrypt(data: bytes) -> bytes:
     key = _load_or_create_key()
-    if _FERNET_AVAILABLE:
-        return MAGIC + _Fernet(key).encrypt(data)
-    if _AES_GCM_AVAILABLE:
+    if _AES_GCM_AVAILABLE:                                         # 1. AES-256-GCM
         return MAGIC + b"AESGCM1:" + _aes_gcm_encrypt(data, key)
-    # Последний fallback — XOR+HMAC (небезопасен для множественных бэкапов)
-    return MAGIC + b"XOR1:" + _xor_encrypt(data, key)
+    if _FERNET_AVAILABLE:                                          # 2. Fernet
+        return MAGIC + _Fernet(key).encrypt(data)
+    return MAGIC + b"XOR1:" + _xor_encrypt(data, key)             # 3. XOR+HMAC
 
 
 def decrypt(data: bytes) -> bytes:
