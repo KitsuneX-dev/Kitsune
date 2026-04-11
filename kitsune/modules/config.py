@@ -33,6 +33,40 @@ def _fmt_value(value) -> str:
 def _chunks(lst: list, n: int) -> list:
     return [lst[i:i + n] for i in range(0, len(lst), n)]
 
+
+# ── Helpers используемые из bot_runner (aiogram cfg_ callbacks) ───────────────
+
+def _get_configurable(client) -> dict:
+    """Возвращает словарь {mod_name: mod} для модулей с ModuleConfig."""
+    from ..core.loader import ModuleConfig
+    loader = getattr(client, "_kitsune_loader", None)
+    if not loader:
+        return {}
+    return {
+        name: mod
+        for name, mod in loader.modules.items()
+        if isinstance(getattr(mod, "config", None), ModuleConfig)
+    }
+
+
+def _mod_text(mod_name: str, mod) -> str:
+    """Текст карточки модуля для cfg_ callback."""
+    lines = ""
+    for k in mod.config.keys():
+        lines += f"▫️ <code>{_esc(k)}</code>: <b>{_fmt_value(mod.config[k])}</b>\n"
+    return (
+        f"⚙️ <b>{_esc(mod.name)}</b> — <code>{_esc(mod_name)}</code>\n\n"
+        f"{lines or '—'}"
+    )
+
+
+def _list_text(configurable: dict) -> str:
+    """Текст списка модулей для cfg_ callback."""
+    if not configurable:
+        return "⚙️ <b>Нет модулей с настройками.</b>"
+    names = ", ".join(f"<code>{_esc(n)}</code>" for n in sorted(configurable.keys()))
+    return f"⚙️ <b>Выбери модуль для настройки:</b>\n\n{names}"
+
 class ConfigModule(KitsuneModule):
 
     name        = "Config"
