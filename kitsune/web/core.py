@@ -533,7 +533,7 @@ body::after{{
 .filter-btn{{padding:8px 14px;border-radius:10px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;font-size:.78rem;transition:all .2s}}
 .filter-btn:hover{{border-color:var(--accent);color:var(--accent2)}}
 .filter-btn.active{{background:var(--accent);border-color:var(--accent);color:#fff}}
-.modules-grid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px}}
+.modules-grid{{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}}
 .modules-pagination{{display:flex;justify-content:center;gap:8px;margin-top:16px}}
 .page-btn{{padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;font-size:.78rem;transition:all .2s}}
 .page-btn:hover{{border-color:var(--accent);color:var(--accent2)}}
