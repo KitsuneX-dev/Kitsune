@@ -328,7 +328,7 @@ html,body{{height:100%}}
 body{{
   font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);
   min-height:100vh;display:flex;align-items:center;justify-content:center;
-  padding:24px 16px;overflow-x:hidden;
+  padding:16px 10px;overflow-x:hidden;
 }}
 body::before,body::after{{
   content:'';position:fixed;border-radius:50%;filter:blur(80px);pointer-events:none;z-index:0;
