@@ -534,6 +534,8 @@ body::after{{
 .filter-btn:hover{{border-color:var(--accent);color:var(--accent2)}}
 .filter-btn.active{{background:var(--accent);border-color:var(--accent);color:#fff}}
 .modules-grid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:16px}}
+.modules-grid-mobile{{display:none}}
+@media (max-width:500px){{.modules-grid{{display:none}}@media (max-width:500px){.modules-grid-mobile{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}}}}
 .modules-count{{font-size:.75rem;color:var(--muted);padding:4px 10px;background:var(--surface2);border-radius:6px;margin-left:8px}}
 .modules-pagination{{display:flex;justify-content:center;gap:8px;margin-top:20px;flex-wrap:wrap}}
 .page-btn{{padding:8px 14px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;font-size:.8rem;transition:all .2s}}
