@@ -342,7 +342,7 @@ body::after{{
   background:radial-gradient(circle,rgba(61,255,160,0.06) 0%,transparent 70%);
 }}
 .shell{{
-  width:100%;max-width:460px;position:relative;z-index:1;
+  width:100%;max-width:900px;position:relative;z-index:1;
   display:flex;flex-direction:column;border-radius:24px;overflow:hidden;
   border:1px solid var(--border2);
   box-shadow:0 0 0 1px rgba(124,77,255,0.08),0 32px 80px rgba(0,0,0,0.6),0 0 60px rgba(124,77,255,0.08);
@@ -529,27 +529,31 @@ body::after{{
 .modal-btn.primary:hover{{background:var(--accent2)}}
 .modal-btn.secondary{{background:transparent;border:1px solid var(--border2);color:var(--muted)}}
 .modal-btn.secondary:hover{{border-color:var(--muted)}}
-.modules-filter{{display:flex;gap:8px;margin-bottom:16px}}
+.modules-filter{{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap}}
 .filter-btn{{padding:8px 14px;border-radius:10px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;font-size:.78rem;transition:all .2s}}
 .filter-btn:hover{{border-color:var(--accent);color:var(--accent2)}}
 .filter-btn.active{{background:var(--accent);border-color:var(--accent);color:#fff}}
-.modules-grid{{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}}
-@media (max-width: 600px){{.modules-grid{{grid-template-columns:repeat(2,1fr)}}}}
-.modules-pagination{{display:flex;justify-content:center;gap:8px;margin-top:16px}}
-.page-btn{{padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;font-size:.78rem;transition:all .2s}}
+.modules-grid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:16px}}
+.modules-pagination{{display:flex;justify-content:center;gap:8px;margin-top:20px;flex-wrap:wrap}}
+.page-btn{{padding:8px 14px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;font-size:.8rem;transition:all .2s}}
 .page-btn:hover{{border-color:var(--accent);color:var(--accent2)}}
 .page-btn.active{{background:var(--accent);border-color:var(--accent);color:#fff}}
 .page-btn:disabled{{opacity:0.4;cursor:not-allowed}}
-.module-card-full{{background:var(--surface2);border:1px solid var(--border);border-radius:16px;padding:16px;display:flex;flex-direction:column;gap:12px;transition:border-color .2s,transform .15s}}
+.module-card-full{{background:var(--surface2);border:1px solid var(--border);border-radius:16px;padding:16px;display:flex;flex-direction:column;gap:10px;transition:border-color .2s,transform .15s;min-height:100%}}
 .module-card-full:hover{{border-color:rgba(124,77,255,0.4);transform:translateY(-2px)}}
 .module-card-header{{display:flex;align-items:center;gap:12px}}
-.module-card-icon{{width:44px;height:44px;border-radius:14px;background:linear-gradient(135deg,#6030e0,#9060ff);display:flex;align-items:center;justify-content:center;font-size:1.4rem;box-shadow:0 0 16px rgba(124,77,255,0.2)}}
+.module-card-icon{{width:42px;height:42px;border-radius:12px;background:linear-gradient(135deg,#6030e0,#9060ff);display:flex;align-items:center;justify-content:center;font-size:1.3rem;box-shadow:0 0 12px rgba(124,77,255,0.2)}}
 .module-card-info{{flex:1;min-width:0}}
-.module-card-name{{font-size:.95rem;font-weight:600;color:var(--text)}}
-.module-card-meta{{font-size:.72rem;color:var(--muted);margin-top:2px;display:flex;gap:8px;flex-wrap:wrap}}
-.module-card-desc{{font-size:.8rem;color:var(--muted);line-height:1.4}}
-.module-card-footer{{display:flex;justify-content:space-between;align-items:center;margin-top:auto;padding-top:12px;border-top:1px solid var(--border)}}
-.module-card-actions{{display:flex;gap:6px}}
+.module-card-name{{font-size:.9rem;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
+.module-card-meta{{font-size:.7rem;color:var(--muted);margin-top:2px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}}
+.module-card-desc{{font-size:.78rem;color:var(--muted);line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}}
+.module-card-footer{{display:flex;justify-content:space-between;align-items:center;margin-top:auto;padding-top:10px;border-top:1px solid var(--border);gap:8px}}
+.module-card-actions{{display:flex;gap:6px;flex-wrap:wrap}}
+.module-btn{{padding:6px 12px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;font-size:.72rem;transition:all .2s;white-space:nowrap}}
+.module-btn:hover{{border-color:var(--accent);color:var(--accent2)}}
+.module-btn.danger:hover{{border-color:var(--red);color:var(--red)}}
+.modules-header{{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;gap:12px;flex-wrap:wrap}}
+.modules-count{{font-size:.78rem;color:var(--muted);padding:6px 12px;background:var(--surface2);border-radius:8px}}
 </style>
 </head>
 <body>
@@ -616,7 +620,7 @@ body::after{{
 
     <div class="panel" id="panel-modules">
       <div class="modules-header">
-        <div class="sec-title" style="margin-bottom:0">Модули</div>
+        <div class="sec-title" style="margin-bottom:0">Модули <span class="modules-count" id="modules-total">0</span></div>
         <button class="add-btn" onclick="showLoadModule()">＋ Загрузить</button>
       </div>
       <div class="modules-filter">
@@ -750,6 +754,8 @@ function renderModules() {{
   let filtered = allModules;
   if (modulesFilter === 'builtin') filtered = allModules.filter(m => m.is_builtin);
   else if (modulesFilter === 'user') filtered = allModules.filter(m => !m.is_builtin);
+  
+  document.getElementById('modules-total').textContent = filtered.length;
   
   const totalPages = Math.ceil(filtered.length / modulesPerPage);
   const start = (modulesPage - 1) * modulesPerPage;
