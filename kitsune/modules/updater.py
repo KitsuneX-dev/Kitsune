@@ -145,6 +145,20 @@ class UpdaterModule(KitsuneModule):
             except TypeError:
                 branch = "main"
             behind = list(repo.iter_commits(f"HEAD..origin/{branch}"))
+
+            # Если предыдущее обновление завершилось с ошибкой pip —
+            # сообщаем об этом вместо "у тебя последняя версия"
+            last_err = self.db.get(_DB_OWNER, "last_update_error", None)
+            if last_err:
+                await self.db.delete(_DB_OWNER, "last_update_error")
+                await m.edit(
+                    f"⚠️ <b>Последнее обновление завершилось с ошибками:</b>\n"
+                    f"<code>{escape_html(last_err)}</code>\n\n"
+                    f"Код обновлён, но зависимости могут быть неполными.",
+                    parse_mode="html",
+                )
+                return
+
             if not behind:
                 await m.edit(self.strings("up_to_date"), parse_mode="html")
                 return
@@ -248,17 +262,73 @@ class UpdaterModule(KitsuneModule):
 
         bar2 = "████████░░░░  67%"
         await edit(f"📦 <b>Обновляю зависимости...</b>\n{bar2}")
-        proc = await asyncio.create_subprocess_exec(
-            sys.executable, "-m", "pip", "install", "-r", "requirements.txt",
+
+        # Определяем среду — в Termux нужны особые флаги
+        is_termux = "com.termux" in os.environ.get("PREFIX", "")
+        req_file  = os.path.join(repo_path, "requirements-termux.txt" if is_termux else "requirements.txt")
+        if not os.path.exists(req_file):
+            req_file = os.path.join(repo_path, "requirements.txt")
+
+        pip_args = [
+            sys.executable, "-m", "pip", "install", "-r", req_file,
             "--quiet", "--no-warn-script-location",
-            cwd=repo_path,
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        _, stderr = await proc.communicate()
-        if proc.returncode != 0:
-            await edit(f"⚠️ pip install вернул ошибку:\n<code>{escape_html(stderr.decode()[:500])}</code>")
-            return
+        ]
+        if is_termux:
+            # prefer-binary: не компилировать из исходников (нет поддержки Android)
+            # no-build-isolation: избегаем setuptools-сборки которая падает на Android
+            pip_args += ["--prefer-binary", "--no-build-isolation"]
+
+        pip_errors = []
+        # Читаем пакеты и устанавливаем по одному — пропускаем несовместимые
+        if is_termux:
+            try:
+                with open(req_file, encoding="utf-8") as f:
+                    pkgs = [
+                        l.strip() for l in f
+                        if l.strip() and not l.strip().startswith("#")
+                    ]
+                for pkg in pkgs:
+                    p = await asyncio.create_subprocess_exec(
+                        sys.executable, "-m", "pip", "install", pkg,
+                        "--quiet", "--no-warn-script-location",
+                        "--prefer-binary", "--no-build-isolation",
+                        cwd=repo_path,
+                        stdout=asyncio.subprocess.DEVNULL,
+                        stderr=asyncio.subprocess.PIPE,
+                    )
+                    _, err = await p.communicate()
+                    if p.returncode != 0:
+                        err_txt = err.decode(errors="replace").strip()
+                        if "platform android is not supported" in err_txt.lower():
+                            # Пакет не поддерживает Android — пропускаем тихо
+                            continue
+                        pip_errors.append(f"{pkg}: {err_txt[:120]}")
+            except Exception as exc:
+                pip_errors.append(str(exc))
+        else:
+            proc = await asyncio.create_subprocess_exec(
+                *pip_args,
+                cwd=repo_path,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            _, stderr = await proc.communicate()
+            if proc.returncode != 0:
+                pip_errors.append(stderr.decode(errors="replace")[:500])
+
+        if pip_errors:
+            err_text = "\n".join(pip_errors[:3])
+            await edit(
+                f"⚠️ <b>Обновление установлено, но часть зависимостей не установилась:</b>\n"
+                f"<code>{escape_html(err_text)}</code>\n\n"
+                f"Продолжаю перезапуск..."
+            )
+            await asyncio.sleep(3)
+
+        if pip_errors:
+            err_summary = "; ".join(pip_errors[:2])
+            await self.db.set(_DB_OWNER, "last_update_error", err_summary[:300])
+            await self.db.force_save()
 
         bar3 = "████████████  100%"
         await edit(f"🔄 <b>Перезапускаю...</b>\n{bar3}")
