@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import datetime
 import time
@@ -16,6 +17,7 @@ from ..core.security import (
 )
 
 _DB_OWNER = "kitsune.security"
+_CONFIRM_TTL = 60  # секунд до таймаута подтверждения
 
 def _esc(s: str) -> str:
     return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
@@ -83,10 +85,37 @@ class SecurityModule(KitsuneModule):
             "<code>.sudoadd</code> / <code>.sudorm</code> / <code>.sudolist</code> — управление sudo\n"
             "<code>.security</code> — эта справка"
         ),
+        # owneradd confirm
+        "owneradd_confirm": (
+            "⚠️ <b>Выдача прав владельца</b>\n\n"
+            "Вы собираетесь выдать пользователю\n"
+            "<a href=\"tg://user?id={uid}\"><b>{name}</b></a> полный доступ к UserBot.\n\n"
+            "🔓 Этот пользователь сможет:\n"
+            "  • использовать <b>все</b> команды и модули\n"
+            "  • управлять безопасностью и настройками\n"
+            "  • выдавать права другим пользователям\n\n"
+            "🚨 Выдавайте только людям которым доверяете полностью."
+        ),
+        "owneradd_done":    "✅ <a href=\"tg://user?id={uid}\">{name}</a> теперь co-owner. Полный доступ выдан.",
+        "owneradd_cancel":  "❌ Действие отменено. Права не выданы.",
+        "owneradd_timeout": "⏱ Время вышло. Действие отменено.",
+        # ownerrm confirm
+        "ownerrm_confirm": (
+            "❗ <b>Внимание — удаление владельца</b>\n\n"
+            "Вы хотите удалить пользователя\n"
+            "<a href=\"tg://user?id={uid}\"><b>{name}</b></a> из списка co-owner.\n\n"
+            "После удаления он потеряет доступ ко всем командам и модулям."
+        ),
+        "ownerrm_done":    "✅ <a href=\"tg://user?id={uid}\">{name}</a> удалён из co-owner.",
+        "ownerrm_cancel":  "❌ Действие отменено. Пользователь остался в списке.",
+        "ownerrm_timeout": "⏱ Время вышло. Действие отменено.",
     }
 
     def _sec(self):
         return getattr(self.client, "_kitsune_security", None)
+
+    def _inline(self):
+        return getattr(self.client, "_kitsune_inline", None)
 
     async def _resolve_user(self, event):
         args = self.get_args(event).strip()
@@ -110,6 +139,8 @@ class SecurityModule(KitsuneModule):
 
         return None
 
+    # ── owneradd ────────────────────────────────────────────────────────────
+
     @command("owneradd", required=OWNER)
     async def owneradd_cmd(self, event) -> None:
         user = await self._resolve_user(event)
@@ -125,12 +156,60 @@ class SecurityModule(KitsuneModule):
             await event.message.edit(self.strings("coowner_already"), parse_mode="html")
             return
 
-        owners.append(user.id)
-        await self.db.set(_DB_OWNER, "co_owners", owners)
-        await event.message.edit(
-            self.strings("coowner_added").format(uid=user.id, name=_esc(get_display_name(user))),
-            parse_mode="html",
-        )
+        name = _esc(get_display_name(user))
+        uid  = user.id
+        text = self.strings("owneradd_confirm").format(uid=uid, name=name)
+
+        inline = self._inline()
+        if inline:
+            markup = [
+                [
+                    {"text": "✅ Выдать доступ", "callback": self._cb_owneradd_yes, "args": (uid, name)},
+                    {"text": "❌ Отмена",        "callback": self._cb_owneradd_no},
+                ]
+            ]
+            msg = await inline.form(text, event.message, markup)
+            # Таймаут 60 сек
+            asyncio.ensure_future(self._owneradd_timeout(msg, uid, name))
+        else:
+            # Fallback без inline — спрашиваем текстом
+            await event.message.edit(
+                text + "\n\n<i>Ответь <code>да</code> чтобы подтвердить или <code>нет</code> для отмены.</i>",
+                parse_mode="html",
+            )
+            await self._wait_text_confirm(
+                event,
+                on_yes=self._do_owneradd(uid, name),
+                on_no=self.strings("owneradd_cancel"),
+            )
+
+    async def _cb_owneradd_yes(self, call, uid: int, name: str) -> None:
+        owners = self.db.get(_DB_OWNER, "co_owners", [])
+        if uid not in owners:
+            owners.append(uid)
+            await self.db.set(_DB_OWNER, "co_owners", owners)
+        inline = self._inline()
+        if inline:
+            await inline.edit(call, self.strings("owneradd_done").format(uid=uid, name=name))
+        await call.answer("✅ Выдано")
+
+    async def _cb_owneradd_no(self, call) -> None:
+        inline = self._inline()
+        if inline:
+            await inline.edit(call, self.strings("owneradd_cancel"))
+        await call.answer("❌ Отменено")
+
+    async def _owneradd_timeout(self, msg: typing.Any, uid: int, name: str) -> None:
+        await asyncio.sleep(_CONFIRM_TTL)
+        owners = self.db.get(_DB_OWNER, "co_owners", [])
+        # Если так и не выдали — редактируем в таймаут
+        if uid not in owners:
+            inline = self._inline()
+            if inline and msg:
+                with contextlib.suppress(Exception):
+                    await inline.edit(msg, self.strings("owneradd_timeout"))
+
+    # ── ownerrm ─────────────────────────────────────────────────────────────
 
     @command("ownerrm", required=OWNER)
     async def ownerrm_cmd(self, event) -> None:
@@ -144,12 +223,53 @@ class SecurityModule(KitsuneModule):
             await event.message.edit(self.strings("coowner_not_in"), parse_mode="html")
             return
 
-        owners.remove(user.id)
-        await self.db.set(_DB_OWNER, "co_owners", owners)
-        await event.message.edit(
-            self.strings("coowner_removed").format(uid=user.id, name=_esc(get_display_name(user))),
-            parse_mode="html",
-        )
+        name = _esc(get_display_name(user))
+        uid  = user.id
+        text = self.strings("ownerrm_confirm").format(uid=uid, name=name)
+
+        inline = self._inline()
+        if inline:
+            markup = [
+                [
+                    {"text": "✅ Подтвердить", "callback": self._cb_ownerrm_yes, "args": (uid, name)},
+                    {"text": "❌ Отмена",      "callback": self._cb_ownerrm_no},
+                ]
+            ]
+            msg = await inline.form(text, event.message, markup)
+            asyncio.ensure_future(self._ownerrm_timeout(msg, uid, name))
+        else:
+            await event.message.edit(
+                text + "\n\n<i>Ответь <code>да</code> чтобы подтвердить или <code>нет</code> для отмены.</i>",
+                parse_mode="html",
+            )
+
+    async def _cb_ownerrm_yes(self, call, uid: int, name: str) -> None:
+        owners = self.db.get(_DB_OWNER, "co_owners", [])
+        if uid in owners:
+            owners.remove(uid)
+            await self.db.set(_DB_OWNER, "co_owners", owners)
+        inline = self._inline()
+        if inline:
+            await inline.edit(call, self.strings("ownerrm_done").format(uid=uid, name=name))
+        await call.answer("✅ Удалено")
+
+    async def _cb_ownerrm_no(self, call) -> None:
+        inline = self._inline()
+        if inline:
+            await inline.edit(call, self.strings("ownerrm_cancel"))
+        await call.answer("❌ Отменено")
+
+    async def _ownerrm_timeout(self, msg: typing.Any, uid: int, name: str) -> None:
+        await asyncio.sleep(_CONFIRM_TTL)
+        owners = self.db.get(_DB_OWNER, "co_owners", [])
+        # Если всё ещё в owners — значит не подтвердили удаление
+        if uid in owners:
+            inline = self._inline()
+            if inline and msg:
+                with contextlib.suppress(Exception):
+                    await inline.edit(msg, self.strings("ownerrm_timeout"))
+
+    # ── ownerlist ────────────────────────────────────────────────────────────
 
     @command("ownerlist", required=OWNER)
     async def ownerlist_cmd(self, event) -> None:
@@ -169,6 +289,8 @@ class SecurityModule(KitsuneModule):
             parse_mode="html",
         )
 
+    # ── sudo ─────────────────────────────────────────────────────────────────
+
     @command("sudoadd", required=OWNER)
     async def sudoadd_cmd(self, event) -> None:
         user = await self._resolve_user(event)
@@ -179,7 +301,6 @@ class SecurityModule(KitsuneModule):
             await event.message.edit(self.strings("self"), parse_mode="html")
             return
 
-        sec = self._sec()
         sudo = self.db.get(_DB_OWNER, "sudo", [])
         if user.id in sudo:
             await event.message.edit(self.strings("sudo_already"), parse_mode="html")
@@ -229,6 +350,8 @@ class SecurityModule(KitsuneModule):
             parse_mode="html",
         )
 
+    # ── blacklist ─────────────────────────────────────────────────────────────
+
     @command("blacklist", required=OWNER)
     async def blacklist_cmd(self, event) -> None:
         chat_id = event.message.chat_id
@@ -276,6 +399,8 @@ class SecurityModule(KitsuneModule):
             f"✅ <a href=\"tg://user?id={user.id}\">{_esc(get_display_name(user))}</a> убран из чёрного списка.",
             parse_mode="html",
         )
+
+    # ── tsec ──────────────────────────────────────────────────────────────────
 
     @command("tsec", required=OWNER)
     async def tsec_cmd(self, event) -> None:
