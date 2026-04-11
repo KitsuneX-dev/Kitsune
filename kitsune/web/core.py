@@ -31,6 +31,14 @@ class WebCore:
         app.router.add_get("/api/status",       self._handle_status)
         app.router.add_get("/api/users",        self._handle_users)
         app.router.add_post("/api/save_config", self._handle_save_config)
+        app.router.add_get("/api/modules",      self._handle_modules)
+        app.router.add_post("/api/modules/action/{name}", self._handle_module_action)
+        app.router.add_post("/api/modules/load", self._handle_module_load)
+        app.router.add_route("GET", "/api/modules/config/{name}", self._handle_module_config)
+        app.router.add_route("POST", "/api/modules/config/{name}", self._handle_module_config)
+        app.router.add_get("/api/settings",     self._handle_settings)
+        app.router.add_post("/api/settings",    self._handle_settings)
+        app.router.add_get("/api/logs",         self._handle_logs)
         self._runner = aiohttp.web.AppRunner(app)
         await self._runner.setup()
         self._site = aiohttp.web.TCPSite(self._runner, host, port)
@@ -109,6 +117,192 @@ class WebCore:
         for k, v in body.items():
             set_config_key(k, v)
         return aiohttp.web.Response(text='{"ok":true}', content_type="application/json")
+
+    async def _handle_modules(self, request):
+        loader = getattr(self._client, "_kitsune_loader", None)
+        if not loader:
+            return aiohttp.web.Response(
+                text='{"ok":false,"error":"loader not available"}',
+                content_type="application/json",
+            )
+        modules = []
+        for name, mod in loader.modules.items():
+            modules.append({
+                "name": mod.name,
+                "description": getattr(mod, "description", ""),
+                "author": getattr(mod, "author", ""),
+                "version": getattr(mod, "version", "1.0"),
+                "icon": getattr(mod, "icon", "📦"),
+                "category": getattr(mod, "category", "other"),
+                "is_builtin": getattr(mod, "_is_builtin", False),
+                "has_config": mod.config is not None and len(list(mod.config.keys())) > 0,
+                "config": dict(mod.config.items()) if mod.config else {},
+            })
+        return aiohttp.web.Response(
+            text=json.dumps({"ok": True, "modules": modules}),
+            content_type="application/json",
+            headers={"Access-Control-Allow-Origin": "*"},
+        )
+
+    async def _handle_module_action(self, request):
+        loader = getattr(self._client, "_kitsune_loader", None)
+        if not loader:
+            return aiohttp.web.Response(
+                text='{"ok":false,"error":"loader not available"}',
+                content_type="application/json",
+            )
+        name = request.match_info.get("name", "")
+        if not name:
+            return aiohttp.web.Response(
+                text='{"ok":false,"error":"module name required"}',
+                content_type="application/json",
+            )
+        try:
+            if request.method == "POST":
+                action = request.query.get("action", "unload")
+                if action == "unload":
+                    result = await loader.unload_module(name)
+                    return aiohttp.web.Response(
+                        text=json.dumps({"ok": result, "action": "unloaded"}),
+                        content_type="application/json",
+                    )
+                elif action == "reload":
+                    mod = await loader.reload_module(name)
+                    return aiohttp.web.Response(
+                        text=json.dumps({"ok": True, "action": "reloaded", "module": mod.name}),
+                        content_type="application/json",
+                    )
+            return aiohttp.web.Response(
+                text='{"ok":false,"error":"unknown action"}',
+                content_type="application/json",
+            )
+        except Exception as exc:
+            return aiohttp.web.Response(
+                text=json.dumps({"ok": False, "error": str(exc)}),
+                content_type="application/json",
+            )
+
+    async def _handle_module_load(self, request):
+        loader = getattr(self._client, "_kitsune_loader", None)
+        if not loader:
+            return aiohttp.web.Response(
+                text='{"ok":false,"error":"loader not available"}',
+                content_type="application/json",
+            )
+        try:
+            body = await request.json()
+            url = body.get("url", "")
+            if not url:
+                return aiohttp.web.Response(
+                    text='{"ok":false,"error":"url required"}',
+                    content_type="application/json",
+                )
+            mod = await loader.load_from_url(url)
+            return aiohttp.web.Response(
+                text=json.dumps({"ok": True, "module": mod.name, "version": mod.version}),
+                content_type="application/json",
+            )
+        except Exception as exc:
+            return aiohttp.web.Response(
+                text=json.dumps({"ok": False, "error": str(exc)}),
+                content_type="application/json",
+            )
+
+    async def _handle_module_config(self, request):
+        loader = getattr(self._client, "_kitsune_loader", None)
+        if not loader:
+            return aiohttp.web.Response(
+                text='{"ok":false,"error":"loader not available"}',
+                content_type="application/json",
+            )
+        name = request.match_info.get("name", "")
+        mod = loader.get_module(name)
+        if not mod or not mod.config:
+            return aiohttp.web.Response(
+                text='{"ok":false,"error":"module or config not found"}',
+                content_type="application/json",
+            )
+        if request.method == "GET":
+            config_data = {}
+            for key in mod.config.keys():
+                config_data[key] = {
+                    "value": mod.config[key],
+                    "default": mod.config.get_default(key),
+                    "doc": mod.config.get_doc(key),
+                }
+            return aiohttp.web.Response(
+                text=json.dumps({"ok": True, "config": config_data}),
+                content_type="application/json",
+            )
+        try:
+            body = await request.json()
+            for key, value in body.items():
+                if key in mod.config:
+                    mod.config[key] = value
+            db_key = f"kitsune.config.{mod.name.lower()}"
+            for key in mod.config.keys():
+                self._db.set(db_key, key, mod.config[key])
+            return aiohttp.web.Response(
+                text='{"ok":true}',
+                content_type="application/json",
+            )
+        except Exception as exc:
+            return aiohttp.web.Response(
+                text=json.dumps({"ok": False, "error": str(exc)}),
+                content_type="application/json",
+            )
+
+    async def _handle_settings(self, request):
+        db = self._db
+        if request.method == "GET":
+            settings = {
+                "prefix": db.get("kitsune.core", "prefix", "."),
+                "lang": db.get("kitsune.core", "lang", "ru"),
+                "autodel": db.get("kitsune.core", "autodel", 0),
+            }
+            return aiohttp.web.Response(
+                text=json.dumps({"ok": True, "settings": settings}),
+                content_type="application/json",
+                headers={"Access-Control-Allow-Origin": "*"},
+            )
+        try:
+            body = await request.json()
+            for key, value in body.items():
+                db.set("kitsune.core", key, value)
+            from ..main import set_config_key
+            for key, value in body.items():
+                set_config_key(key, value)
+            return aiohttp.web.Response(
+                text='{"ok":true}',
+                content_type="application/json",
+            )
+        except Exception as exc:
+            return aiohttp.web.Response(
+                text=json.dumps({"ok": False, "error": str(exc)}),
+                content_type="application/json",
+            )
+
+    async def _handle_logs(self, request):
+        log_file = Path.home() / ".kitsune" / "kitsune.log"
+        if not log_file.exists():
+            return aiohttp.web.Response(
+                text=json.dumps({"ok": True, "logs": []}),
+                content_type="application/json",
+            )
+        try:
+            lines = log_file.read_text(encoding="utf-8").splitlines()
+            limit = 100
+            recent = lines[-limit:] if len(lines) > limit else lines
+            return aiohttp.web.Response(
+                text=json.dumps({"ok": True, "logs": recent}),
+                content_type="application/json",
+                headers={"Access-Control-Allow-Origin": "*"},
+            )
+        except Exception:
+            return aiohttp.web.Response(
+                text=json.dumps({"ok": True, "logs": []}),
+                content_type="application/json",
+            )
 
 
 def _build_html(*, name, uid, username, version):
@@ -300,6 +494,41 @@ body::after{{
 }}
 @keyframes spin{{to{{transform:rotate(360deg)}}}}
 .loading-msg{{text-align:center;padding:40px 20px;font-size:.85rem;color:var(--muted)}}
+.modules-header,.logs-header{{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}}
+.module-card{{
+  background:var(--surface2);border:1px solid var(--border);border-radius:14px;
+  padding:14px 16px;display:flex;align-items:center;gap:14px;
+  transition:border-color .2s,transform .15s;margin-bottom:10px;
+}}
+.module-card:hover{{border-color:rgba(124,77,255,0.3);transform:translateY(-1px)}}
+.module-icon{{width:40px;height:40px;flex-shrink:0;border-radius:12px;background:var(--surface);display:flex;align-items:center;justify-content:center;font-size:1.2rem}}
+.module-info{{flex:1;min-width:0}}
+.module-name{{font-size:.9rem;font-weight:600;color:var(--text)}}
+.module-meta{{font-size:.75rem;color:var(--muted);margin-top:3px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}}
+.module-actions{{display:flex;gap:6px}}
+.module-btn{{padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;font-size:.75rem;transition:all .2s}}
+.module-btn:hover{{border-color:var(--accent);color:var(--accent2)}}
+.module-btn.danger:hover{{border-color:var(--red);color:var(--red)}}
+.setting-row{{display:flex;justify-content:space-between;align-items:center;padding:10px 12px;border-radius:10px}}
+.setting-row:hover{{background:rgba(124,77,255,0.06)}}
+.setting-input{{background:var(--surface2);border:1px solid var(--border2);border-radius:8px;padding:8px 12px;color:var(--text);font-size:.85rem;width:120px}}
+.setting-select{{background:var(--surface2);border:1px solid var(--border2);border-radius:8px;padding:8px 12px;color:var(--text);font-size:.85rem;width:140px}}
+.logs-container{{background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:12px;font-family:monospace;font-size:.75rem;max-height:400px;overflow-y:auto;white-space:pre-wrap;word-break:break-all;color:var(--muted);line-height:1.5}}
+.log-line{{padding:2px 0}}
+.log-line.error{{color:var(--red)}}
+.log-line.warn{{color:var(--orange)}}
+.log-line.info{{color:var(--text)}}
+.modal-overlay{{position:fixed;inset:0;background:rgba(0,0,0,0.7);display:none;align-items:center;justify-content:center;z-index:1000}}
+.modal-overlay.show{{display:flex}}
+.modal{{background:var(--surface);border:1px solid var(--border2);border-radius:16px;padding:24px;width:90%;max-width:400px}}
+.modal-title{{font-family:'Syne',sans-serif;font-size:1.1rem;font-weight:700;margin-bottom:16px;color:var(--text)}}
+.modal-input{{width:100%;background:var(--surface2);border:1px solid var(--border2);border-radius:10px;padding:12px;color:var(--text);font-size:.9rem;margin-bottom:16px}}
+.modal-btns{{display:flex;gap:10px;justify-content:flex-end}}
+.modal-btn{{padding:10px 18px;border-radius:10px;border:none;font-size:.85rem;font-weight:600;cursor:pointer;transition:all .2s}}
+.modal-btn.primary{{background:var(--accent);color:#fff}}
+.modal-btn.primary:hover{{background:var(--accent2)}}
+.modal-btn.secondary{{background:transparent;border:1px solid var(--border2);color:var(--muted)}}
+.modal-btn.secondary:hover{{border-color:var(--muted)}}
 </style>
 </head>
 <body>
@@ -316,8 +545,9 @@ body::after{{
 
   <div class="tab-bar">
     <button class="tab-btn active" onclick="switchTab('main',this)">🏠 Главная</button>
-    <button class="tab-btn" onclick="switchTab('users',this)">👥 Устройства</button>
-    <button class="tab-btn" onclick="switchTab('info',this)">📊 Инфо</button>
+    <button class="tab-btn" onclick="switchTab('modules',this)">📦 Модули</button>
+    <button class="tab-btn" onclick="switchTab('settings',this)">⚙️ Настройки</button>
+    <button class="tab-btn" onclick="switchTab('logs',this)">📜 Логи</button>
   </div>
 
   <div class="panel-area">
@@ -363,21 +593,44 @@ body::after{{
       </div>
     </div>
 
-    <div class="panel" id="panel-info">
-      <div class="sec-title">Ресурсы системы</div>
-      <div class="stat-list">
-        <div class="stat-item">
-          <div class="stat-head"><span class="stat-name">CPU</span><span class="stat-val" id="cpu-val">—</span></div>
-          <div class="bar-track"><div class="bar-fill" id="cpu-bar" style="width:0%"></div></div>
+    <div class="panel" id="panel-modules">
+      <div class="modules-header">
+        <div class="sec-title" style="margin-bottom:0">Модули</div>
+        <button class="add-btn" onclick="showLoadModule()">＋ Загрузить</button>
+      </div>
+      <div id="modules-list">
+        <div class="loading-msg"><span class="spinner"></span>Загружаю...</div>
+      </div>
+    </div>
+
+    <div class="panel" id="panel-settings">
+      <div class="sec-title">Основные настройки</div>
+      <div class="settings-list">
+        <div class="setting-row">
+          <span class="row-key">Префикс команд</span>
+          <input type="text" class="setting-input" id="set-prefix" value="." onchange="saveSetting('prefix',this.value)">
         </div>
-        <div class="stat-item">
-          <div class="stat-head"><span class="stat-name">RAM</span><span class="stat-val" id="ram-val">—</span></div>
-          <div class="bar-track"><div class="bar-fill" id="ram-bar" style="width:0%"></div></div>
+        <div class="setting-row">
+          <span class="row-key">Язык</span>
+          <select class="setting-select" id="set-lang" onchange="saveSetting('lang',this.value)">
+            <option value="ru">Русский</option>
+            <option value="en">English</option>
+          </select>
         </div>
-        <div class="stat-item">
-          <div class="stat-head"><span class="stat-name">Диск</span><span class="stat-val" id="disk-val">—</span></div>
-          <div class="bar-track"><div class="bar-fill" id="disk-bar" style="width:0%"></div></div>
+        <div class="setting-row">
+          <span class="row-key">Автоудаление сообщений (сек)</span>
+          <input type="number" class="setting-input" id="set-autodel" value="0" min="0" onchange="saveSetting('autodel',this.value)">
         </div>
+      </div>
+    </div>
+
+    <div class="panel" id="panel-logs">
+      <div class="logs-header">
+        <div class="sec-title" style="margin-bottom:0">Логи</div>
+        <button class="add-btn" onclick="loadLogs()">🔄 Обновить</button>
+      </div>
+      <div class="logs-container" id="logs-container">
+        <div class="loading-msg"><span class="spinner"></span>Загружаю...</div>
       </div>
     </div>
 
@@ -385,31 +638,38 @@ body::after{{
 </div>
 
 <div class="toast" id="toast">
-  <span>🚧</span>
-  <span>Ожидается в дальнейших обновлениях</span>
+  <span>✓</span>
+  <span id="toast-msg">Сохранено</span>
+</div>
+
+<div class="modal-overlay" id="load-modal">
+  <div class="modal">
+    <div class="modal-title">Загрузить модуль</div>
+    <input type="text" class="modal-input" id="module-url" placeholder="URL модуля (.py)">
+    <div class="modal-btns">
+      <button class="modal-btn secondary" onclick="closeModal()">Отмена</button>
+      <button class="modal-btn primary" onclick="loadModule()">Загрузить</button>
+    </div>
+  </div>
 </div>
 
 <script>
-let usersLoaded = false, toastTimer = null;
+let toastTimer = null;
 
 function switchTab(name, btn) {{
   document.querySelectorAll('.tab-btn').forEach(t => t.classList.remove('active'));
   document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
   btn.classList.add('active');
   document.getElementById('panel-' + name).classList.add('active');
-  if (name === 'users' && !usersLoaded) loadUsers();
+  if (name === 'modules' && !modulesLoaded) loadModules();
+  if (name === 'settings' && !settingsLoaded) loadSettings();
+  if (name === 'logs' && !logsLoaded) loadLogs();
 }}
 function setText(id, v) {{ const el = document.getElementById(id); if (el) el.textContent = v; }}
 function setBar(id, pct) {{
   const el = document.getElementById(id); if (!el) return;
   el.style.width = pct + '%';
   el.className = 'bar-fill' + (pct >= 90 ? ' crit' : pct >= 70 ? ' warn' : '');
-}}
-function showComingSoon() {{
-  const t = document.getElementById('toast');
-  t.classList.add('show');
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => t.classList.remove('show'), 3000);
 }}
 function escHtml(s) {{
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
@@ -427,34 +687,133 @@ async function fetchStatus() {{
     setText('last-upd', 'обновлено ' + now.toLocaleTimeString('ru',{{hour:'2-digit',minute:'2-digit',second:'2-digit'}}));
   }} catch(e) {{}}
 }}
-async function loadUsers() {{
-  const list = document.getElementById('users-list');
+fetchStatus();
+setInterval(fetchStatus, 5000);
+
+let modulesLoaded = false, settingsLoaded = false, logsLoaded = false;
+
+async function loadModules() {{
+  const list = document.getElementById('modules-list');
   try {{
-    const r = await fetch('/api/users'); const d = await r.json();
-    usersLoaded = true;
-    if (!d.ok || !d.users || !d.users.length) {{
-      list.innerHTML = '<div class="empty-state"><div class="empty-icon">👤</div><div class="empty-text">Нет подключённых аккаунтов</div></div>';
+    const r = await fetch('/api/modules'); const d = await r.json();
+    modulesLoaded = true;
+    if (!d.ok || !d.modules || !d.modules.length) {{
+      list.innerHTML = '<div class="empty-state"><div class="empty-icon">📦</div><div class="empty-text">Нет модулей</div></div>';
       return;
     }}
-    list.innerHTML = d.users.map(u => `
-      <div class="user-card">
-        <div class="user-avatar">🦊</div>
-        <div class="user-info">
-          <div class="user-name">${{escHtml(u.name)}}</div>
-          <div class="user-meta">
-            ${{u.username ? '<span>' + escHtml(u.username) + '</span>' : ''}}
-            <span class="tag tag-owner">👑 Владелец</span>
-            <span class="tag tag-active">● Активен</span>
+    list.innerHTML = d.modules.map(m => `
+      <div class="module-card">
+        <div class="module-icon">${{m.icon || '📦'}}</div>
+        <div class="module-info">
+          <div class="module-name">${{escHtml(m.name)}}${{m.is_builtin ? '<span class="tag tag-owner" style="margin-left:6px">Встроен</span>' : ''}}</div>
+          <div class="module-meta">
+            <span>v${{m.version}}</span>
+            ${{m.author ? '<span>by ' + escHtml(m.author) + '</span>' : ''}}
+            ${{m.has_config ? '<span>⚙️ Настройки</span>' : ''}}
           </div>
         </div>
+        ${{!m.is_builtin ? `
+        <div class="module-actions">
+          <button class="module-btn" onclick="reloadModule('${{m.name}}')">🔄</button>
+          <button class="module-btn danger" onclick="unloadModule('${{m.name}}')">✕</button>
+        </div>
+        ` : ''}}
       </div>
     `).join('');
   }} catch(e) {{
     list.innerHTML = '<div class="empty-state"><div class="empty-icon">⚠️</div><div class="empty-text">Ошибка загрузки</div></div>';
   }}
 }}
-fetchStatus();
-setInterval(fetchStatus, 5000);
+
+async function unloadModule(name) {{
+  if (!confirm('Выгрузить модуль ' + name + '?')) return;
+  try {{
+    const r = await fetch('/api/modules/action/' + name + '?action=unload', {{method: 'POST'}});
+    const d = await r.json();
+    if (d.ok) {{ showToast('Модуль выгружен'); loadModules(); }}
+    else {{ showToast('Ошибка: ' + d.error); }}
+  }} catch(e) {{ showToast('Ошибка'); }}
+}}
+
+async function reloadModule(name) {{
+  try {{
+    const r = await fetch('/api/modules/action/' + name + '?action=reload', {{method: 'POST'}});
+    const d = await r.json();
+    if (d.ok) {{ showToast('Модуль перезагружен'); loadModules(); }}
+    else {{ showToast('Ошибка: ' + d.error); }}
+  }} catch(e) {{ showToast('Ошибка'); }}
+}}
+
+function showLoadModule() {{ document.getElementById('load-modal').classList.add('show'); }}
+function closeModal() {{ document.getElementById('load-modal').classList.remove('show'); }}
+
+async function loadModule() {{
+  const url = document.getElementById('module-url').value;
+  if (!url) return;
+  try {{
+    const r = await fetch('/api/modules/load', {{
+      method: 'POST',
+      headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{url: url}})
+    }});
+    const d = await r.json();
+    if (d.ok) {{ showToast('Модуль загружен: ' + d.module); closeModal(); loadModules(); }}
+    else {{ showToast('Ошибка: ' + d.error); }}
+  }} catch(e) {{ showToast('Ошибка'); }}
+}}
+
+async function loadSettings() {{
+  try {{
+    const r = await fetch('/api/settings'); const d = await r.json();
+    settingsLoaded = true;
+    if (d.ok && d.settings) {{
+      document.getElementById('set-prefix').value = d.settings.prefix || '.';
+      document.getElementById('set-lang').value = d.settings.lang || 'ru';
+      document.getElementById('set-autodel').value = d.settings.autodel || 0;
+    }}
+  }} catch(e) {{}}
+}}
+
+async function saveSetting(key, value) {{
+  try {{
+    const r = await fetch('/api/settings', {{
+      method: 'POST',
+      headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{[key]: value}})
+    }});
+    const d = await r.json();
+    showToast(d.ok ? 'Сохранено' : 'Ошибка');
+  }} catch(e) {{ showToast('Ошибка'); }}
+}}
+
+async function loadLogs() {{
+  const container = document.getElementById('logs-container');
+  try {{
+    const r = await fetch('/api/logs'); const d = await r.json();
+    logsLoaded = true;
+    if (!d.ok || !d.logs || !d.logs.length) {{
+      container.innerHTML = '<div class="empty-state"><div class="empty-icon">📜</div><div class="empty-text">Логов нет</div></div>';
+      return;
+    }}
+    container.innerHTML = d.logs.map(line => {{
+      let cls = 'log-line';
+      if (line.toLowerCase().includes('error')) cls += ' error';
+      else if (line.toLowerCase().includes('warn')) cls += ' warn';
+      else if (line.toLowerCase().includes('info')) cls += ' info';
+      return '<div class="' + cls + '">' + escHtml(line) + '</div>';
+    }}).join('');
+  }} catch(e) {{
+    container.innerHTML = '<div class="empty-state"><div class="empty-icon">⚠️</div><div class="empty-text">Ошибка загрузки</div></div>';
+  }}
+}}
+
+function showToast(msg) {{
+  const t = document.getElementById('toast');
+  document.getElementById('toast-msg').textContent = msg;
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 3000);
+}}
 </script>
 </body>
 </html>"""
