@@ -534,6 +534,7 @@ body::after{{
 .filter-btn:hover{{border-color:var(--accent);color:var(--accent2)}}
 .filter-btn.active{{background:var(--accent);border-color:var(--accent);color:#fff}}
 .modules-grid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:16px}}
+.modules-grid-phone{{display:none}}
 .modules-count{{font-size:.75rem;color:var(--muted);padding:4px 10px;background:var(--surface2);border-radius:6px;margin-left:8px}}
 .modules-pagination{{display:flex;justify-content:center;gap:8px;margin-top:20px;flex-wrap:wrap}}
 .page-btn{{padding:8px 14px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;font-size:.8rem;transition:all .2s}}
@@ -630,6 +631,9 @@ body::after{{
         <button class="filter-btn" onclick="filterModules('user',this)">Пользовательские</button>
       </div>
       <div class="modules-grid" id="modules-list">
+        <div class="loading-msg"><span class="spinner"></span>Загружаю...</div>
+      </div>
+      <div class="modules-grid-phone" id="modules-list-phone">
         <div class="loading-msg"><span class="spinner"></span>Загружаю...</div>
       </div>
       <div class="modules-pagination" id="modules-pagination"></div>
@@ -751,24 +755,28 @@ function filterModules(type, btn) {{
 }}
 
 function renderModules() {{
+  const isPhone = window.innerWidth <= 500;
   const list = document.getElementById('modules-list');
+  const listPhone = document.getElementById('modules-list-phone');
   let filtered = allModules;
   if (modulesFilter === 'builtin') filtered = allModules.filter(m => m.is_builtin);
   else if (modulesFilter === 'user') filtered = allModules.filter(m => !m.is_builtin);
   
   document.getElementById('modules-total').textContent = filtered.length;
   
-  const totalPages = Math.ceil(filtered.length / modulesPerPage);
-  const start = (modulesPage - 1) * modulesPerPage;
-  const pageModules = filtered.slice(start, start + modulesPerPage);
+  const perPage = isPhone ? 4 : modulesPerPage;
+  const totalPages = Math.ceil(filtered.length / perPage);
+  const start = (modulesPage - 1) * perPage;
+  const pageModules = filtered.slice(start, start + perPage);
   
   if (!pageModules.length) {{
     list.innerHTML = '<div class="empty-state"><div class="empty-icon">📦</div><div class="empty-text">Нет модулей</div></div>';
+    listPhone.innerHTML = list.innerHTML;
     document.getElementById('modules-pagination').innerHTML = '';
     return;
   }}
   
-  list.innerHTML = pageModules.map(m => `
+  const html = pageModules.map(m => `
     <div class="module-card-full">
       <div class="module-card-header">
         <div class="module-card-icon">${{m.icon || '📦'}}</div>
@@ -792,6 +800,9 @@ function renderModules() {{
       </div>
     </div>
   `).join('');
+  
+  list.innerHTML = html;
+  listPhone.innerHTML = html;
   
   if (totalPages > 1) {{
     let pages = '';
