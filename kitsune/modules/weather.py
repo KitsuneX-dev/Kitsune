@@ -6,7 +6,7 @@ import typing
 
 from ..core.loader import KitsuneModule, command, ConfigValue, ModuleConfig
 from ..core.security import OWNER
-from ..utils import escape_html, auto_delete
+from ..utils import escape_html
 from ..validators import String, Choice
 
 logger = logging.getLogger(__name__)
@@ -166,7 +166,6 @@ class WeatherModule(KitsuneModule):
         unit = self.config["units"] if self.config else "C"
         text = _parse_weather(data, unit)
         await event.edit(text, parse_mode="html", link_preview=False)
-        await auto_delete(event)
 
     async def _fetch_weather(self, city: str) -> dict:
         import aiohttp

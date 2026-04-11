@@ -54,12 +54,25 @@ _logger = _logging.getLogger(__name__)
 IS_TERMUX = is_termux()
 IS_DOCKER = is_docker()
 
-async def auto_delete(message, delay: float = 5.0) -> None:
+async def auto_delete(message, delay: float | None = None) -> None:
+    """
+    Удаляет сообщение через delay секунд.
+    Если delay не передан — читает настройку auto_delete_delay из БД.
+    Если задержка = 0 (по умолчанию) — ничего не удаляет.
+    """
+    import contextlib as _ctx
+    if delay is None:
+        try:
+            client = getattr(message, 'client', None)
+            db = getattr(client, '_kitsune_db', None)
+            delay = float(db.get('kitsune.core', 'auto_delete_delay', 0)) if db else 0.0
+        except Exception:
+            delay = 0.0
+    if not delay:
+        return
     await _asyncio.sleep(delay)
-    try:
+    with _ctx.suppress(Exception):
         await message.delete()
-    except Exception:
-        pass
 
 class ProgressMessage:
 
