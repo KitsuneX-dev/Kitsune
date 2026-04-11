@@ -5,7 +5,6 @@ import time
 
 from ..core.loader import KitsuneModule, command
 from ..core.security import OWNER
-from ..utils import auto_delete
 
 def _fmt_uptime(seconds: float) -> str:
     seconds = int(seconds)
@@ -78,7 +77,6 @@ class PingModule(KitsuneModule):
             ),
             parse_mode="html",
         )
-        await auto_delete(msg)
 
     @command("me", required=OWNER)
     async def me_cmd(self, event) -> None:
