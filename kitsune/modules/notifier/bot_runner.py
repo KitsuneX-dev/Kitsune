@@ -237,7 +237,7 @@ class BotRunner:
         await call.answer()
 
         from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-        from kitsune.modules.config import _get_configurable, _mod_text, _list_text
+        from ..config import _get_configurable, _mod_text, _list_text
 
         data = call.data
 
@@ -348,7 +348,7 @@ class BotRunner:
         mod_name, key, value = pending["mod"], pending["key"], msg.text or ""
 
         from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-        from kitsune.modules.config import _get_configurable
+        from ..config import _get_configurable
         configurable = _get_configurable(self._client)
         mod = configurable.get(mod_name)
         if not mod or key not in mod.config:
