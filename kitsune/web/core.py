@@ -533,7 +533,9 @@ body::after{{
 .filter-btn{{padding:8px 14px;border-radius:10px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;font-size:.78rem;transition:all .2s}}
 .filter-btn:hover{{border-color:var(--accent);color:var(--accent2)}}
 .filter-btn.active{{background:var(--accent);border-color:var(--accent);color:#fff}}
-.modules-grid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:16px}}
+.modules-grid{{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}}
+@media (max-width:768px){{.modules-grid{{grid-template-columns:repeat(2,1fr);gap:12px}}}}
+.modules-count{{font-size:.75rem;color:var(--muted);padding:4px 10px;background:var(--surface2);border-radius:6px;margin-left:8px}}
 .modules-pagination{{display:flex;justify-content:center;gap:8px;margin-top:20px;flex-wrap:wrap}}
 .page-btn{{padding:8px 14px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;font-size:.8rem;transition:all .2s}}
 .page-btn:hover{{border-color:var(--accent);color:var(--accent2)}}
@@ -723,7 +725,14 @@ setInterval(fetchStatus, 5000);
 
 let modulesLoaded = false, settingsLoaded = false, logsLoaded = false;
 
-let allModules = [], modulesPage = 1, modulesPerPage = 9, modulesFilter = 'all';
+let allModules = [], modulesPage = 1, modulesPerPage = 12, modulesFilter = 'all';
+
+function getModulesPerPage() {{
+  const w = window.innerWidth;
+  if (w <= 500) return 4;
+  if (w <= 768) return 6;
+  return 12;
+}}
 
 async function loadModules() {{
   const list = document.getElementById('modules-list');
@@ -757,9 +766,10 @@ function renderModules() {{
   
   document.getElementById('modules-total').textContent = filtered.length;
   
-  const totalPages = Math.ceil(filtered.length / modulesPerPage);
-  const start = (modulesPage - 1) * modulesPerPage;
-  const pageModules = filtered.slice(start, start + modulesPerPage);
+  const perPage = getModulesPerPage();
+  const totalPages = Math.ceil(filtered.length / perPage);
+  const start = (modulesPage - 1) * perPage;
+  const pageModules = filtered.slice(start, start + perPage);
   
   if (!pageModules.length) {{
     list.innerHTML = '<div class="empty-state"><div class="empty-icon">📦</div><div class="empty-text">Нет модулей</div></div>';
