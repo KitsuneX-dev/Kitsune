@@ -155,7 +155,7 @@ class CommandDispatcher:
         self._limiter.start_cleanup()
 
     async def _on_out_message(self, event: events.NewMessage.Event) -> None:
-        await self._handle_message(event, is_own=True)
+        await self._handle_message(event, is_own=True, is_co_owner=False)
 
     async def _on_in_message(self, event: events.NewMessage.Event) -> None:
         message = event.message
@@ -169,9 +169,10 @@ class CommandDispatcher:
         co_owners  = self._db.get("kitsune.security", "co_owners", [])
         if sender_id not in sudo_users and sender_id not in co_owners:
             return
-        await self._handle_message(event, is_own=False)
+        is_co_owner = sender_id in co_owners
+        await self._handle_message(event, is_own=False, is_co_owner=is_co_owner)
 
-    async def _handle_message(self, event: events.NewMessage.Event, *, is_own: bool) -> None:
+    async def _handle_message(self, event: events.NewMessage.Event, *, is_own: bool, is_co_owner: bool = False) -> None:
         message = event.message
         if not message or not message.text:
             return
@@ -203,7 +204,35 @@ class CommandDispatcher:
 
             handler, required = entry
 
-            if not is_own and required >= OWNER:
+            # Co-owner выполняет команду от лица основного аккаунта:
+            # удаляем его сообщение и отправляем фейковое от основного клиента,
+            # чтобы все event.edit / event.reply шли от нас.
+            if is_co_owner:
+                try:
+                    # Отправляем команду от своего лица в тот же чат
+                    sent = await self._client.send_message(
+                        message.chat_id,
+                        text,
+                        reply_to=message.reply_to_msg_id,
+                    )
+                    # Удаляем оригинальное сообщение co-owner
+                    try:
+                        await message.delete()
+                    except Exception:
+                        pass
+                    # Создаём event на основе нашего сообщения
+                    new_event = events.NewMessage.Event(sent)
+                    new_event._client = self._client
+                    event = new_event
+                    message = sent
+                    is_own = True
+                    is_co_owner = False
+                except Exception:
+                    logger.exception("Dispatcher: failed to proxy co_owner message for .%s", cmd_name)
+                    return
+
+            # Sudo-пользователи (не co-owner) не могут выполнять OWNER-команды
+            if not is_own and not is_co_owner and required >= OWNER:
                 return
 
             sender_id = message.sender_id or 0
