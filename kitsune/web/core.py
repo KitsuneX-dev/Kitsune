@@ -529,6 +529,26 @@ body::after{{
 .modal-btn.primary:hover{{background:var(--accent2)}}
 .modal-btn.secondary{{background:transparent;border:1px solid var(--border2);color:var(--muted)}}
 .modal-btn.secondary:hover{{border-color:var(--muted)}}
+.modules-filter{{display:flex;gap:8px;margin-bottom:16px}}
+.filter-btn{{padding:8px 14px;border-radius:10px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;font-size:.78rem;transition:all .2s}}
+.filter-btn:hover{{border-color:var(--accent);color:var(--accent2)}}
+.filter-btn.active{{background:var(--accent);border-color:var(--accent);color:#fff}}
+.modules-grid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px}}
+.modules-pagination{{display:flex;justify-content:center;gap:8px;margin-top:16px}}
+.page-btn{{padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;font-size:.78rem;transition:all .2s}}
+.page-btn:hover{{border-color:var(--accent);color:var(--accent2)}}
+.page-btn.active{{background:var(--accent);border-color:var(--accent);color:#fff}}
+.page-btn:disabled{{opacity:0.4;cursor:not-allowed}}
+.module-card-full{{background:var(--surface2);border:1px solid var(--border);border-radius:16px;padding:16px;display:flex;flex-direction:column;gap:12px;transition:border-color .2s,transform .15s}}
+.module-card-full:hover{{border-color:rgba(124,77,255,0.4);transform:translateY(-2px)}}
+.module-card-header{{display:flex;align-items:center;gap:12px}}
+.module-card-icon{{width:44px;height:44px;border-radius:14px;background:linear-gradient(135deg,#6030e0,#9060ff);display:flex;align-items:center;justify-content:center;font-size:1.4rem;box-shadow:0 0 16px rgba(124,77,255,0.2)}}
+.module-card-info{{flex:1;min-width:0}}
+.module-card-name{{font-size:.95rem;font-weight:600;color:var(--text)}}
+.module-card-meta{{font-size:.72rem;color:var(--muted);margin-top:2px;display:flex;gap:8px;flex-wrap:wrap}}
+.module-card-desc{{font-size:.8rem;color:var(--muted);line-height:1.4}}
+.module-card-footer{{display:flex;justify-content:space-between;align-items:center;margin-top:auto;padding-top:12px;border-top:1px solid var(--border)}}
+.module-card-actions{{display:flex;gap:6px}}
 </style>
 </head>
 <body>
@@ -598,9 +618,15 @@ body::after{{
         <div class="sec-title" style="margin-bottom:0">Модули</div>
         <button class="add-btn" onclick="showLoadModule()">＋ Загрузить</button>
       </div>
-      <div id="modules-list">
+      <div class="modules-filter">
+        <button class="filter-btn active" onclick="filterModules('all',this)">Все</button>
+        <button class="filter-btn" onclick="filterModules('builtin',this)">Системные</button>
+        <button class="filter-btn" onclick="filterModules('user',this)">Пользовательские</button>
+      </div>
+      <div class="modules-grid" id="modules-list">
         <div class="loading-msg"><span class="spinner"></span>Загружаю...</div>
       </div>
+      <div class="modules-pagination" id="modules-pagination"></div>
     </div>
 
     <div class="panel" id="panel-settings">
@@ -692,6 +718,8 @@ setInterval(fetchStatus, 5000);
 
 let modulesLoaded = false, settingsLoaded = false, logsLoaded = false;
 
+let allModules = [], modulesPage = 1, modulesPerPage = 9, modulesFilter = 'all';
+
 async function loadModules() {{
   const list = document.getElementById('modules-list');
   try {{
@@ -701,28 +729,76 @@ async function loadModules() {{
       list.innerHTML = '<div class="empty-state"><div class="empty-icon">📦</div><div class="empty-text">Нет модулей</div></div>';
       return;
     }}
-    list.innerHTML = d.modules.map(m => `
-      <div class="module-card">
-        <div class="module-icon">${{m.icon || '📦'}}</div>
-        <div class="module-info">
-          <div class="module-name">${{escHtml(m.name)}}${{m.is_builtin ? '<span class="tag tag-owner" style="margin-left:6px">Встроен</span>' : ''}}</div>
-          <div class="module-meta">
-            <span>v${{m.version}}</span>
-            ${{m.author ? '<span>by ' + escHtml(m.author) + '</span>' : ''}}
-            ${{m.has_config ? '<span>⚙️ Настройки</span>' : ''}}
-          </div>
-        </div>
-        ${{!m.is_builtin ? `
-        <div class="module-actions">
-          <button class="module-btn" onclick="reloadModule('${{m.name}}')">🔄</button>
-          <button class="module-btn danger" onclick="unloadModule('${{m.name}}')">✕</button>
-        </div>
-        ` : ''}}
-      </div>
-    `).join('');
+    allModules = d.modules;
+    renderModules();
   }} catch(e) {{
     list.innerHTML = '<div class="empty-state"><div class="empty-icon">⚠️</div><div class="empty-text">Ошибка загрузки</div></div>';
   }}
+}}
+
+function filterModules(type, btn) {{
+  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  modulesFilter = type;
+  modulesPage = 1;
+  renderModules();
+}}
+
+function renderModules() {{
+  const list = document.getElementById('modules-list');
+  let filtered = allModules;
+  if (modulesFilter === 'builtin') filtered = allModules.filter(m => m.is_builtin);
+  else if (modulesFilter === 'user') filtered = allModules.filter(m => !m.is_builtin);
+  
+  const totalPages = Math.ceil(filtered.length / modulesPerPage);
+  const start = (modulesPage - 1) * modulesPerPage;
+  const pageModules = filtered.slice(start, start + modulesPerPage);
+  
+  if (!pageModules.length) {{
+    list.innerHTML = '<div class="empty-state"><div class="empty-icon">📦</div><div class="empty-text">Нет модулей</div></div>';
+    document.getElementById('modules-pagination').innerHTML = '';
+    return;
+  }}
+  
+  list.innerHTML = pageModules.map(m => `
+    <div class="module-card-full">
+      <div class="module-card-header">
+        <div class="module-card-icon">${{m.icon || '📦'}}</div>
+        <div class="module-card-info">
+          <div class="module-card-name">${{escHtml(m.name)}}${{m.is_builtin ? '<span class="tag tag-owner" style="margin-left:6px">Системный</span>' : ''}}</div>
+          <div class="module-card-meta">
+            <span>v${{m.version}}</span>
+            ${{m.author ? '<span>' + escHtml(m.author) + '</span>' : ''}}
+          </div>
+        </div>
+      </div>
+      ${{m.description ? '<div class="module-card-desc">' + escHtml(m.description) + '</div>' : ''}}
+      <div class="module-card-footer">
+        <span style="font-size:.72rem;color:var(--muted)">${{m.has_config ? '⚙️ Настройки' : ''}}</span>
+        ${{!m.is_builtin ? `
+        <div class="module-card-actions">
+          <button class="module-btn" onclick="reloadModule('${{m.name}}')">🔄 Перезагрузить</button>
+          <button class="module-btn danger" onclick="unloadModule('${{m.name}}')">✕ Выгрузить</button>
+        </div>
+        ` : ''}}
+      </div>
+    </div>
+  `).join('');
+  
+  if (totalPages > 1) {{
+    let pages = '';
+    for (let i = 1; i <= totalPages; i++) {{
+      pages += '<button class="page-btn' + (i === modulesPage ? ' active' : '') + '" onclick="goToPage(' + i + ')">' + i + '</button>';
+    }}
+    document.getElementById('modules-pagination').innerHTML = pages;
+  }} else {{
+    document.getElementById('modules-pagination').innerHTML = '';
+  }}
+}}
+
+function goToPage(page) {{
+  modulesPage = page;
+  renderModules();
 }}
 
 async function unloadModule(name) {{
