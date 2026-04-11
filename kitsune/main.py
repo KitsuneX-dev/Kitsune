@@ -302,13 +302,10 @@ async def _startup(args: argparse.Namespace) -> None:
     client.tg_me = me
     logger.info("main: logged in as %s (id=%d)", me.first_name, me.id)
 
+    hydro = None
     if not args.no_hydrogram:
         hydro = await _start_hydrogram(api_id, api_hash, str(session_path))
         client.hydrogram = hydro
-        if hydro:
-            from .core.hydro_bridge import setup_hydrogram_bridge
-            await setup_hydrogram_bridge(hydro, client, dispatcher, db)
-            logger.info("main: HydrogramBridge active — single dispatcher for both clients")
 
     db = DatabaseManager(client)
     await db.init()
@@ -322,6 +319,11 @@ async def _startup(args: argparse.Namespace) -> None:
         prefix = db_prefix
     dispatcher = CommandDispatcher(client, db, security, prefix=prefix)
     dispatcher.set_owner(me.id)
+
+    if hydro:
+        from .core.hydro_bridge import setup_hydrogram_bridge
+        await setup_hydrogram_bridge(hydro, client, dispatcher, db)
+        logger.info("main: HydrogramBridge active — single dispatcher for both clients")
 
     client._kitsune_dispatcher = dispatcher
     loader = Loader(client, db, dispatcher)
