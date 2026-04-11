@@ -309,8 +309,14 @@ class Loader:
             p for p in sorted(_BUILTIN_MODULES_DIR.glob("*.py"))
             if not p.name.startswith("_")
         ]
+        # Пакеты-папки с __init__.py (например notifier/)
+        pkg_paths = [
+            p / "__init__.py"
+            for p in sorted(_BUILTIN_MODULES_DIR.iterdir())
+            if p.is_dir() and not p.name.startswith("_") and (p / "__init__.py").exists()
+        ]
         # Параллельная загрузка независимых модулей — быстрее при старте
-        await asyncio.gather(*[self._load_one_builtin(p) for p in paths])
+        await asyncio.gather(*[self._load_one_builtin(p) for p in paths + pkg_paths])
 
     async def load_all_user(self) -> None:
         user_dir = Path.home() / ".kitsune" / "modules"
@@ -388,19 +394,31 @@ class Loader:
         raise ModuleLoadError(f"Cannot reload {name!r}: source unknown")
 
     async def _load_from_path(self, path: Path, *, is_builtin: bool) -> KitsuneModule:
+        # Поддержка пакетов: если path = .../notifier/__init__.py,
+        # то module_name = kitsune.modules.notifier
+        is_pkg = path.name == "__init__.py"
+        if is_pkg:
+            module_name = f"kitsune.modules.{path.parent.name}"
+        else:
+            module_name = f"kitsune.modules.{path.stem}"
+
         source = path.read_text(encoding="utf-8")
 
         if not is_builtin:
             _scan_ast(source, filename=str(path))
 
-        module_name = f"kitsune.modules.{path.stem}"
-
-        spec = importlib.util.spec_from_file_location(module_name, path)
+        spec = importlib.util.spec_from_file_location(
+            module_name, path,
+            submodule_search_locations=[str(path.parent)] if is_pkg else None,
+        )
         if spec is None or spec.loader is None:
             raise ModuleLoadError(f"Cannot create module spec for {path}")
 
         py_module = importlib.util.module_from_spec(spec)
         py_module.__loader__ = spec.loader
+        if is_pkg:
+            py_module.__path__ = [str(path.parent)]
+            py_module.__package__ = module_name
         sys.modules[module_name] = py_module
 
         try:
