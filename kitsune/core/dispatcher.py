@@ -108,6 +108,52 @@ def _check_tag(tag: str, func: typing.Callable, m: Message) -> bool:
 def _should_skip_watcher(func: typing.Callable, message: Message) -> bool:
     return any(_check_tag(tag, func, message) for tag in ALL_TAGS)
 
+
+class _CoOwnerMessageProxy:
+    """
+    Прокси над сообщением co-owner.
+    edit() / respond() / reply() — отправляют новое сообщение от основного клиента,
+    потому что редактировать чужое сообщение невозможно.
+    Все остальные атрибуты проксируются к оригинальному message.
+    """
+
+    def __init__(self, message: typing.Any, client: typing.Any) -> None:
+        object.__setattr__(self, "_msg", message)
+        object.__setattr__(self, "_client", client)
+
+    def __getattr__(self, name: str) -> typing.Any:
+        return getattr(object.__getattribute__(self, "_msg"), name)
+
+    def __setattr__(self, name: str, value: typing.Any) -> None:
+        if name in ("_msg", "_client"):
+            object.__setattr__(self, name, value)
+        else:
+            setattr(object.__getattribute__(self, "_msg"), name, value)
+
+    async def edit(self, text: str, **kwargs) -> typing.Any:
+        client = object.__getattribute__(self, "_client")
+        msg    = object.__getattribute__(self, "_msg")
+        return await client.send_message(msg.chat_id, text, **kwargs)
+
+    async def respond(self, text: str, **kwargs) -> typing.Any:
+        client = object.__getattribute__(self, "_client")
+        msg    = object.__getattribute__(self, "_msg")
+        return await client.send_message(msg.chat_id, text, **kwargs)
+
+    async def reply(self, text: str, **kwargs) -> typing.Any:
+        client = object.__getattribute__(self, "_client")
+        msg    = object.__getattribute__(self, "_msg")
+        return await client.send_message(
+            msg.chat_id, text,
+            reply_to=msg.id,
+            **kwargs,
+        )
+
+    async def delete(self) -> None:
+        # Не удаляем сообщение co-owner — просто игнорируем
+        pass
+
+
 class CommandDispatcher:
 
     def __init__(
@@ -204,16 +250,14 @@ class CommandDispatcher:
 
             handler, required = entry
 
-            # Co-owner выполняет команду от лица основного аккаунта:
-            # подменяем sender_id и привязываем клиент — никаких новых сообщений.
+            # Co-owner выполняет команду от лица основного аккаунта.
+            # Редактировать его сообщение нельзя, поэтому оборачиваем message
+            # в прокси: edit()/respond() → send_message от нашего клиента.
             if is_co_owner:
-                # Патчим message так, чтобы он выглядел как исходящий от нас
                 message._sender_id = self._client.tg_id
-                message.out = True
-                # Привязываем основной клиент к message и event,
-                # чтобы edit/reply/respond шли от нашего аккаунта
                 message._client = self._client
                 event._client = self._client
+                event.message = _CoOwnerMessageProxy(message, self._client)
                 is_own = True
                 is_co_owner = False
 
