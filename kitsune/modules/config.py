@@ -411,7 +411,7 @@ class ConfigModule(KitsuneModule):
         except Exception:
             pass
 
-    @command("config", required=OWNER)
+    @command("config", required=OWNER, aliases=["cfg"])
     async def config_cmd(self, event) -> None:
         inline = self._inline()
         if not inline or not inline._bot:
