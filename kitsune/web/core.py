@@ -15,30 +15,29 @@ try:
 except ImportError:
     WEB_AVAILABLE = False
 
+
 class WebCore:
     def __init__(self, client: typing.Any, db: typing.Any) -> None:
-        self._client  = client
-        self._db      = db
+        self._client = client
+        self._db = db
         self._runner: typing.Any = None
-        self._site:   typing.Any = None
+        self._site: typing.Any = None
 
     async def start(self, host: str = "0.0.0.0", port: int = 8080) -> None:
         if not WEB_AVAILABLE:
             logger.warning("WebCore: aiohttp not available, web UI disabled")
             return
         app = aiohttp.web.Application()
-        app.router.add_get("/",                 self._handle_root)
-        app.router.add_get("/api/status",       self._handle_status)
-        app.router.add_get("/api/users",        self._handle_users)
-        app.router.add_post("/api/save_config", self._handle_save_config)
-        app.router.add_get("/api/modules",      self._handle_modules)
-        app.router.add_post("/api/modules/action/{name}", self._handle_module_action)
-        app.router.add_post("/api/modules/load", self._handle_module_load)
-        app.router.add_route("GET", "/api/modules/config/{name}", self._handle_module_config)
+        app.router.add_get("/",                              self._handle_root)
+        app.router.add_get("/api/status",                   self._handle_status)
+        app.router.add_get("/api/modules",                  self._handle_modules)
+        app.router.add_post("/api/modules/action/{name}",   self._handle_module_action)
+        app.router.add_post("/api/modules/load",            self._handle_module_load)
+        app.router.add_route("GET",  "/api/modules/config/{name}", self._handle_module_config)
         app.router.add_route("POST", "/api/modules/config/{name}", self._handle_module_config)
-        app.router.add_get("/api/settings",     self._handle_settings)
-        app.router.add_post("/api/settings",    self._handle_settings)
-        app.router.add_get("/api/logs",         self._handle_logs)
+        app.router.add_get("/api/settings",                 self._handle_settings)
+        app.router.add_post("/api/settings",                self._handle_settings)
+        app.router.add_get("/api/logs",                     self._handle_logs)
         self._runner = aiohttp.web.AppRunner(app)
         await self._runner.setup()
         self._site = aiohttp.web.TCPSite(self._runner, host, port)
@@ -52,36 +51,34 @@ class WebCore:
         if self._runner:
             await self._runner.cleanup()
 
+    def _json(self, data, status=200):
+        return aiohttp.web.Response(
+            text=json.dumps(data, ensure_ascii=False),
+            content_type="application/json", status=status,
+            headers={"Access-Control-Allow-Origin": "*"},
+        )
+
     async def _handle_root(self, request):
         from ..version import __version_str__
         me = self._client.tg_me
-        name     = me.first_name if me else "—"
-        uid      = me.id if me else "—"
-        username = f"@{me.username}" if me and getattr(me, "username", None) else ""
-        html = _build_html(name=name, uid=uid, username=username, version=__version_str__)
+        html = _build_html(
+            name=me.first_name if me else "—",
+            uid=me.id if me else "—",
+            username=f"@{me.username}" if me and getattr(me, "username", None) else "",
+            version=__version_str__,
+        )
         return aiohttp.web.Response(text=html, content_type="text/html")
 
     async def _handle_status(self, request):
-        import psutil, time
+        import time
         from ..version import __version_str__
-        mem  = psutil.virtual_memory()
-        disk = psutil.disk_usage("/")
         try:
-            cpu = psutil.cpu_percent(interval=0.2)
-        except PermissionError:
-            cpu = 0.0
-        loader    = getattr(self._client, "_kitsune_loader", None)
-        mod_count = len(loader.modules) if loader else 0
-        data = {
-            "ok": True, "version": __version_str__,
-            "timestamp": int(time.time()),
-            "account": {
-                "name":     self._client.tg_me.first_name if self._client.tg_me else "—",
-                "id":       self._client.tg_me.id if self._client.tg_me else 0,
-                "username": getattr(self._client.tg_me, "username", "") or "",
-            },
-            "modules": mod_count,
-            "system": {
+            import psutil
+            mem  = psutil.virtual_memory()
+            disk = psutil.disk_usage("/")
+            try: cpu = psutil.cpu_percent(interval=0.2)
+            except Exception: cpu = 0.0
+            system = {
                 "cpu_pct":       round(cpu, 1),
                 "ram_used_mb":   mem.used // 1024 // 1024,
                 "ram_total_mb":  mem.total // 1024 // 1024,
@@ -89,826 +86,494 @@ class WebCore:
                 "disk_used_gb":  round(disk.used / 1024 ** 3, 1),
                 "disk_total_gb": round(disk.total / 1024 ** 3, 1),
                 "disk_pct":      round(disk.percent, 1),
-            },
-        }
-        return aiohttp.web.Response(
-            text=json.dumps(data), content_type="application/json",
-            headers={"Access-Control-Allow-Origin": "*"},
-        )
-
-    async def _handle_users(self, request):
+            }
+        except ImportError:
+            system = {k: 0 for k in ("cpu_pct","ram_used_mb","ram_total_mb","ram_pct","disk_used_gb","disk_total_gb","disk_pct")}
+        loader = getattr(self._client, "_kitsune_loader", None)
         me = self._client.tg_me
-        users = []
-        if me:
-            username = f"@{me.username}" if getattr(me, "username", None) else ""
-            users.append({"name": me.first_name or "—", "username": username, "id": me.id, "owner": True})
-        return aiohttp.web.Response(
-            text=json.dumps({"ok": True, "users": users}),
-            content_type="application/json",
-            headers={"Access-Control-Allow-Origin": "*"},
-        )
-
-    async def _handle_save_config(self, request):
-        try:
-            body = await request.json()
-        except Exception:
-            return aiohttp.web.Response(status=400, text='{"ok":false,"error":"bad json"}')
-        from ..main import set_config_key
-        for k, v in body.items():
-            set_config_key(k, v)
-        return aiohttp.web.Response(text='{"ok":true}', content_type="application/json")
+        return self._json({
+            "ok": True, "version": __version_str__, "timestamp": int(time.time()),
+            "account": {"name": me.first_name if me else "—", "id": me.id if me else 0, "username": getattr(me, "username", "") or ""},
+            "modules": len(loader.modules) if loader else 0,
+            "system": system,
+        })
 
     async def _handle_modules(self, request):
         loader = getattr(self._client, "_kitsune_loader", None)
         if not loader:
-            return aiohttp.web.Response(
-                text='{"ok":false,"error":"loader not available"}',
-                content_type="application/json",
-            )
-        modules = []
-        for name, mod in loader.modules.items():
-            modules.append({
-                "name": mod.name,
-                "description": getattr(mod, "description", ""),
-                "author": getattr(mod, "author", ""),
-                "version": getattr(mod, "version", "1.0"),
-                "icon": getattr(mod, "icon", "📦"),
-                "category": getattr(mod, "category", "other"),
-                "is_builtin": getattr(mod, "_is_builtin", False),
-                "has_config": mod.config is not None and len(list(mod.config.keys())) > 0,
-                "config": dict(mod.config.items()) if mod.config else {},
-            })
-        return aiohttp.web.Response(
-            text=json.dumps({"ok": True, "modules": modules}),
-            content_type="application/json",
-            headers={"Access-Control-Allow-Origin": "*"},
-        )
+            return self._json({"ok": False, "error": "loader not available"})
+        modules = [{
+            "name": mod.name,
+            "description": getattr(mod, "description", ""),
+            "author": getattr(mod, "author", ""),
+            "version": getattr(mod, "version", "1.0"),
+            "icon": getattr(mod, "icon", "📦"),
+            "category": getattr(mod, "category", "other"),
+            "is_builtin": getattr(mod, "_is_builtin", False),
+            "has_config": mod.config is not None and len(list(mod.config.keys())) > 0,
+        } for mod in loader.modules.values()]
+        return self._json({"ok": True, "modules": modules})
 
     async def _handle_module_action(self, request):
         loader = getattr(self._client, "_kitsune_loader", None)
         if not loader:
-            return aiohttp.web.Response(
-                text='{"ok":false,"error":"loader not available"}',
-                content_type="application/json",
-            )
+            return self._json({"ok": False, "error": "loader not available"})
         name = request.match_info.get("name", "")
-        if not name:
-            return aiohttp.web.Response(
-                text='{"ok":false,"error":"module name required"}',
-                content_type="application/json",
-            )
         try:
-            if request.method == "POST":
-                action = request.query.get("action", "unload")
-                if action == "unload":
-                    result = await loader.unload_module(name)
-                    return aiohttp.web.Response(
-                        text=json.dumps({"ok": result, "action": "unloaded"}),
-                        content_type="application/json",
-                    )
-                elif action == "reload":
-                    mod = await loader.reload_module(name)
-                    return aiohttp.web.Response(
-                        text=json.dumps({"ok": True, "action": "reloaded", "module": mod.name}),
-                        content_type="application/json",
-                    )
-            return aiohttp.web.Response(
-                text='{"ok":false,"error":"unknown action"}',
-                content_type="application/json",
-            )
+            action = request.query.get("action", "unload")
+            if action == "unload":
+                result = await loader.unload_module(name)
+                return self._json({"ok": result, "action": "unloaded"})
+            elif action == "reload":
+                mod = await loader.reload_module(name)
+                return self._json({"ok": True, "action": "reloaded", "module": mod.name})
+            return self._json({"ok": False, "error": "unknown action"})
         except Exception as exc:
-            return aiohttp.web.Response(
-                text=json.dumps({"ok": False, "error": str(exc)}),
-                content_type="application/json",
-            )
+            return self._json({"ok": False, "error": str(exc)})
 
     async def _handle_module_load(self, request):
         loader = getattr(self._client, "_kitsune_loader", None)
         if not loader:
-            return aiohttp.web.Response(
-                text='{"ok":false,"error":"loader not available"}',
-                content_type="application/json",
-            )
+            return self._json({"ok": False, "error": "loader not available"})
         try:
             body = await request.json()
             url = body.get("url", "")
             if not url:
-                return aiohttp.web.Response(
-                    text='{"ok":false,"error":"url required"}',
-                    content_type="application/json",
-                )
+                return self._json({"ok": False, "error": "url required"})
             mod = await loader.load_from_url(url)
-            return aiohttp.web.Response(
-                text=json.dumps({"ok": True, "module": mod.name, "version": mod.version}),
-                content_type="application/json",
-            )
+            return self._json({"ok": True, "module": mod.name, "version": mod.version})
         except Exception as exc:
-            return aiohttp.web.Response(
-                text=json.dumps({"ok": False, "error": str(exc)}),
-                content_type="application/json",
-            )
+            return self._json({"ok": False, "error": str(exc)})
 
     async def _handle_module_config(self, request):
         loader = getattr(self._client, "_kitsune_loader", None)
         if not loader:
-            return aiohttp.web.Response(
-                text='{"ok":false,"error":"loader not available"}',
-                content_type="application/json",
-            )
+            return self._json({"ok": False, "error": "loader not available"})
         name = request.match_info.get("name", "")
         mod = loader.get_module(name)
         if not mod or not mod.config:
-            return aiohttp.web.Response(
-                text='{"ok":false,"error":"module or config not found"}',
-                content_type="application/json",
-            )
+            return self._json({"ok": False, "error": "module or config not found"})
         if request.method == "GET":
-            config_data = {}
-            for key in mod.config.keys():
-                config_data[key] = {
-                    "value": mod.config[key],
-                    "default": mod.config.get_default(key),
-                    "doc": mod.config.get_doc(key),
-                }
-            return aiohttp.web.Response(
-                text=json.dumps({"ok": True, "config": config_data}),
-                content_type="application/json",
-            )
+            return self._json({"ok": True, "config": {
+                k: {"value": mod.config[k], "default": mod.config.get_default(k), "doc": mod.config.get_doc(k)}
+                for k in mod.config.keys()
+            }})
         try:
             body = await request.json()
-            for key, value in body.items():
-                if key in mod.config:
-                    mod.config[key] = value
-            db_key = f"kitsune.config.{mod.name.lower()}"
-            for key in mod.config.keys():
-                self._db.set(db_key, key, mod.config[key])
-            return aiohttp.web.Response(
-                text='{"ok":true}',
-                content_type="application/json",
-            )
+            for k, v in body.items():
+                if k in mod.config: mod.config[k] = v
+            for k in mod.config.keys():
+                self._db.set(f"kitsune.config.{mod.name.lower()}", k, mod.config[k])
+            return self._json({"ok": True})
         except Exception as exc:
-            return aiohttp.web.Response(
-                text=json.dumps({"ok": False, "error": str(exc)}),
-                content_type="application/json",
-            )
+            return self._json({"ok": False, "error": str(exc)})
 
     async def _handle_settings(self, request):
         db = self._db
         if request.method == "GET":
-            settings = {
+            return self._json({"ok": True, "settings": {
                 "prefix": db.get("kitsune.core", "prefix", "."),
                 "lang": db.get("kitsune.core", "lang", "ru"),
                 "autodel": db.get("kitsune.core", "autodel", 0),
-            }
-            return aiohttp.web.Response(
-                text=json.dumps({"ok": True, "settings": settings}),
-                content_type="application/json",
-                headers={"Access-Control-Allow-Origin": "*"},
-            )
+            }})
         try:
             body = await request.json()
-            for key, value in body.items():
-                db.set("kitsune.core", key, value)
+            for k, v in body.items(): db.set("kitsune.core", k, v)
             from ..main import set_config_key
-            for key, value in body.items():
-                set_config_key(key, value)
-            return aiohttp.web.Response(
-                text='{"ok":true}',
-                content_type="application/json",
-            )
+            for k, v in body.items(): set_config_key(k, v)
+            return self._json({"ok": True})
         except Exception as exc:
-            return aiohttp.web.Response(
-                text=json.dumps({"ok": False, "error": str(exc)}),
-                content_type="application/json",
-            )
+            return self._json({"ok": False, "error": str(exc)})
 
     async def _handle_logs(self, request):
         log_file = Path.home() / ".kitsune" / "kitsune.log"
         if not log_file.exists():
-            return aiohttp.web.Response(
-                text=json.dumps({"ok": True, "logs": []}),
-                content_type="application/json",
-            )
+            return self._json({"ok": True, "logs": []})
         try:
-            lines = log_file.read_text(encoding="utf-8").splitlines()
-            limit = 100
-            recent = lines[-limit:] if len(lines) > limit else lines
-            return aiohttp.web.Response(
-                text=json.dumps({"ok": True, "logs": recent}),
-                content_type="application/json",
-                headers={"Access-Control-Allow-Origin": "*"},
-            )
+            lines = log_file.read_text(encoding="utf-8", errors="replace").splitlines()
+            limit = int(request.query.get("limit", 200))
+            return self._json({"ok": True, "logs": lines[-limit:] if len(lines) > limit else lines})
         except Exception:
-            return aiohttp.web.Response(
-                text=json.dumps({"ok": True, "logs": []}),
-                content_type="application/json",
-            )
+            return self._json({"ok": True, "logs": []})
 
 
 def _build_html(*, name, uid, username, version):
-    return f"""<!DOCTYPE html>
+    return """<!DOCTYPE html>
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Kitsune {version}</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>🦊 Kitsune """ + version + """</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700&family=DM+Sans:opsz,wght@9..40,300;9..40,500;9..40,700&display=swap" rel="stylesheet">
 <style>
-*,*::before,*::after{{box-sizing:border-box;margin:0;padding:0}}
-:root{{
-  --bg:#0a0a0f;--surface:#111118;--surface2:#16161f;
-  --border:rgba(255,255,255,0.06);--border2:rgba(255,255,255,0.1);
-  --text:#f0f0f8;--muted:#6b6b80;
-  --accent:#7c4dff;--accent2:#a278ff;--accent-glow:rgba(124,77,255,0.25);
-  --green:#3dffa0;--green-dim:rgba(61,255,160,0.12);
-  --orange:#ff9f4a;--red:#ff4a6b;--gold:#ffd166;
-}}
-html,body{{height:100%}}
-body{{
-  font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);
-  min-height:100vh;display:flex;align-items:center;justify-content:center;
-  padding:16px 10px;overflow-x:hidden;
-}}
-body::before,body::after{{
-  content:'';position:fixed;border-radius:50%;filter:blur(80px);pointer-events:none;z-index:0;
-}}
-body::before{{
-  width:500px;height:500px;top:-120px;left:-120px;
-  background:radial-gradient(circle,rgba(124,77,255,0.13) 0%,transparent 70%);
-}}
-body::after{{
-  width:400px;height:400px;bottom:-80px;right:-80px;
-  background:radial-gradient(circle,rgba(61,255,160,0.06) 0%,transparent 70%);
-}}
-.shell{{
-  width:100%;max-width:900px;position:relative;z-index:1;
-  display:flex;flex-direction:column;border-radius:24px;overflow:hidden;
-  border:1px solid var(--border2);
-  box-shadow:0 0 0 1px rgba(124,77,255,0.08),0 32px 80px rgba(0,0,0,0.6),0 0 60px rgba(124,77,255,0.08);
-  background:var(--surface);
-}}
-.topbar{{
-  padding:22px 24px 18px;
-  background:linear-gradient(160deg,rgba(124,77,255,0.1) 0%,transparent 60%);
-  border-bottom:1px solid var(--border);
-  display:flex;align-items:center;gap:16px;position:relative;overflow:hidden;
-}}
-.topbar::after{{
-  content:'';position:absolute;top:0;left:0;right:0;height:1px;
-  background:linear-gradient(90deg,transparent,rgba(124,77,255,0.5),transparent);
-}}
-.logo-wrap{{
-  width:48px;height:48px;flex-shrink:0;
-  background:linear-gradient(135deg,#6030e0,#9060ff);
-  border-radius:16px;display:flex;align-items:center;justify-content:center;
-  font-size:1.5rem;
-  box-shadow:0 0 24px rgba(124,77,255,0.4),0 4px 12px rgba(0,0,0,0.4);
-  position:relative;
-}}
-.logo-wrap::after{{
-  content:'';position:absolute;inset:0;border-radius:16px;
-  background:linear-gradient(135deg,rgba(255,255,255,0.15),transparent);
-}}
-.topbar-info{{flex:1;min-width:0}}
-.topbar-title{{
-  font-family:'Syne',sans-serif;font-size:1.15rem;font-weight:800;
-  color:var(--text);letter-spacing:-.02em;white-space:nowrap;
-}}
-.topbar-sub{{font-size:.72rem;color:var(--muted);margin-top:2px}}
-.status-pill{{
-  display:inline-flex;align-items:center;gap:5px;
-  background:var(--green-dim);border:1px solid rgba(61,255,160,0.2);
-  border-radius:20px;padding:5px 11px;
-  font-size:.72rem;font-weight:600;color:var(--green);white-space:nowrap;
-}}
-.pulse{{
-  width:6px;height:6px;border-radius:50%;
-  background:var(--green);box-shadow:0 0 8px var(--green);
-  animation:pulse 2s ease-in-out infinite;
-}}
-@keyframes pulse{{0%,100%{{opacity:1;transform:scale(1)}}50%{{opacity:.5;transform:scale(.8)}}}}
-.tab-bar{{
-  display:flex;padding:0 12px;background:var(--surface);
-  border-bottom:1px solid var(--border);
-}}
-.tab-btn{{
-  flex:1;padding:12px 8px;background:none;border:none;
-  font-family:'Inter',sans-serif;font-size:.78rem;font-weight:500;
-  color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;
-  transition:color .2s,border-color .2s;white-space:nowrap;
-}}
-.tab-btn.active{{color:var(--accent2);border-bottom-color:var(--accent);}}
-.tab-btn:hover:not(.active){{color:rgba(240,240,248,.6)}}
-.panel-area{{min-height:300px}}
-.panel{{display:none;padding:20px;animation:fadeUp .22s ease both}}
-.panel.active{{display:block}}
-@keyframes fadeUp{{from{{opacity:0;transform:translateY(6px)}}to{{opacity:1;transform:none}}}}
-.sec-title{{
-  font-family:'Syne',sans-serif;font-size:.78rem;font-weight:700;
-  color:var(--muted);letter-spacing:.08em;text-transform:uppercase;margin-bottom:12px;
-}}
-.row-list{{display:flex;flex-direction:column;gap:2px}}
-.row{{
-  display:flex;justify-content:space-between;align-items:center;
-  padding:10px 12px;border-radius:10px;transition:background .15s;
-}}
-.row:hover{{background:rgba(124,77,255,0.06)}}
-.row-key{{font-size:.8rem;color:var(--muted);font-weight:500}}
-.row-val{{font-size:.85rem;color:var(--text);font-weight:500;text-align:right;max-width:220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
-.row-val.accent{{color:var(--accent2)}}
-.row-val.mono{{font-family:monospace;font-size:.8rem;color:var(--muted)}}
-.divider{{height:1px;background:var(--border);margin:12px 0}}
-.stat-list{{display:flex;flex-direction:column;gap:14px}}
-.stat-head{{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:7px}}
-.stat-name{{font-size:.8rem;font-weight:600;color:var(--text)}}
-.stat-val{{font-size:.78rem;color:var(--muted);font-family:monospace}}
-.bar-track{{height:6px;border-radius:3px;background:rgba(255,255,255,0.05);overflow:hidden}}
-.bar-fill{{
-  height:100%;border-radius:3px;
-  background:linear-gradient(90deg,var(--accent),var(--accent2));
-  transition:width .7s cubic-bezier(.4,0,.2,1);
-  position:relative;overflow:hidden;
-}}
-.bar-fill::after{{
-  content:'';position:absolute;top:0;left:-100%;width:100%;height:100%;
-  background:linear-gradient(90deg,transparent,rgba(255,255,255,0.15),transparent);
-  animation:shimmer 2s infinite;
-}}
-@keyframes shimmer{{to{{left:200%}}}}
-.bar-fill.warn{{background:linear-gradient(90deg,var(--orange),#ffbb6b)}}
-.bar-fill.crit{{background:linear-gradient(90deg,var(--red),#ff8080)}}
-.users-header{{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}}
-.add-btn{{
-  display:inline-flex;align-items:center;gap:6px;padding:7px 13px;
-  background:rgba(124,77,255,0.12);border:1px solid rgba(124,77,255,0.25);
-  border-radius:10px;font-size:.76rem;font-weight:600;color:var(--accent2);
-  cursor:pointer;transition:all .2s;font-family:'Inter',sans-serif;
-}}
-.add-btn:hover{{background:rgba(124,77,255,0.2);border-color:rgba(124,77,255,0.45);box-shadow:0 0 16px rgba(124,77,255,0.2)}}
-.toast{{
-  position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(20px);
-  background:var(--surface2);border:1px solid var(--border2);border-radius:14px;
-  padding:12px 20px;font-size:.82rem;color:var(--text);
-  box-shadow:0 8px 32px rgba(0,0,0,0.5);opacity:0;pointer-events:none;
-  transition:all .3s cubic-bezier(.4,0,.2,1);z-index:999;
-  display:flex;align-items:center;gap:8px;white-space:nowrap;
-}}
-.toast.show{{opacity:1;transform:translateX(-50%) translateY(0)}}
-.user-card{{
-  background:var(--surface2);border:1px solid var(--border);border-radius:14px;
-  padding:14px 16px;display:flex;align-items:center;gap:14px;
-  transition:border-color .2s,transform .15s;
-}}
-.user-card:hover{{border-color:rgba(124,77,255,0.3);transform:translateY(-1px)}}
-.user-avatar{{
-  width:42px;height:42px;flex-shrink:0;border-radius:50%;
-  background:linear-gradient(135deg,#6030e0,#9060ff);
-  display:flex;align-items:center;justify-content:center;font-size:1.2rem;
-  box-shadow:0 0 16px rgba(124,77,255,0.3);
-}}
-.user-info{{flex:1;min-width:0}}
-.user-name{{font-size:.9rem;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
-.user-meta{{font-size:.75rem;color:var(--muted);margin-top:3px;display:flex;gap:6px;flex-wrap:wrap;align-items:center}}
-.tag{{display:inline-flex;align-items:center;gap:3px;padding:2px 8px;border-radius:8px;font-size:.68rem;font-weight:600}}
-.tag-owner{{background:rgba(255,209,102,0.12);color:var(--gold);border:1px solid rgba(255,209,102,0.2)}}
-.tag-active{{background:var(--green-dim);color:var(--green);border:1px solid rgba(61,255,160,0.2)}}
-.empty-state{{text-align:center;padding:40px 20px}}
-.empty-icon{{font-size:2.5rem;margin-bottom:10px;opacity:.4}}
-.empty-text{{font-size:.85rem;color:var(--muted)}}
-.footer-bar{{
-  border-top:1px solid var(--border);padding:12px 20px;
-  display:flex;justify-content:space-between;align-items:center;
-}}
-.footer-dot{{
-  width:5px;height:5px;border-radius:50%;background:var(--accent);
-  display:inline-block;margin-right:6px;animation:pulse 2s infinite;
-}}
-.footer-ts{{font-size:.7rem;color:var(--muted)}}
-.footer-ver{{font-size:.7rem;color:rgba(124,77,255,0.5);font-family:monospace}}
-.spinner{{
-  display:inline-block;width:16px;height:16px;
-  border:2px solid var(--border2);border-top-color:var(--accent);
-  border-radius:50%;animation:spin .6s linear infinite;
-  vertical-align:middle;margin-right:8px;
-}}
-@keyframes spin{{to{{transform:rotate(360deg)}}}}
-.loading-msg{{text-align:center;padding:40px 20px;font-size:.85rem;color:var(--muted)}}
-.modules-header,.logs-header{{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}}
-.module-card{{
-  background:var(--surface2);border:1px solid var(--border);border-radius:14px;
-  padding:14px 16px;display:flex;align-items:center;gap:14px;
-  transition:border-color .2s,transform .15s;margin-bottom:10px;
-}}
-.module-card:hover{{border-color:rgba(124,77,255,0.3);transform:translateY(-1px)}}
-.module-icon{{width:40px;height:40px;flex-shrink:0;border-radius:12px;background:var(--surface);display:flex;align-items:center;justify-content:center;font-size:1.2rem}}
-.module-info{{flex:1;min-width:0}}
-.module-name{{font-size:.9rem;font-weight:600;color:var(--text)}}
-.module-meta{{font-size:.75rem;color:var(--muted);margin-top:3px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}}
-.module-actions{{display:flex;gap:6px}}
-.module-btn{{padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;font-size:.75rem;transition:all .2s}}
-.module-btn:hover{{border-color:var(--accent);color:var(--accent2)}}
-.module-btn.danger:hover{{border-color:var(--red);color:var(--red)}}
-.setting-row{{display:flex;justify-content:space-between;align-items:center;padding:10px 12px;border-radius:10px}}
-.setting-row:hover{{background:rgba(124,77,255,0.06)}}
-.setting-input{{background:var(--surface2);border:1px solid var(--border2);border-radius:8px;padding:8px 12px;color:var(--text);font-size:.85rem;width:120px}}
-.setting-select{{background:var(--surface2);border:1px solid var(--border2);border-radius:8px;padding:8px 12px;color:var(--text);font-size:.85rem;width:140px}}
-.logs-container{{background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:12px;font-family:monospace;font-size:.75rem;max-height:400px;overflow-y:auto;white-space:pre-wrap;word-break:break-all;color:var(--muted);line-height:1.5}}
-.log-line{{padding:2px 0}}
-.log-line.error{{color:var(--red)}}
-.log-line.warn{{color:var(--orange)}}
-.log-line.info{{color:var(--text)}}
-.modal-overlay{{position:fixed;inset:0;background:rgba(0,0,0,0.7);display:none;align-items:center;justify-content:center;z-index:1000}}
-.modal-overlay.show{{display:flex}}
-.modal{{background:var(--surface);border:1px solid var(--border2);border-radius:16px;padding:24px;width:90%;max-width:400px}}
-.modal-title{{font-family:'Syne',sans-serif;font-size:1.1rem;font-weight:700;margin-bottom:16px;color:var(--text)}}
-.modal-input{{width:100%;background:var(--surface2);border:1px solid var(--border2);border-radius:10px;padding:12px;color:var(--text);font-size:.9rem;margin-bottom:16px}}
-.modal-btns{{display:flex;gap:10px;justify-content:flex-end}}
-.modal-btn{{padding:10px 18px;border-radius:10px;border:none;font-size:.85rem;font-weight:600;cursor:pointer;transition:all .2s}}
-.modal-btn.primary{{background:var(--accent);color:#fff}}
-.modal-btn.primary:hover{{background:var(--accent2)}}
-.modal-btn.secondary{{background:transparent;border:1px solid var(--border2);color:var(--muted)}}
-.modal-btn.secondary:hover{{border-color:var(--muted)}}
-.modules-filter{{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap}}
-.filter-btn{{padding:8px 14px;border-radius:10px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;font-size:.78rem;transition:all .2s}}
-.filter-btn:hover{{border-color:var(--accent);color:var(--accent2)}}
-.filter-btn.active{{background:var(--accent);border-color:var(--accent);color:#fff}}
-.modules-grid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:16px}}
-.modules-grid-phone{{display:none}}
-.modules-count{{font-size:.75rem;color:var(--muted);padding:4px 10px;background:var(--surface2);border-radius:6px;margin-left:8px}}
-.modules-pagination{{display:flex;justify-content:center;gap:8px;margin-top:20px;flex-wrap:wrap}}
-.page-btn{{padding:8px 14px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;font-size:.8rem;transition:all .2s}}
-.page-btn:hover{{border-color:var(--accent);color:var(--accent2)}}
-.page-btn.active{{background:var(--accent);border-color:var(--accent);color:#fff}}
-.page-btn:disabled{{opacity:0.4;cursor:not-allowed}}
-.module-card-full{{background:var(--surface2);border:1px solid var(--border);border-radius:16px;padding:16px;display:flex;flex-direction:column;gap:10px;transition:border-color .2s,transform .15s;min-height:100%}}
-.module-card-full:hover{{border-color:rgba(124,77,255,0.4);transform:translateY(-2px)}}
-.module-card-header{{display:flex;align-items:center;gap:12px}}
-.module-card-icon{{width:42px;height:42px;border-radius:12px;background:linear-gradient(135deg,#6030e0,#9060ff);display:flex;align-items:center;justify-content:center;font-size:1.3rem;box-shadow:0 0 12px rgba(124,77,255,0.2)}}
-.module-card-info{{flex:1;min-width:0}}
-.module-card-name{{font-size:.9rem;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
-.module-card-meta{{font-size:.7rem;color:var(--muted);margin-top:2px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}}
-.module-card-desc{{font-size:.78rem;color:var(--muted);line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}}
-.module-card-footer{{display:flex;justify-content:space-between;align-items:center;margin-top:auto;padding-top:10px;border-top:1px solid var(--border);gap:8px}}
-.module-card-actions{{display:flex;gap:6px;flex-wrap:wrap}}
-.module-btn{{padding:6px 12px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;font-size:.72rem;transition:all .2s;white-space:nowrap}}
-.module-btn:hover{{border-color:var(--accent);color:var(--accent2)}}
-.module-btn.danger:hover{{border-color:var(--red);color:var(--red)}}
-.modules-header{{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;gap:12px;flex-wrap:wrap}}
-.modules-count{{font-size:.78rem;color:var(--muted);padding:6px 12px;background:var(--surface2);border-radius:8px}}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+:root{
+  --bg:#080810;--s1:#0e0e1a;--s2:#13131f;--s3:#1a1a28;
+  --bd:rgba(255,255,255,0.07);--bd2:rgba(255,255,255,0.12);
+  --tx:#e8e8f4;--mu:#5a5a78;--mu2:#8080a0;
+  --fox:#ff6b35;--fox2:#ff9960;--fox-g:rgba(255,107,53,0.18);
+  --blue:#4a9eff;--green:#3dffaa;--gr-dim:rgba(61,255,170,0.1);
+  --red:#ff4a6b;--ylw:#ffd166;
+  --mono:'Space Mono',monospace;--body:'DM Sans',sans-serif;
+  --r:14px;--r2:10px;--ease:.18s cubic-bezier(.4,0,.2,1);
+}
+html{height:100%}
+body{
+  font-family:var(--body);background:var(--bg);color:var(--tx);min-height:100%;
+  overflow-x:hidden;
+  background-image:
+    radial-gradient(ellipse 70% 50% at 5% 0%,rgba(255,107,53,0.08) 0%,transparent 55%),
+    radial-gradient(ellipse 50% 40% at 95% 100%,rgba(74,158,255,0.05) 0%,transparent 55%);
+}
+.app{max-width:960px;margin:0 auto;padding:0 16px 40px}
+/* Header */
+.hdr{padding:20px 0 18px;display:flex;align-items:center;gap:14px;border-bottom:1px solid var(--bd)}
+.logo{width:46px;height:46px;flex-shrink:0;border-radius:14px;background:linear-gradient(135deg,#d94f1a,#ff7a40);display:flex;align-items:center;justify-content:center;font-size:1.4rem;box-shadow:0 0 22px rgba(255,107,53,0.4);position:relative;overflow:hidden}
+.logo::after{content:'';position:absolute;inset:0;background:linear-gradient(135deg,rgba(255,255,255,0.18),transparent)}
+.hdr-info{flex:1;min-width:0}
+.hdr-title{font-family:var(--mono);font-size:.92rem;font-weight:700;color:var(--tx)}
+.hdr-sub{font-size:.68rem;color:var(--mu);margin-top:3px;font-family:var(--mono)}
+.online{display:inline-flex;align-items:center;gap:5px;background:var(--gr-dim);border:1px solid rgba(61,255,170,0.2);border-radius:20px;padding:5px 12px;font-size:.65rem;font-weight:700;color:var(--green);font-family:var(--mono);letter-spacing:.05em}
+.dot{width:5px;height:5px;border-radius:50%;background:var(--green);box-shadow:0 0 6px var(--green);animation:blink 2s infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+/* Nav */
+.nav{display:flex;gap:2px;padding:12px 0 0;overflow-x:auto;scrollbar-width:none}
+.nav::-webkit-scrollbar{display:none}
+.nb{flex-shrink:0;padding:9px 16px;border-radius:9px;border:none;font-family:var(--body);font-size:.78rem;font-weight:500;color:var(--mu2);background:transparent;cursor:pointer;transition:var(--ease);white-space:nowrap;border:1px solid transparent}
+.nb:hover{color:var(--tx);background:var(--s2)}
+.nb.on{color:var(--fox2);background:rgba(255,107,53,0.1);border-color:rgba(255,107,53,0.18)}
+/* Panel */
+.panel{display:none;padding-top:20px;animation:fi .2s ease both}
+.panel.on{display:block}
+@keyframes fi{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+/* Card */
+.card{background:var(--s1);border:1px solid var(--bd);border-radius:var(--r);padding:18px;margin-bottom:12px;transition:border-color var(--ease)}
+.card:hover{border-color:var(--bd2)}
+.ctit{font-family:var(--mono);font-size:.62rem;font-weight:700;color:var(--mu);letter-spacing:.1em;text-transform:uppercase;margin-bottom:14px}
+/* Stat grid */
+.sg{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px}
+.sb{background:var(--s2);border:1px solid var(--bd);border-radius:var(--r2);padding:14px 16px}
+.sl{font-size:.62rem;color:var(--mu);font-family:var(--mono);letter-spacing:.08em;text-transform:uppercase;margin-bottom:6px}
+.sv{font-family:var(--mono);font-size:1.1rem;font-weight:700;color:var(--tx)}
+.sv.fox{color:var(--fox2)}.sv.gr{color:var(--green)}
+/* Row */
+.rows{display:flex;flex-direction:column}
+.row{display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid rgba(255,255,255,0.04)}
+.row:last-child{border:none}
+.rk{font-size:.78rem;color:var(--mu2);font-weight:300}
+.rv{font-size:.78rem;color:var(--tx);font-weight:500;font-family:var(--mono);max-width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:right}
+.rv.fox{color:var(--fox2)}
+/* Bars */
+.bar{margin-top:10px}
+.bh{display:flex;justify-content:space-between;margin-bottom:5px}
+.bn{font-size:.7rem;color:var(--mu2)}.bv{font-size:.7rem;color:var(--mu);font-family:var(--mono)}
+.bt{height:4px;border-radius:2px;background:rgba(255,255,255,0.06);overflow:hidden}
+.bf{height:100%;border-radius:2px;background:linear-gradient(90deg,var(--fox),var(--fox2));transition:width .8s cubic-bezier(.4,0,.2,1)}
+.bf.mid{background:linear-gradient(90deg,#f0a030,var(--ylw))}.bf.hi{background:linear-gradient(90deg,var(--red),#ff8080)}
+/* Modules */
+.mc{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;gap:10px;flex-wrap:wrap}
+.mf{display:flex;gap:6px;flex-wrap:wrap}
+.fi{padding:6px 12px;border-radius:20px;border:1px solid var(--bd);background:transparent;color:var(--mu2);cursor:pointer;font-size:.72rem;font-family:var(--body);transition:var(--ease)}
+.fi:hover{border-color:var(--bd2);color:var(--tx)}
+.fi.on{background:rgba(255,107,53,0.12);border-color:rgba(255,107,53,0.25);color:var(--fox2)}
+.mb{font-size:.68rem;color:var(--mu);font-family:var(--mono);padding:3px 8px;background:var(--s2);border-radius:6px}
+.mg{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px}
+@media(max-width:580px){.mg{grid-template-columns:1fr}}
+.mc2{background:var(--s1);border:1px solid var(--bd);border-radius:var(--r);padding:16px;display:flex;flex-direction:column;gap:10px;transition:border-color var(--ease),transform var(--ease)}
+.mc2:hover{border-color:rgba(255,107,53,0.25);transform:translateY(-2px)}
+.mct{display:flex;align-items:center;gap:10px}
+.mi{width:38px;height:38px;flex-shrink:0;border-radius:10px;background:linear-gradient(135deg,rgba(255,107,53,0.2),rgba(255,107,53,0.04));border:1px solid rgba(255,107,53,0.15);display:flex;align-items:center;justify-content:center;font-size:1.1rem}
+.mn{font-size:.85rem;font-weight:700;color:var(--tx);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mm{font-size:.66rem;color:var(--mu);margin-top:2px;font-family:var(--mono)}
+.md{font-size:.73rem;color:var(--mu2);line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.mf2{display:flex;gap:6px;justify-content:flex-end;padding-top:8px;border-top:1px solid var(--bd)}
+.tsys{display:inline-flex;padding:2px 7px;border-radius:5px;font-size:.6rem;font-weight:700;font-family:var(--mono);background:rgba(74,158,255,0.12);color:var(--blue);border:1px solid rgba(74,158,255,0.2);margin-left:6px}
+/* Btn */
+.btn{display:inline-flex;align-items:center;gap:5px;padding:8px 14px;border-radius:var(--r2);border:1px solid var(--bd2);background:transparent;color:var(--mu2);cursor:pointer;font-size:.75rem;font-family:var(--body);font-weight:500;transition:var(--ease);white-space:nowrap}
+.btn:hover{border-color:rgba(255,107,53,0.4);color:var(--fox2);background:rgba(255,107,53,0.06)}
+.btn.pri{background:rgba(255,107,53,0.14);border-color:rgba(255,107,53,0.28);color:var(--fox2)}
+.btn.pri:hover{background:rgba(255,107,53,0.24)}
+.btn.dng:hover{border-color:rgba(255,74,107,0.4);color:var(--red);background:rgba(255,74,107,0.06)}
+.btn.sm{padding:5px 10px;font-size:.7rem}
+/* Settings */
+.sr{display:flex;align-items:center;justify-content:space-between;padding:11px 0;border-bottom:1px solid rgba(255,255,255,0.04)}
+.sr:last-child{border:none}
+.slb{font-size:.8rem;color:var(--tx)}
+.ss{font-size:.68rem;color:var(--mu);margin-top:2px}
+.inp{background:var(--s2);border:1px solid var(--bd2);border-radius:8px;padding:8px 12px;color:var(--tx);font-size:.8rem;font-family:var(--mono);outline:none;transition:border-color var(--ease);width:100px}
+.inp:focus{border-color:rgba(255,107,53,0.4)}
+.sel{background:var(--s2);border:1px solid var(--bd2);border-radius:8px;padding:8px 12px;color:var(--tx);font-size:.8rem;font-family:var(--body);outline:none;cursor:pointer;width:130px}
+/* Logs */
+.lw{background:var(--s2);border:1px solid var(--bd);border-radius:var(--r2);padding:14px;font-family:var(--mono);font-size:.68rem;max-height:500px;overflow-y:auto;line-height:1.65;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,0.1) transparent}
+.lw::-webkit-scrollbar{width:4px}.lw::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.1);border-radius:2px}
+.le{color:var(--red)}.lw2{color:var(--ylw)}.li{color:var(--mu2)}.ld{color:var(--mu)}
+/* Modal */
+.ov{position:fixed;inset:0;background:rgba(0,0,0,.75);display:none;align-items:center;justify-content:center;z-index:100;padding:16px;backdrop-filter:blur(4px)}
+.ov.on{display:flex}
+.modal{background:var(--s1);border:1px solid var(--bd2);border-radius:18px;padding:24px;width:100%;max-width:400px;box-shadow:0 24px 60px rgba(0,0,0,.6)}
+.mtit{font-family:var(--mono);font-size:.9rem;font-weight:700;margin-bottom:16px}
+.mi2{width:100%;background:var(--s2);border:1px solid var(--bd2);border-radius:10px;padding:11px 14px;color:var(--tx);font-size:.85rem;font-family:var(--mono);outline:none;margin-bottom:14px;transition:border-color var(--ease)}
+.mi2:focus{border-color:rgba(255,107,53,0.4)}
+.mbs{display:flex;gap:10px;justify-content:flex-end}
+.mok{padding:10px 18px;border-radius:10px;border:none;font-size:.82rem;font-weight:700;cursor:pointer;background:linear-gradient(135deg,#d94f1a,#ff7a40);color:#fff;font-family:var(--body);transition:var(--ease)}
+.mok:hover{filter:brightness(1.1)}
+.mno{padding:10px 18px;border-radius:10px;background:var(--s2);color:var(--mu2);border:1px solid var(--bd);font-size:.82rem;cursor:pointer;font-family:var(--body);transition:var(--ease)}
+.mno:hover{border-color:var(--bd2);color:var(--tx)}
+/* Toast */
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(16px);background:var(--s2);border:1px solid var(--bd2);border-radius:12px;padding:11px 18px;font-size:.78rem;color:var(--tx);box-shadow:0 8px 32px rgba(0,0,0,.5);opacity:0;pointer-events:none;transition:all .25s cubic-bezier(.4,0,.2,1);z-index:999;display:flex;align-items:center;gap:8px;max-width:calc(100vw - 32px);white-space:nowrap}
+.toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+/* Pager */
+.pg{display:flex;justify-content:center;gap:6px;margin-top:16px;flex-wrap:wrap}
+.pgb{padding:7px 12px;border-radius:8px;border:1px solid var(--bd);background:transparent;color:var(--mu2);cursor:pointer;font-size:.74rem;transition:var(--ease);font-family:var(--mono)}
+.pgb:hover{border-color:var(--bd2);color:var(--tx)}
+.pgb.on{background:rgba(255,107,53,0.14);border-color:rgba(255,107,53,0.28);color:var(--fox2)}
+/* Empty/Loading */
+.empty{text-align:center;padding:40px 20px;color:var(--mu)}.eico{font-size:2rem;margin-bottom:8px;opacity:.35}
+.ld2{text-align:center;padding:32px;color:var(--mu);font-size:.8rem}
+.sp{display:inline-block;width:14px;height:14px;vertical-align:middle;border:2px solid rgba(255,255,255,.1);border-top-color:var(--fox2);border-radius:50%;animation:spin .6s linear infinite;margin-right:6px}
+@keyframes spin{to{transform:rotate(360deg)}}
+/* Footer */
+.footer{display:flex;justify-content:space-between;align-items:center;padding:14px 0 0;border-top:1px solid var(--bd);margin-top:6px;font-size:.65rem;color:var(--mu);font-family:var(--mono)}
 </style>
 </head>
 <body>
-<div class="shell">
+<div class="app">
 
-  <div class="topbar">
-    <div class="logo-wrap">🦊</div>
-    <div class="topbar-info">
-      <div class="topbar-title">Kitsune Userbot</div>
-      <div class="topbar-sub">v{version} &nbsp;·&nbsp; by Yushi @Mikasu32</div>
-    </div>
-    <div class="status-pill"><div class="pulse"></div>Online</div>
+<header class="hdr">
+  <div class="logo">🦊</div>
+  <div class="hdr-info">
+    <div class="hdr-title">kitsune_userbot</div>
+    <div class="hdr-sub">v""" + version + """ &nbsp;·&nbsp; @Mikasu32</div>
   </div>
+  <div class="online"><div class="dot"></div>online</div>
+</header>
 
-  <div class="tab-bar">
-    <button class="tab-btn active" onclick="switchTab('main',this)">🏠 Главная</button>
-    <button class="tab-btn" onclick="switchTab('modules',this)">📦 Модули</button>
-    <button class="tab-btn" onclick="switchTab('settings',this)">⚙️ Настройки</button>
-    <button class="tab-btn" onclick="switchTab('logs',this)">📜 Логи</button>
+<nav class="nav">
+  <button class="nb on" onclick="go('dash',this)">⬡ Обзор</button>
+  <button class="nb" onclick="go('mods',this)">◫ Модули</button>
+  <button class="nb" onclick="go('sets',this)">◈ Настройки</button>
+  <button class="nb" onclick="go('logs',this)">≡ Логи</button>
+</nav>
+
+<!-- DASH -->
+<div class="panel on" id="p-dash">
+  <div class="sg">
+    <div class="sb"><div class="sl">модули</div><div class="sv fox" id="s-mods">—</div></div>
+    <div class="sb"><div class="sl">CPU</div><div class="sv" id="s-cpu">—</div></div>
+    <div class="sb"><div class="sl">RAM</div><div class="sv" id="s-ram">—</div></div>
+    <div class="sb"><div class="sl">DISK</div><div class="sv" id="s-disk">—</div></div>
   </div>
-
-  <div class="panel-area">
-
-    <div class="panel active" id="panel-main">
-      <div class="sec-title">Аккаунт</div>
-      <div class="row-list">
-        <div class="row">
-          <span class="row-key">Имя</span>
-          <span class="row-val accent" id="acc-name">{name}</span>
-        </div>
-        <div class="row">
-          <span class="row-key">Username</span>
-          <span class="row-val" id="acc-username">{username or '—'}</span>
-        </div>
-        <div class="row">
-          <span class="row-key">ID</span>
-          <span class="row-val mono">{uid}</span>
-        </div>
-        <div class="row">
-          <span class="row-key">Модули</span>
-          <span class="row-val accent" id="mod-count">—</span>
-        </div>
-        <div class="row">
-          <span class="row-key">Разработчик</span>
-          <span class="row-val">Yushi · @Mikasu32</span>
-        </div>
-      </div>
-      <div class="divider"></div>
-      <div class="footer-bar">
-        <span><span class="footer-dot"></span><span class="footer-ts" id="last-upd">обновляется...</span></span>
-        <span class="footer-ver">v{version}</span>
-      </div>
+  <div class="card">
+    <div class="ctit">Аккаунт</div>
+    <div class="rows">
+      <div class="row"><span class="rk">Имя</span><span class="rv fox">""" + name + """</span></div>
+      <div class="row"><span class="rk">Username</span><span class="rv">""" + (username or "—") + """</span></div>
+      <div class="row"><span class="rk">ID</span><span class="rv">""" + str(uid) + """</span></div>
+      <div class="row"><span class="rk">Разработчик</span><span class="rv">Yushi · @Mikasu32</span></div>
     </div>
+  </div>
+  <div class="card">
+    <div class="ctit">Ресурсы системы</div>
+    <div id="bars"><div class="ld2"><span class="sp"></span>загрузка...</div></div>
+  </div>
+  <div class="footer"><span id="ts">обновление...</span><span>kitsune v""" + version + """</span></div>
+</div>
 
-    <div class="panel" id="panel-users">
-      <div class="users-header">
-        <div class="sec-title" style="margin-bottom:0">Подключённые аккаунты</div>
-        <button class="add-btn" onclick="showComingSoon()">＋ Добавить</button>
-      </div>
-      <div id="users-list">
-        <div class="loading-msg"><span class="spinner"></span>Загружаю...</div>
-      </div>
+<!-- MODULES -->
+<div class="panel" id="p-mods">
+  <div class="mc">
+    <div class="mf">
+      <button class="fi on" onclick="filt('all',this)">Все <span class="mb" id="mc-a">0</span></button>
+      <button class="fi" onclick="filt('sys',this)">Системные <span class="mb" id="mc-s">0</span></button>
+      <button class="fi" onclick="filt('usr',this)">Пользовательские <span class="mb" id="mc-u">0</span></button>
     </div>
+    <button class="btn pri" onclick="showMod()">＋ Загрузить</button>
+  </div>
+  <div class="mg" id="mg"><div class="ld2"><span class="sp"></span>загрузка...</div></div>
+  <div class="pg" id="pg"></div>
+</div>
 
-    <div class="panel" id="panel-modules">
-      <div class="modules-header">
-        <div class="sec-title" style="margin-bottom:0">Модули <span class="modules-count" id="modules-total">0</span></div>
-        <button class="add-btn" onclick="showLoadModule()">＋ Загрузить</button>
-      </div>
-      <div class="modules-filter">
-        <button class="filter-btn active" onclick="filterModules('all',this)">Все</button>
-        <button class="filter-btn" onclick="filterModules('builtin',this)">Системные</button>
-        <button class="filter-btn" onclick="filterModules('user',this)">Пользовательские</button>
-      </div>
-      <div class="modules-grid" id="modules-list">
-        <div class="loading-msg"><span class="spinner"></span>Загружаю...</div>
-      </div>
-      <div class="modules-grid-phone" id="modules-list-phone">
-        <div class="loading-msg"><span class="spinner"></span>Загружаю...</div>
-      </div>
-      <div class="modules-pagination" id="modules-pagination"></div>
+<!-- SETTINGS -->
+<div class="panel" id="p-sets">
+  <div class="card">
+    <div class="ctit">Основные настройки</div>
+    <div class="sr">
+      <div><div class="slb">Префикс команд</div><div class="ss">Символ перед командами бота</div></div>
+      <input type="text" class="inp" id="pfx" value="." onchange="sv('prefix',this.value)" maxlength="3">
     </div>
-
-    <div class="panel" id="panel-settings">
-      <div class="sec-title">Основные настройки</div>
-      <div class="settings-list">
-        <div class="setting-row">
-          <span class="row-key">Префикс команд</span>
-          <input type="text" class="setting-input" id="set-prefix" value="." onchange="saveSetting('prefix',this.value)">
-        </div>
-        <div class="setting-row">
-          <span class="row-key">Язык</span>
-          <select class="setting-select" id="set-lang" onchange="saveSetting('lang',this.value)">
-            <option value="ru">Русский</option>
-            <option value="en">English</option>
-          </select>
-        </div>
-        <div class="setting-row">
-          <span class="row-key">Автоудаление сообщений (сек)</span>
-          <input type="number" class="setting-input" id="set-autodel" value="0" min="0" onchange="saveSetting('autodel',this.value)">
-        </div>
-      </div>
+    <div class="sr">
+      <div><div class="slb">Язык</div><div class="ss">Язык ответов</div></div>
+      <select class="sel" id="lng" onchange="sv('lang',this.value)">
+        <option value="ru">🇷🇺 Русский</option>
+        <option value="en">🇬🇧 English</option>
+      </select>
     </div>
-
-    <div class="panel" id="panel-logs">
-      <div class="logs-header">
-        <div class="sec-title" style="margin-bottom:0">Логи</div>
-        <button class="add-btn" onclick="loadLogs()">🔄 Обновить</button>
-      </div>
-      <div class="logs-container" id="logs-container">
-        <div class="loading-msg"><span class="spinner"></span>Загружаю...</div>
-      </div>
+    <div class="sr">
+      <div><div class="slb">Автоудаление (сек)</div><div class="ss">0 = выключено</div></div>
+      <input type="number" class="inp" id="adel" value="0" min="0" onchange="sv('autodel',this.value)">
     </div>
-
   </div>
 </div>
 
-<div class="toast" id="toast">
-  <span>✓</span>
-  <span id="toast-msg">Сохранено</span>
+<!-- LOGS -->
+<div class="panel" id="p-logs">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+    <div class="ctit" style="margin:0">Системные логи</div>
+    <button class="btn sm" onclick="loadLogs()">🔄 Обновить</button>
+  </div>
+  <div class="lw" id="lw"><div class="ld2"><span class="sp"></span>загрузка...</div></div>
 </div>
 
-<div class="modal-overlay" id="load-modal">
+</div>
+
+<div class="toast" id="toast"><span id="tmsg"></span></div>
+
+<div class="ov" id="ov">
   <div class="modal">
-    <div class="modal-title">Загрузить модуль</div>
-    <input type="text" class="modal-input" id="module-url" placeholder="URL модуля (.py)">
-    <div class="modal-btns">
-      <button class="modal-btn secondary" onclick="closeModal()">Отмена</button>
-      <button class="modal-btn primary" onclick="loadModule()">Загрузить</button>
+    <div class="mtit">Загрузить модуль</div>
+    <input type="text" class="mi2" id="murl" placeholder="URL модуля (.py) или название">
+    <div class="mbs">
+      <button class="mno" onclick="hideMod()">Отмена</button>
+      <button class="mok" onclick="doLoad()">Загрузить</button>
     </div>
   </div>
 </div>
 
 <script>
-let toastTimer = null;
-
-function switchTab(name, btn) {{
-  document.querySelectorAll('.tab-btn').forEach(t => t.classList.remove('active'));
-  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
-  btn.classList.add('active');
-  document.getElementById('panel-' + name).classList.add('active');
-  if (name === 'modules' && !modulesLoaded) loadModules();
-  if (name === 'settings' && !settingsLoaded) loadSettings();
-  if (name === 'logs' && !logsLoaded) loadLogs();
-}}
-function setText(id, v) {{ const el = document.getElementById(id); if (el) el.textContent = v; }}
-function setBar(id, pct) {{
-  const el = document.getElementById(id); if (!el) return;
-  el.style.width = pct + '%';
-  el.className = 'bar-fill' + (pct >= 90 ? ' crit' : pct >= 70 ? ' warn' : '');
-}}
-function escHtml(s) {{
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-}}
-async function fetchStatus() {{
-  try {{
-    const r = await fetch('/api/status'); const d = await r.json(); if (!d.ok) return;
-    const s = d.system;
-    setText('mod-count', d.modules);
-    setText('cpu-val',  s.cpu_pct + '%');
-    setText('ram-val',  s.ram_used_mb + ' / ' + s.ram_total_mb + ' MB');
-    setText('disk-val', s.disk_used_gb + ' / ' + s.disk_total_gb + ' GB');
-    setBar('cpu-bar', s.cpu_pct); setBar('ram-bar', s.ram_pct); setBar('disk-bar', s.disk_pct);
-    const now = new Date();
-    setText('last-upd', 'обновлено ' + now.toLocaleTimeString('ru',{{hour:'2-digit',minute:'2-digit',second:'2-digit'}}));
-  }} catch(e) {{}}
-}}
-fetchStatus();
-setInterval(fetchStatus, 5000);
-
-let modulesLoaded = false, settingsLoaded = false, logsLoaded = false;
-
-let allModules = [], modulesPage = 1, modulesPerPage = 9, modulesFilter = 'all';
-
-async function loadModules() {{
-  const list = document.getElementById('modules-list');
-  try {{
-    const r = await fetch('/api/modules'); const d = await r.json();
-    modulesLoaded = true;
-    if (!d.ok || !d.modules || !d.modules.length) {{
-      list.innerHTML = '<div class="empty-state"><div class="empty-icon">📦</div><div class="empty-text">Нет модулей</div></div>';
-      return;
-    }}
-    allModules = d.modules;
-    renderModules();
-  }} catch(e) {{
-    list.innerHTML = '<div class="empty-state"><div class="empty-icon">⚠️</div><div class="empty-text">Ошибка загрузки</div></div>';
-  }}
-}}
-
-function filterModules(type, btn) {{
-  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
-  modulesFilter = type;
-  modulesPage = 1;
-  renderModules();
-}}
-
-function renderModules() {{
-  const isPhone = window.innerWidth <= 500;
-  const list = document.getElementById('modules-list');
-  const listPhone = document.getElementById('modules-list-phone');
-  let filtered = allModules;
-  if (modulesFilter === 'builtin') filtered = allModules.filter(m => m.is_builtin);
-  else if (modulesFilter === 'user') filtered = allModules.filter(m => !m.is_builtin);
-  
-  document.getElementById('modules-total').textContent = filtered.length;
-  
-  const perPage = isPhone ? 4 : modulesPerPage;
-  const totalPages = Math.ceil(filtered.length / perPage);
-  const start = (modulesPage - 1) * perPage;
-  const pageModules = filtered.slice(start, start + perPage);
-  
-  if (!pageModules.length) {{
-    list.innerHTML = '<div class="empty-state"><div class="empty-icon">📦</div><div class="empty-text">Нет модулей</div></div>';
-    listPhone.innerHTML = list.innerHTML;
-    document.getElementById('modules-pagination').innerHTML = '';
-    return;
-  }}
-  
-  const html = pageModules.map(m => `
-    <div class="module-card-full">
-      <div class="module-card-header">
-        <div class="module-card-icon">${{m.icon || '📦'}}</div>
-        <div class="module-card-info">
-          <div class="module-card-name">${{escHtml(m.name)}}${{m.is_builtin ? '<span class="tag tag-owner" style="margin-left:6px">Системный</span>' : ''}}</div>
-          <div class="module-card-meta">
-            <span>v${{m.version}}</span>
-            ${{m.author ? '<span>' + escHtml(m.author) + '</span>' : ''}}
-          </div>
+let _tt,_mods=[],_pg=1,_ppg=6,_filt='all',_ml=false,_sl=false;
+const $=id=>document.getElementById(id);
+function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+function toast(m,ok=true){
+  const t=$('toast');$('tmsg').textContent=(ok?'✓  ':' ✕  ')+m;
+  t.style.borderColor=ok?'rgba(61,255,170,.2)':'rgba(255,74,107,.2)';
+  t.classList.add('on');clearTimeout(_tt);_tt=setTimeout(()=>t.classList.remove('on'),3000);
+}
+function go(n,btn){
+  document.querySelectorAll('.nb').forEach(b=>b.classList.remove('on'));
+  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('on'));
+  btn.classList.add('on');$('p-'+n).classList.add('on');
+  if(n==='mods'&&!_ml)loadMods();
+  if(n==='sets'&&!_sl)loadSets();
+  if(n==='logs')loadLogs();
+}
+// Status
+async function fetchSt(){
+  try{
+    const d=await (await fetch('/api/status')).json();if(!d.ok)return;
+    const s=d.system;
+    $('s-mods').textContent=d.modules;
+    $('s-cpu').textContent=s.cpu_pct+'%';
+    $('s-ram').textContent=s.ram_used_mb+' MB';
+    $('s-disk').textContent=s.disk_used_gb+' GB';
+    $('bars').innerHTML=['CPU','RAM','Disk'].map((nm,i)=>{
+      const [p,vl]=[
+        [s.cpu_pct,s.cpu_pct+'%'],
+        [s.ram_pct,s.ram_used_mb+'/'+s.ram_total_mb+' MB'],
+        [s.disk_pct,s.disk_used_gb+'/'+s.disk_total_gb+' GB']
+      ][i];
+      const c=p>=85?'hi':p>=60?'mid':'';
+      return `<div class="bar"><div class="bh"><span class="bn">${nm}</span><span class="bv">${vl}</span></div><div class="bt"><div class="bf ${c}" style="width:${p}%"></div></div></div>`;
+    }).join('');
+    const n=new Date();$('ts').textContent='обновлено '+n.toLocaleTimeString('ru',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  }catch(e){}
+}
+fetchSt();setInterval(fetchSt,5000);
+// Modules
+async function loadMods(){
+  $('mg').innerHTML='<div class="ld2"><span class="sp"></span>загрузка...</div>';
+  try{
+    const d=await(await fetch('/api/modules')).json();_ml=true;
+    if(!d.ok||!d.modules){$('mg').innerHTML='<div class="empty"><div class="eico">📦</div>Нет модулей</div>';return;}
+    _mods=d.modules;
+    $('mc-a').textContent=_mods.length;
+    $('mc-s').textContent=_mods.filter(m=>m.is_builtin).length;
+    $('mc-u').textContent=_mods.filter(m=>!m.is_builtin).length;
+    render();
+  }catch(e){$('mg').innerHTML='<div class="empty"><div class="eico">⚠️</div>Ошибка загрузки</div>';}
+}
+function filt(t,btn){document.querySelectorAll('.fi').forEach(b=>b.classList.remove('on'));btn.classList.add('on');_filt=t;_pg=1;render();}
+function render(){
+  const mob=window.innerWidth<=560;_ppg=mob?4:6;
+  let list=_mods;
+  if(_filt==='sys')list=_mods.filter(m=>m.is_builtin);
+  else if(_filt==='usr')list=_mods.filter(m=>!m.is_builtin);
+  const tot=Math.ceil(list.length/_ppg);
+  const page=list.slice((_pg-1)*_ppg,_pg*_ppg);
+  if(!page.length){$('mg').innerHTML='<div class="empty"><div class="eico">📦</div>Нет модулей</div>';$('pg').innerHTML='';return;}
+  $('mg').innerHTML=page.map(m=>`
+    <div class="mc2">
+      <div class="mct">
+        <div class="mi">${m.icon||'📦'}</div>
+        <div style="flex:1;min-width:0">
+          <div class="mn">${esc(m.name)}${m.is_builtin?'<span class="tsys">sys</span>':''}</div>
+          <div class="mm">v${m.version}${m.author?' · '+esc(m.author):''}</div>
         </div>
       </div>
-      ${{m.description ? '<div class="module-card-desc">' + escHtml(m.description) + '</div>' : ''}}
-      <div class="module-card-footer">
-        <span style="font-size:.72rem;color:var(--muted)">${{m.has_config ? '⚙️ Настройки' : ''}}</span>
-        ${{!m.is_builtin ? `
-        <div class="module-card-actions">
-          <button class="module-btn" onclick="reloadModule('${{m.name}}')">🔄 Перезагрузить</button>
-          <button class="module-btn danger" onclick="unloadModule('${{m.name}}')">✕ Выгрузить</button>
-        </div>
-        ` : ''}}
-      </div>
+      ${m.description?'<div class="md">'+esc(m.description)+'</div>':''}
+      ${!m.is_builtin?`<div class="mf2">
+        <button class="btn sm" onclick="rl('${m.name}')">🔄</button>
+        <button class="btn sm dng" onclick="ul('${m.name}')">✕</button>
+      </div>`:''}
     </div>
   `).join('');
-  
-  list.innerHTML = html;
-  listPhone.innerHTML = html;
-  
-  if (totalPages > 1) {{
-    let pages = '';
-    for (let i = 1; i <= totalPages; i++) {{
-      pages += '<button class="page-btn' + (i === modulesPage ? ' active' : '') + '" onclick="goToPage(' + i + ')">' + i + '</button>';
-    }}
-    document.getElementById('modules-pagination').innerHTML = pages;
-  }} else {{
-    document.getElementById('modules-pagination').innerHTML = '';
-  }}
-}}
-
-function goToPage(page) {{
-  modulesPage = page;
-  renderModules();
-}}
-
-async function unloadModule(name) {{
-  if (!confirm('Выгрузить модуль ' + name + '?')) return;
-  try {{
-    const r = await fetch('/api/modules/action/' + name + '?action=unload', {{method: 'POST'}});
-    const d = await r.json();
-    if (d.ok) {{ showToast('Модуль выгружен'); loadModules(); }}
-    else {{ showToast('Ошибка: ' + d.error); }}
-  }} catch(e) {{ showToast('Ошибка'); }}
-}}
-
-async function reloadModule(name) {{
-  try {{
-    const r = await fetch('/api/modules/action/' + name + '?action=reload', {{method: 'POST'}});
-    const d = await r.json();
-    if (d.ok) {{ showToast('Модуль перезагружен'); loadModules(); }}
-    else {{ showToast('Ошибка: ' + d.error); }}
-  }} catch(e) {{ showToast('Ошибка'); }}
-}}
-
-function showLoadModule() {{ document.getElementById('load-modal').classList.add('show'); }}
-function closeModal() {{ document.getElementById('load-modal').classList.remove('show'); }}
-
-async function loadModule() {{
-  const url = document.getElementById('module-url').value;
-  if (!url) return;
-  try {{
-    const r = await fetch('/api/modules/load', {{
-      method: 'POST',
-      headers: {{'Content-Type': 'application/json'}},
-      body: JSON.stringify({{url: url}})
-    }});
-    const d = await r.json();
-    if (d.ok) {{ showToast('Модуль загружен: ' + d.module); closeModal(); loadModules(); }}
-    else {{ showToast('Ошибка: ' + d.error); }}
-  }} catch(e) {{ showToast('Ошибка'); }}
-}}
-
-async function loadSettings() {{
-  try {{
-    const r = await fetch('/api/settings'); const d = await r.json();
-    settingsLoaded = true;
-    if (d.ok && d.settings) {{
-      document.getElementById('set-prefix').value = d.settings.prefix || '.';
-      document.getElementById('set-lang').value = d.settings.lang || 'ru';
-      document.getElementById('set-autodel').value = d.settings.autodel || 0;
-    }}
-  }} catch(e) {{}}
-}}
-
-async function saveSetting(key, value) {{
-  try {{
-    const r = await fetch('/api/settings', {{
-      method: 'POST',
-      headers: {{'Content-Type': 'application/json'}},
-      body: JSON.stringify({{[key]: value}})
-    }});
-    const d = await r.json();
-    showToast(d.ok ? 'Сохранено' : 'Ошибка');
-  }} catch(e) {{ showToast('Ошибка'); }}
-}}
-
-async function loadLogs() {{
-  const container = document.getElementById('logs-container');
-  try {{
-    const r = await fetch('/api/logs'); const d = await r.json();
-    logsLoaded = true;
-    if (!d.ok || !d.logs || !d.logs.length) {{
-      container.innerHTML = '<div class="empty-state"><div class="empty-icon">📜</div><div class="empty-text">Логов нет</div></div>';
-      return;
-    }}
-    container.innerHTML = d.logs.map(line => {{
-      let cls = 'log-line';
-      if (line.toLowerCase().includes('error')) cls += ' error';
-      else if (line.toLowerCase().includes('warn')) cls += ' warn';
-      else if (line.toLowerCase().includes('info')) cls += ' info';
-      return '<div class="' + cls + '">' + escHtml(line) + '</div>';
-    }}).join('');
-  }} catch(e) {{
-    container.innerHTML = '<div class="empty-state"><div class="empty-icon">⚠️</div><div class="empty-text">Ошибка загрузки</div></div>';
-  }}
-}}
-
-function showToast(msg) {{
-  const t = document.getElementById('toast');
-  document.getElementById('toast-msg').textContent = msg;
-  t.classList.add('show');
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => t.classList.remove('show'), 3000);
-}}
+  $('pg').innerHTML=tot>1?Array.from({length:tot},(_,i)=>
+    `<button class="pgb${i+1===_pg?' on':''}" onclick="gp(${i+1})">${i+1}</button>`
+  ).join(''):'';
+}
+function gp(p){_pg=p;render();}
+async function ul(name){
+  if(!confirm('Выгрузить '+name+'?'))return;
+  const d=await(await fetch('/api/modules/action/'+name+'?action=unload',{method:'POST'})).json();
+  d.ok?(toast('Выгружен'),_ml=false,loadMods()):toast('Ошибка: '+d.error,false);
+}
+async function rl(name){
+  const d=await(await fetch('/api/modules/action/'+name+'?action=reload',{method:'POST'})).json();
+  d.ok?(toast('Перезагружен'),_ml=false,loadMods()):toast('Ошибка: '+d.error,false);
+}
+function showMod(){$('ov').classList.add('on');$('murl').focus();}
+function hideMod(){$('ov').classList.remove('on');$('murl').value='';}
+async function doLoad(){
+  const url=$('murl').value.trim();if(!url)return;
+  const btn=document.querySelector('.mok');btn.textContent='...';btn.disabled=true;
+  try{
+    const d=await(await fetch('/api/modules/load',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url})})).json();
+    d.ok?(toast('Загружен: '+d.module),hideMod(),_ml=false,loadMods()):toast('Ошибка: '+d.error,false);
+  }catch(e){toast('Ошибка сети',false);}
+  btn.textContent='Загрузить';btn.disabled=false;
+}
+$('ov').addEventListener('click',e=>{if(e.target===$('ov'))hideMod();});
+document.addEventListener('keydown',e=>{if(e.key==='Escape')hideMod();});
+// Settings
+async function loadSets(){
+  try{
+    const d=await(await fetch('/api/settings')).json();_sl=true;
+    if(d.ok&&d.settings){$('pfx').value=d.settings.prefix||'.';$('lng').value=d.settings.lang||'ru';$('adel').value=d.settings.autodel||0;}
+  }catch(e){}
+}
+async function sv(k,v){
+  try{
+    const d=await(await fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({[k]:v})})).json();
+    toast(d.ok?'Сохранено':'Ошибка',d.ok);
+  }catch(e){toast('Ошибка сети',false);}
+}
+// Logs
+async function loadLogs(){
+  $('lw').innerHTML='<div class="ld2"><span class="sp"></span>загрузка...</div>';
+  try{
+    const d=await(await fetch('/api/logs?limit=300')).json();
+    if(!d.ok||!d.logs||!d.logs.length){$('lw').innerHTML='<div class="empty"><div class="eico">📜</div>Логов нет</div>';return;}
+    $('lw').innerHTML=d.logs.map(l=>{
+      const ll=l.toLowerCase();
+      let c='ld';
+      if(ll.includes('[error]')||ll.includes('error'))c='le';
+      else if(ll.includes('[warn]')||ll.includes('warning'))c='lw2';
+      else if(ll.includes('[info]'))c='li';
+      return '<div class="'+c+'">'+esc(l)+'</div>';
+    }).join('');
+    $('lw').scrollTop=$('lw').scrollHeight;
+  }catch(e){$('lw').innerHTML='<div class="empty"><div class="eico">⚠️</div>Ошибка</div>';}
+}
 </script>
 </body>
 </html>"""
