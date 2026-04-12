@@ -318,6 +318,9 @@ async def _pip_install(package: str) -> bool:
         logger.warning("Loader: pip install %r exception: %s", pip_name, exc)
         return False
 
+
+class Loader:
+
     def __init__(
         self,
         client: typing.Any,
