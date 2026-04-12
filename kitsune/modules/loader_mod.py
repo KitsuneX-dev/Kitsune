@@ -126,8 +126,14 @@ class LoaderModule(KitsuneModule):
                 )
                 return
 
+        async def progress_cb(text: str) -> None:
+            try:
+                await event.message.edit(text, parse_mode="html")
+            except Exception:
+                pass
+
         try:
-            mod = await loader.load_from_url(url)
+            mod = await loader.load_from_url(url, progress_cb=progress_cb)
             user_mods = self._get_user_modules()
             user_mods[mod.name] = url
             await self._save_user_modules(user_mods)
@@ -173,8 +179,14 @@ class LoaderModule(KitsuneModule):
         path = user_dir / filename
         path.write_text(text, encoding="utf-8")
 
+        async def progress_cb(text: str) -> None:
+            try:
+                await event.message.edit(text, parse_mode="html")
+            except Exception:
+                pass
+
         try:
-            mod = await loader.load_from_file(path)
+            mod = await loader.load_from_file(path, progress_cb=progress_cb)
             await event.message.edit(
                 self.strings("installed").format(name=mod.name), parse_mode="html"
             )

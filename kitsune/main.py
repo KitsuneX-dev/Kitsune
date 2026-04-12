@@ -133,24 +133,39 @@ async def _start_hydrogram(api_id: int, api_hash: str, session_name: str) -> Any
         return None
 
     try:
-        hydro_session = f"{session_name}_hydro"
         hydro_session_file = DATA_DIR / f"{Path(session_name).name}_hydro.session"
 
-        # Если session файл отсутствует — не запускаем Hydrogram
-        # (иначе он запросит номер телефона в консоли)
         if not hydro_session_file.exists():
             logger.info("main: Hydrogram session not found, skipping to avoid console prompt")
             return None
 
-        hydro = HydroClient(
+        import os as _os
+        is_termux = "com.termux" in _os.environ.get("PREFIX", "") or _os.path.isdir("/data/data/com.termux")
+
+        kwargs: dict = dict(
             name=str(DATA_DIR / f"{Path(session_name).name}_hydro"),
             api_id=api_id,
             api_hash=api_hash,
             workdir=str(DATA_DIR),
-            no_updates=False,
+            # На Termux не держим постоянный апдейт-коннект — bridge перехватывает через telethon.
+            # На Ubuntu/Linux оставляем полный режим.
+            no_updates=is_termux,
         )
+
+        # Параметры стабильности соединения (если hydrogram их поддерживает)
+        try:
+            import inspect
+            sig = inspect.signature(HydroClient.__init__)
+            if "sleep_threshold" in sig.parameters:
+                kwargs["sleep_threshold"] = 60
+            if "max_concurrent_transmissions" in sig.parameters:
+                kwargs["max_concurrent_transmissions"] = 1
+        except Exception:
+            pass
+
+        hydro = HydroClient(**kwargs)
         await hydro.start()
-        logger.info("main: Hydrogram client started")
+        logger.info("main: Hydrogram client started (termux=%s, no_updates=%s)", is_termux, is_termux)
         return hydro
     except AuthKeyUnregistered:
         logger.warning("main: Hydrogram session invalid, skipping")

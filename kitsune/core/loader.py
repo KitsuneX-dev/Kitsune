@@ -261,7 +261,62 @@ def _scan_ast(source: str, filename: str = "<module>") -> None:
             "Security scan failed:\n" + "\n".join(f"  • {e}" for e in scanner.errors)
         )
 
-class Loader:
+
+def _extract_missing_package(exc: ImportError) -> str | None:
+    """Извлекает имя пакета из ImportError / ModuleNotFoundError."""
+    name = getattr(exc, "name", None)
+    if name:
+        # берём корневой пакет: 'PIL.Image' → 'Pillow' обработается отдельно
+        return name.split(".")[0]
+    msg = str(exc)
+    import re
+    m = re.search(r"No module named ['\"]([a-zA-Z0-9_\-\.]+)['\"]", msg)
+    if m:
+        return m.group(1).split(".")[0]
+    return None
+
+
+# Маппинг import-имя → pip-пакет для популярных библиотек
+_IMPORT_TO_PIP: dict[str, str] = {
+    "PIL": "Pillow",
+    "cv2": "opencv-python",
+    "yaml": "PyYAML",
+    "bs4": "beautifulsoup4",
+    "sklearn": "scikit-learn",
+    "dateutil": "python-dateutil",
+    "dotenv": "python-dotenv",
+    "Crypto": "pycryptodome",
+    "nacl": "PyNaCl",
+    "attr": "attrs",
+    "magic": "python-magic",
+    "usb": "pyusb",
+    "serial": "pyserial",
+}
+
+
+async def _pip_install(package: str) -> bool:
+    """Устанавливает пакет через pip. Возвращает True при успехе."""
+    pip_name = _IMPORT_TO_PIP.get(package, package)
+    import os as _os
+    is_termux = "com.termux" in _os.environ.get("PREFIX", "") or _os.path.isdir("/data/data/com.termux")
+    args = [sys.executable, "-m", "pip", "install", pip_name, "--quiet", "--no-warn-script-location"]
+    if is_termux:
+        args += ["--prefer-binary", "--no-build-isolation"]
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *args,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate()
+        if proc.returncode == 0:
+            logger.info("Loader: installed %r successfully", pip_name)
+            return True
+        logger.warning("Loader: pip install %r failed: %s", pip_name, stderr.decode(errors="replace")[:300])
+        return False
+    except Exception as exc:
+        logger.warning("Loader: pip install %r exception: %s", pip_name, exc)
+        return False
 
     def __init__(
         self,
@@ -326,7 +381,7 @@ class Loader:
         paths = sorted(user_dir.glob("*.py"))
         await asyncio.gather(*[self._load_one_user(p) for p in paths])
 
-    async def load_from_url(self, url: str) -> KitsuneModule:
+    async def load_from_url(self, url: str, progress_cb=None) -> KitsuneModule:
         import aiohttp
         async with aiohttp.ClientSession() as session:
             async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as resp:
@@ -345,12 +400,12 @@ class Loader:
         path = user_dir / filename
         path.write_text(source, encoding="utf-8")
 
-        return await self._load_from_path(path, is_builtin=False)
+        return await self._load_from_path(path, is_builtin=False, progress_cb=progress_cb)
 
-    async def load_from_file(self, path: Path) -> KitsuneModule:
+    async def load_from_file(self, path: Path, progress_cb=None) -> KitsuneModule:
         source = path.read_text(encoding="utf-8")
         _scan_ast(source, filename=str(path))
-        return await self._load_from_path(path, is_builtin=False)
+        return await self._load_from_path(path, is_builtin=False, progress_cb=progress_cb)
 
     async def unload_module(self, name: str) -> bool:
         mod = self._modules.get(name.lower())
@@ -376,7 +431,7 @@ class Loader:
         logger.info("Loader: unloaded %s", name)
         return True
 
-    async def reload_module(self, name: str) -> KitsuneModule:
+    async def reload_module(self, name: str, progress_cb=None) -> KitsuneModule:
         mod = self._modules.get(name.lower())
         if mod is None:
             raise ModuleLoadError(f"Module {name!r} not loaded")
@@ -387,13 +442,13 @@ class Loader:
         await self.unload_module(name)
 
         if source_url:
-            return await self.load_from_url(source_url)
+            return await self.load_from_url(source_url, progress_cb=progress_cb)
         if source_info:
-            return await self._load_from_path(Path(source_info), is_builtin=False)
+            return await self._load_from_path(Path(source_info), is_builtin=False, progress_cb=progress_cb)
 
         raise ModuleLoadError(f"Cannot reload {name!r}: source unknown")
 
-    async def _load_from_path(self, path: Path, *, is_builtin: bool) -> KitsuneModule:
+    async def _load_from_path(self, path: Path, *, is_builtin: bool, progress_cb=None) -> KitsuneModule:
         # Поддержка пакетов: если path = .../notifier/__init__.py,
         # то module_name = kitsune.modules.notifier
         is_pkg = path.name == "__init__.py"
@@ -423,6 +478,34 @@ class Loader:
 
         try:
             spec.loader.exec_module(py_module)
+        except ImportError as exc:
+            # Авто-установка отсутствующей зависимости
+            missing_pkg = _extract_missing_package(exc)
+            if missing_pkg and not is_builtin:
+                logger.info("Loader: missing package %r — attempting auto-install", missing_pkg)
+                if progress_cb:
+                    try:
+                        await progress_cb(f"📦 Устанавливаю зависимость <code>{missing_pkg}</code>...")
+                    except Exception:
+                        pass
+                installed = await _pip_install(missing_pkg)
+                if installed:
+                    if progress_cb:
+                        try:
+                            await progress_cb(f"✅ Зависимость <code>{missing_pkg}</code> установлена. Загружаю модуль...")
+                        except Exception:
+                            pass
+                    try:
+                        spec.loader.exec_module(py_module)
+                    except Exception as exc2:
+                        del sys.modules[module_name]
+                        raise ModuleLoadError(f"Execution failed after install: {exc2}") from exc2
+                else:
+                    del sys.modules[module_name]
+                    raise ModuleLoadError(f"Failed to install dependency {missing_pkg!r}: {exc}") from exc
+            else:
+                del sys.modules[module_name]
+                raise ModuleLoadError(f"Execution failed: {exc}") from exc
         except Exception as exc:
             del sys.modules[module_name]
             raise ModuleLoadError(f"Execution failed: {exc}") from exc
