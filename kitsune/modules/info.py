@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 import logging
@@ -140,7 +139,6 @@ class InfoModule(KitsuneModule):
         if self.config["custom_message"]:
             import re
             # Убираем переносы строк внутри <tg-emoji ...>\n текст</tg-emoji>
-            # которые пользователь случайно добавил при наборе — они ломают парсер.
             tpl = re.sub(r'(<tg-emoji[^>]+>)\s*\n\s*', r'\1', self.config["custom_message"])
             return tpl.format(
                 me=me_link, version=version, build=build,
@@ -171,14 +169,7 @@ class InfoModule(KitsuneModule):
 
     @staticmethod
     def _parse_html_with_tg_emoji(html_text: str):
-        """
-        Парсит HTML с поддержкой <tg-emoji emoji-id="..."> тегов.
-        Telethon не умеет их обрабатывать нативно — делаем сами.
-
-        Алгоритм: разбиваем HTML на чанки по <tg-emoji> границам,
-        парсим каждый чанк отдельно и отслеживаем смещение точно.
-        Возвращает (plain_text, entities).
-        """
+        """Парсит HTML с поддержкой <tg-emoji emoji-id="..."> тегов."""
         import re
         from telethon.extensions import html as tl_html
         from telethon.tl.types import MessageEntityCustomEmoji
@@ -258,14 +249,10 @@ class InfoModule(KitsuneModule):
                 "Обнови ссылку в конфиге на: %s", banner
             )
 
-        # Если есть custom_message — всегда отправляем через Telethon (userbot),
-        # чтобы корректно отображались <tg-emoji> (premium emoji),
-        # цитаты (<blockquote>) и другие entities, которые не поддерживает Bot API.
+        # Если есть custom_message — используем Telethon + премиум-эмодзи
         if self.config["custom_message"]:
-            from telethon.extensions import html as tl_html
             from telethon.tl.types import ReplyInlineMarkup, KeyboardButtonUrl, KeyboardButtonRow
 
-            # Используем кастомный парсер, который правильно обрабатывает <tg-emoji>
             parsed_text, entities = self._parse_html_with_tg_emoji(text)
 
             markup = None
@@ -278,22 +265,24 @@ class InfoModule(KitsuneModule):
 
             if banner:
                 try:
-                    # Сначала отправляем файл без caption, потом редактируем —
-                    # так formatting_entities гарантированно применяются к тексту
-                    # (как в help.py через message.edit).
-                    sent = await self.client.send_file(
+                    # Отправляем баннер СРАЗУ с подписью и эмодзи
+                    await self.client.send_file(
                         event.peer_id,
                         banner,
+                        caption=parsed_text,
+                        formatting_entities=entities,
+                        buttons=markup,
                     )
-                    await sent.edit(parsed_text, formatting_entities=entities, buttons=markup)
                     await event.message.delete()
                     return
                 except Exception:
-                    pass
+                    logger.exception("info: не удалось отправить баннер с подписью")
 
+            # Если баннера нет или он упал — просто редактируем сообщение
             await event.message.edit(parsed_text, formatting_entities=entities, buttons=markup)
             return
 
+        # Старый режим (без custom_message)
         if inline and inline._bot:
             markup = [[mark]] if mark else []
             kwargs = {"gif": banner} if banner else {}
@@ -324,16 +313,7 @@ class InfoModule(KitsuneModule):
 
     @command("fmt", required=OWNER)
     async def fmt_cmd(self, event) -> None:
-        """
-        Форматирует текст в HTML-теги для вставки в custom_message.
-        Использование:
-          .fmt b <текст>          → <b>текст</b>
-          .fmt i <текст>          → <i>текст</i>
-          .fmt code <текст>       → <code>текст</code>
-          .fmt quote <текст>      → <blockquote>текст</blockquote>
-          .fmt qe <текст>         → <blockquote expandable>текст</blockquote>
-        Ответь на сообщение без аргументов — отформатирует replied текст как <b>.
-        """
+        """Форматирует текст в HTML-теги для custom_message"""
         args = self.get_args(event).strip()
 
         if not args:
@@ -378,7 +358,6 @@ class InfoModule(KitsuneModule):
         open_tag, close_tag = tag_map[tag]
         result = f"{open_tag}{content}{close_tag}"
 
-        # Показываем готовый HTML-код для копирования
         await event.message.edit(
             f"✅ Скопируй и вставь в <code>fcfg kitsuneinfo custom_message</code>:\n\n"
             f"<code>{_esc(result)}</code>",
@@ -386,17 +365,12 @@ class InfoModule(KitsuneModule):
         )
 
 
-    async def emoji_cmd(self, event) -> None:  # вызывается через .e r.text (см. eval.py)
-        """
-        Субкоманда r.text: извлекает ID premium-эмодзи из текста.
-        Использование: .e r.text <текст с прем-эмодзи>
-        Возвращает строку с <tg-emoji emoji-id="..."> тегами для вставки в custom_message.
-        """
+    async def emoji_cmd(self, event) -> None:
+        """Субкоманда .e r.text — вытаскивает ID премиум-эмодзи"""
         from telethon.tl.types import MessageEntityCustomEmoji
 
         args = self.get_args(event).strip()
 
-        # Проверяем субкоманду r.text
         if not args.startswith("r.text"):
             await event.message.edit(
                 "\u274c Использование: <code>.e r.text &lt;текст с прем-эмодзи&gt;</code>",
@@ -404,7 +378,6 @@ class InfoModule(KitsuneModule):
             )
             return
 
-        # Отрезаем "r.text " от начала
         after_subcmd = args[len("r.text"):].lstrip()
         if not after_subcmd:
             await event.message.edit(
@@ -414,16 +387,12 @@ class InfoModule(KitsuneModule):
             )
             return
 
-        # Entities из исходного сообщения
-        # Вычисляем смещение: убираем префикс + "e r.text " из позиций
         raw_full = event.message.raw_text or ""
         dispatcher = getattr(self.client, "_kitsune_dispatcher", None)
         prefix = dispatcher._prefix if dispatcher else "."
-        # Смещение = длина команды до нашего after_subcmd
         skip = len(raw_full) - len(after_subcmd)
 
         entities = list(event.message.entities or [])
-        # Берём только custom emoji которые находятся в зоне after_subcmd
         relevant = [
             e for e in entities
             if isinstance(e, MessageEntityCustomEmoji) and e.offset >= skip
@@ -431,14 +400,11 @@ class InfoModule(KitsuneModule):
 
         if not relevant:
             await event.message.edit(
-                "\u2139\ufe0f Премиум-эмодзи не найдены в тексте.\n"
-                "Убедись что вставляешь кастомные эмодзи (не обычные Unicode).",
+                "\u2139\ufe0f Премиум-эмодзи не найдены в тексте.",
                 parse_mode="html",
             )
             return
 
-        # Строим результат — заменяем прем-эмодзи на теги, сдвигая позиции
-        # Сортируем с конца чтобы замены не сбивали позиции
         replacements = sorted(
             [(e.offset - skip, e.length, e.document_id) for e in relevant],
             key=lambda x: x[0], reverse=True,
@@ -454,4 +420,3 @@ class InfoModule(KitsuneModule):
             f"<code>{_esc(result)}</code>",
             parse_mode="html",
         )
-
