@@ -262,10 +262,11 @@ class InfoModule(KitsuneModule):
         # чтобы корректно отображались <tg-emoji> (premium emoji),
         # цитаты (<blockquote>) и другие entities, которые не поддерживает Bot API.
         if self.config["custom_message"]:
+            from telethon.extensions import html as tl_html
             from telethon.tl.types import ReplyInlineMarkup, KeyboardButtonUrl, KeyboardButtonRow
 
-            # Используем свой парсер с поддержкой <tg-emoji>
-            parsed_text, entities = self._parse_html_with_tg_emoji(text)
+            # Telethon 1.36+ нативно поддерживает <tg-emoji> — просто парсим как help.py
+            parsed_text, entities = tl_html.parse(text)
 
             markup = None
             if mark:
