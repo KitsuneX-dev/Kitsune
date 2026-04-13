@@ -189,32 +189,38 @@ class InfoModule(KitsuneModule):
 
         # Если есть custom_message — всегда отправляем через Telethon (userbot),
         # чтобы корректно отображались <tg-emoji> (premium emoji),
-        # цитаты и другие HTML-сущности, которые не поддерживает Bot API.
+        # цитаты (<blockquote>) и другие entities, которые не поддерживает Bot API.
+        # Парсим HTML вручную и передаём formatting_entities — именно так
+        # работает help.py с custom emoji.
         if self.config["custom_message"]:
-            from telethon.tl.types import InputMessagesFilterEmpty
+            from telethon.extensions import html as tl_html
+            from telethon.tl.types import ReplyInlineMarkup, KeyboardButtonUrl, KeyboardButtonRow
+
+            parsed_text, entities = tl_html.parse(text)
+
             markup = None
             if mark:
-                from telethon.tl.types import ReplyInlineMarkup, KeyboardButtonUrl
-                from telethon.tl.types import KeyboardButtonRow
                 markup = ReplyInlineMarkup(rows=[
                     KeyboardButtonRow(buttons=[
                         KeyboardButtonUrl(text=mark["text"], url=mark["url"])
                     ])
                 ])
+
             if banner:
                 try:
                     await self.client.send_file(
                         event.peer_id,
                         banner,
-                        caption=text,
-                        parse_mode="html",
+                        caption=parsed_text,
+                        formatting_entities=entities,
                         buttons=markup,
                     )
                     await event.delete()
                     return
                 except Exception:
                     pass
-            await event.edit(text, parse_mode="html", buttons=markup)
+
+            await event.edit(parsed_text, formatting_entities=entities, buttons=markup)
             return
 
         if inline and inline._bot:
@@ -245,7 +251,70 @@ class InfoModule(KitsuneModule):
         await self.db.set(_DB_OWNER, "custom_message", None)
         await event.reply("✅ Info-сообщение сброшено.", parse_mode="html")
 
-    @command("e", required=OWNER)
+    @command("fmt", required=OWNER)
+    async def fmt_cmd(self, event) -> None:
+        """
+        Форматирует текст в HTML-теги для вставки в custom_message.
+        Использование:
+          .fmt b <текст>          → <b>текст</b>
+          .fmt i <текст>          → <i>текст</i>
+          .fmt code <текст>       → <code>текст</code>
+          .fmt quote <текст>      → <blockquote>текст</blockquote>
+          .fmt qe <текст>         → <blockquote expandable>текст</blockquote>
+        Ответь на сообщение без аргументов — отформатирует replied текст как <b>.
+        """
+        args = self.get_args(event).strip()
+
+        if not args:
+            await event.message.edit(
+                "❌ Использование:\n"
+                "<code>.fmt b текст</code> — <b>жирный</b>\n"
+                "<code>.fmt i текст</code> — <i>курсив</i>\n"
+                "<code>.fmt code текст</code> — <code>моноширинный</code>\n"
+                "<code>.fmt quote текст</code> — цитата\n"
+                "<code>.fmt qe текст</code> — сворачиваемая цитата",
+                parse_mode="html",
+            )
+            return
+
+        parts = args.split(maxsplit=1)
+        if len(parts) < 2:
+            await event.message.edit("❌ Укажи тип и текст: <code>.fmt b мой текст</code>", parse_mode="html")
+            return
+
+        tag, content = parts[0].lower(), parts[1]
+
+        tag_map = {
+            "b":     ("<b>", "</b>"),
+            "bold":  ("<b>", "</b>"),
+            "i":     ("<i>", "</i>"),
+            "italic":("<i>", "</i>"),
+            "u":     ("<u>", "</u>"),
+            "s":     ("<s>", "</s>"),
+            "code":  ("<code>", "</code>"),
+            "quote": ("<blockquote>", "</blockquote>"),
+            "q":     ("<blockquote>", "</blockquote>"),
+            "qe":    ("<blockquote expandable>", "</blockquote>"),
+        }
+
+        if tag not in tag_map:
+            await event.message.edit(
+                f"❌ Неизвестный тип <code>{_esc(tag)}</code>. Доступные: b, i, u, s, code, quote, qe",
+                parse_mode="html",
+            )
+            return
+
+        open_tag, close_tag = tag_map[tag]
+        result = f"{open_tag}{content}{close_tag}"
+
+        # Показываем готовый HTML-код для копирования
+        await event.message.edit(
+            f"✅ Скопируй и вставь в <code>fcfg kitsuneinfo custom_message</code>:\n\n"
+            f"<code>{_esc(result)}</code>",
+            parse_mode="html",
+        )
+
+
     async def emoji_cmd(self, event) -> None:
         """
         Субкоманда r.text: извлекает ID premium-эмодзи из текста.
