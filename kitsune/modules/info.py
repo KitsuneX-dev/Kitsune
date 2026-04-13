@@ -319,7 +319,7 @@ class InfoModule(KitsuneModule):
         )
 
 
-    async def emoji_cmd(self, event) -> None:
+    async def emoji_cmd(self, event) -> None:  # вызывается через .e r.text (см. eval.py)
         """
         Субкоманда r.text: извлекает ID premium-эмодзи из текста.
         Использование: .e r.text <текст с прем-эмодзи>
