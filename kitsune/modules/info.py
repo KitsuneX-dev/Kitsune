@@ -265,8 +265,8 @@ class InfoModule(KitsuneModule):
             from telethon.extensions import html as tl_html
             from telethon.tl.types import ReplyInlineMarkup, KeyboardButtonUrl, KeyboardButtonRow
 
-            # Telethon 1.36+ нативно поддерживает <tg-emoji> — просто парсим как help.py
-            parsed_text, entities = tl_html.parse(text)
+            # Используем кастомный парсер, который правильно обрабатывает <tg-emoji>
+            parsed_text, entities = self._parse_html_with_tg_emoji(text)
 
             markup = None
             if mark:
