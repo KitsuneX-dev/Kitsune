@@ -169,6 +169,75 @@ class InfoModule(KitsuneModule):
             return {"text": btn[0], "url": btn[1]}
         return None
 
+    @staticmethod
+    def _parse_html_with_tg_emoji(html_text: str):
+        """
+        Парсит HTML с поддержкой <tg-emoji emoji-id="..."> тегов.
+        Telethon не умеет их обрабатывать нативно — делаем сами.
+        Возвращает (plain_text, entities).
+        """
+        import re
+        from telethon.extensions import html as tl_html
+        from telethon.tl.types import MessageEntityCustomEmoji
+
+        # Находим все <tg-emoji emoji-id="...">.....</tg-emoji>
+        tg_pattern = re.compile(
+            r'<tg-emoji\s+emoji-id=["\'](\d+)["\']>(.*?)</tg-emoji>',
+            re.DOTALL,
+        )
+
+        # Сначала парсим стандартный HTML (без tg-emoji) через Telethon
+        # Временно заменяем <tg-emoji ...> на плейсхолдеры, чтобы Telethon
+        # не сломал структуру, а потом восстанавливаем позиции.
+        placeholders: list[tuple[int, str, str]] = []  # (idx, emoji_id, inner_text)
+
+        def replace_with_placeholder(m: re.Match) -> str:
+            emoji_id   = m.group(1)
+            inner_text = m.group(2)
+            idx        = len(placeholders)
+            placeholders.append((idx, emoji_id, inner_text))
+            # Используем inner_text как есть — Telethon разберёт остальной HTML
+            return inner_text
+
+        sanitized = tg_pattern.sub(replace_with_placeholder, html_text)
+
+        # Парсим стандартные теги через Telethon
+        plain_text, entities = tl_html.parse(sanitized)
+
+        if not placeholders:
+            return plain_text, entities
+
+        # Теперь нам нужно найти позиции inner_text в plain_text и
+        # добавить MessageEntityCustomEmoji.
+        # Делаем это в обратном порядке прохода по исходному тексту,
+        # накапливая смещение.
+        # Пересчитываем позиции: ищем каждый inner_text последовательно.
+        search_from = 0
+        # Собираем все замены в порядке появления
+        custom_entities = []
+        for _, emoji_id, inner_text in placeholders:
+            # inner_text в plain_text (уже без HTML-тегов внутри)
+            # Парсим inner_text на предмет вложенных HTML-тегов
+            inner_plain, _ = tl_html.parse(inner_text)
+            pos = plain_text.find(inner_plain, search_from)
+            if pos == -1:
+                continue
+            length = len(inner_plain)
+            custom_entities.append(
+                MessageEntityCustomEmoji(
+                    offset=pos,
+                    length=length,
+                    document_id=int(emoji_id),
+                )
+            )
+            search_from = pos + length
+
+        # Объединяем стандартные entities + custom emoji, сортируем по offset
+        all_entities = list(entities or []) + custom_entities
+        all_entities.sort(key=lambda e: e.offset)
+
+        return plain_text, all_entities
+
     @command("info", required=OWNER)
     async def info_cmd(self, event) -> None:
         import asyncio as _asyncio
@@ -194,13 +263,11 @@ class InfoModule(KitsuneModule):
         # Если есть custom_message — всегда отправляем через Telethon (userbot),
         # чтобы корректно отображались <tg-emoji> (premium emoji),
         # цитаты (<blockquote>) и другие entities, которые не поддерживает Bot API.
-        # Парсим HTML вручную и передаём formatting_entities — именно так
-        # работает help.py с custom emoji.
         if self.config["custom_message"]:
-            from telethon.extensions import html as tl_html
             from telethon.tl.types import ReplyInlineMarkup, KeyboardButtonUrl, KeyboardButtonRow
 
-            parsed_text, entities = tl_html.parse(text)
+            # Используем свой парсер с поддержкой <tg-emoji>
+            parsed_text, entities = self._parse_html_with_tg_emoji(text)
 
             markup = None
             if mark:
