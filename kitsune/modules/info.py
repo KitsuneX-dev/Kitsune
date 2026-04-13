@@ -138,7 +138,11 @@ class InfoModule(KitsuneModule):
         ram      = self._get_ram_usage()
 
         if self.config["custom_message"]:
-            return self.config["custom_message"].format(
+            import re
+            # Убираем переносы строк внутри <tg-emoji ...>\n текст</tg-emoji>
+            # которые пользователь случайно добавил при наборе — они ломают парсер.
+            tpl = re.sub(r'(<tg-emoji[^>]+>)\s*\n\s*', r'\1', self.config["custom_message"])
+            return tpl.format(
                 me=me_link, version=version, build=build,
                 prefix=f"«<code>{_esc(prefix)}</code>»",
                 platform=platform, upd=upd, uptime=uptime,
