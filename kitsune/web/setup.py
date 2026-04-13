@@ -14,171 +14,86 @@ _HTML = """<!DOCTYPE html>
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Kitsune Setup</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>🦊 Kitsune Setup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:opsz,wght@9..40,300;9..40,500;9..40,700&display=swap" rel="stylesheet">
 <style>
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-body {
-  font-family: 'Segoe UI', system-ui, sans-serif;
-  background:
-  color:
-  min-height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 20px;
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+:root{
+  --bg:#080810;--s1:#0e0e1a;--s2:#13131f;
+  --bd:rgba(255,255,255,0.07);--bd2:rgba(255,255,255,0.13);
+  --tx:#e8e8f4;--mu:#5a5a78;--mu2:#8080a0;
+  --fox:#ff6b35;--fox2:#ff9960;
+  --green:#3dffaa;--gr-dim:rgba(61,255,170,0.1);
+  --red:#ff4a6b;
+  --mono:'Space Mono',monospace;--body:'DM Sans',sans-serif;
+  --r:16px;--ease:.18s cubic-bezier(.4,0,.2,1);
+}
+html,body{min-height:100%;height:100%}
+body{
+  font-family:var(--body);background:var(--bg);color:var(--tx);
+  display:flex;align-items:center;justify-content:center;
+  padding:20px;overflow-x:hidden;
   background-image:
-    linear-gradient(rgba(120,80,255,0.03) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(120,80,255,0.03) 1px, transparent 1px);
-  background-size: 40px 40px;
+    radial-gradient(ellipse 70% 50% at 10% 0%,rgba(255,107,53,0.09) 0%,transparent 55%),
+    radial-gradient(ellipse 50% 40% at 90% 100%,rgba(74,158,255,0.05) 0%,transparent 55%);
 }
-
-.card {
-  width: 100%;
-  max-width: 440px;
-  background:
-  border: 1px solid rgba(140,90,255,0.2);
-  border-radius: 20px;
-  padding: 40px 36px;
-  box-shadow: 0 0 60px rgba(120,60,255,0.12), 0 0 120px rgba(120,60,255,0.05);
+.card{
+  width:100%;max-width:420px;
+  background:var(--s1);border:1px solid var(--bd2);border-radius:22px;
+  padding:36px 32px;
+  box-shadow:0 0 60px rgba(255,107,53,0.07),0 24px 60px rgba(0,0,0,0.5);
 }
-
-.logo { text-align: center; font-size: 3rem; margin-bottom: 8px; }
-
-h1 {
-  text-align: center;
-  font-size: 1.4rem;
-  font-weight: 700;
-  color:
-  margin-bottom: 4px;
-  letter-spacing: 0.5px;
+@media(max-width:480px){.card{padding:28px 20px;border-radius:18px}}
+.logo{text-align:center;font-size:3rem;margin-bottom:6px;filter:drop-shadow(0 0 20px rgba(255,107,53,0.4))}
+h1{text-align:center;font-family:var(--mono);font-size:1.15rem;font-weight:700;color:var(--tx);margin-bottom:4px;letter-spacing:-.01em}
+.sub{text-align:center;font-size:.74rem;color:var(--mu);margin-bottom:26px;font-family:var(--mono)}
+.steps-bar{display:flex;gap:8px;justify-content:center;margin-bottom:28px}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--bd2);transition:all .3s}
+.dot.active{background:var(--fox);box-shadow:0 0 10px rgba(255,107,53,0.5);transform:scale(1.2)}
+.dot.done{background:var(--green);box-shadow:0 0 8px rgba(61,255,170,0.4)}
+.step{display:none;animation:fi .22s ease both}
+.step.active{display:block}
+@keyframes fi{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.step-title{font-size:.9rem;font-weight:700;color:var(--tx);margin-bottom:18px;font-family:var(--mono)}
+label{display:block;font-size:.72rem;color:var(--mu2);margin-bottom:5px;margin-top:14px;letter-spacing:.04em;text-transform:uppercase}
+input{
+  width:100%;padding:11px 14px;
+  background:var(--s2);border:1px solid var(--bd2);border-radius:10px;
+  color:var(--tx);font-size:.88rem;font-family:var(--mono);
+  outline:none;transition:border-color var(--ease),box-shadow var(--ease);
 }
-
-.sub {
-  text-align: center;
-  font-size: 0.8rem;
-  color:
-  margin-bottom: 28px;
+input:focus{border-color:rgba(255,107,53,0.5);box-shadow:0 0 0 3px rgba(255,107,53,0.12)}
+input::placeholder{color:var(--mu)}
+.hint{font-size:.72rem;color:var(--mu);margin-top:7px;line-height:1.4}
+.hint a{color:var(--fox2);text-decoration:none}
+.hint a:hover{text-decoration:underline}
+button{
+  width:100%;margin-top:22px;padding:13px;
+  background:linear-gradient(135deg,#d94f1a,#ff7a40);
+  border:none;border-radius:11px;
+  color:#fff;font-size:.92rem;font-weight:700;font-family:var(--body);
+  cursor:pointer;letter-spacing:.2px;
+  transition:filter var(--ease),transform .1s,box-shadow var(--ease);
+  box-shadow:0 4px 20px rgba(255,107,53,0.35);
 }
-
-.steps-bar {
-  display: flex;
-  gap: 6px;
-  justify-content: center;
-  margin-bottom: 28px;
+button:hover{filter:brightness(1.08);box-shadow:0 4px 28px rgba(255,107,53,0.5)}
+button:active{transform:scale(.98)}
+button:disabled{opacity:.35;cursor:not-allowed;box-shadow:none;filter:none}
+.error{
+  display:none;margin-top:13px;padding:10px 14px;
+  background:rgba(255,74,107,0.1);border:1px solid rgba(255,74,107,0.25);
+  border-radius:9px;font-size:.8rem;color:#ff8a9e;line-height:1.4;
 }
-
-.dot {
-  width: 8px; height: 8px;
-  border-radius: 50%;
-  background:
-  transition: all .3s;
-}
-.dot.active { background:
-.dot.done   { background:
-
-.step { display: none; animation: fadeIn .25s ease; }
-.step.active { display: block; }
-
-@keyframes fadeIn {
-  from { opacity: 0; transform: translateY(8px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
-
-.step-title {
-  font-size: 0.95rem;
-  font-weight: 600;
-  color:
-  margin-bottom: 20px;
-}
-
-label {
-  display: block;
-  font-size: 0.78rem;
-  color:
-  margin-bottom: 5px;
-  margin-top: 14px;
-}
-
-input {
-  width: 100%;
-  padding: 11px 14px;
-  background:
-  border: 1px solid rgba(140,90,255,0.2);
-  border-radius: 9px;
-  color:
-  font-size: 0.9rem;
-  outline: none;
-  transition: border .2s, box-shadow .2s;
-}
-
-input:focus {
-  border-color:
-  box-shadow: 0 0 0 3px rgba(128,80,224,0.15);
-}
-
-input::placeholder { color:
-
-.hint {
-  font-size: 0.75rem;
-  color:
-  margin-top: 6px;
-}
-.hint a { color:
-.hint a:hover { text-decoration: underline; }
-
-button {
-  width: 100%;
-  margin-top: 22px;
-  padding: 13px;
-  background: linear-gradient(135deg,
-  border: none;
-  border-radius: 10px;
-  color:
-  font-size: 0.95rem;
-  font-weight: 600;
-  cursor: pointer;
-  letter-spacing: 0.3px;
-  transition: opacity .2s, transform .1s, box-shadow .2s;
-  box-shadow: 0 4px 20px rgba(120,60,255,0.3);
-}
-
-button:hover { opacity: .9; box-shadow: 0 4px 28px rgba(120,60,255,0.5); }
-button:active { transform: scale(.98); }
-button:disabled { opacity: .35; cursor: not-allowed; box-shadow: none; }
-
-.error {
-  display: none;
-  margin-top: 14px;
-  padding: 10px 14px;
-  background: rgba(200,50,80,0.1);
-  border: 1px solid rgba(200,50,80,0.25);
-  border-radius: 8px;
-  font-size: 0.82rem;
-  color:
-}
-
-.done-wrap { text-align: center; padding: 10px 0; }
-.done-icon { font-size: 3.5rem; margin-bottom: 14px; }
-.done-title {
-  font-size: 1.25rem;
-  font-weight: 700;
-  color:
-  margin-bottom: 8px;
-}
-.done-sub {
-  font-size: 0.85rem;
-  color:
-}
-.done-info {
-  margin-top: 18px;
-  padding: 12px 16px;
-  background: rgba(120,60,255,0.08);
-  border: 1px solid rgba(120,60,255,0.2);
-  border-radius: 10px;
-  font-size: 0.85rem;
-  color:
+.done-wrap{text-align:center;padding:8px 0}
+.done-icon{font-size:3.5rem;margin-bottom:14px;filter:drop-shadow(0 0 20px rgba(61,255,170,0.5))}
+.done-title{font-family:var(--mono);font-size:1.15rem;font-weight:700;color:var(--green);margin-bottom:8px}
+.done-sub{font-size:.84rem;color:var(--mu2);line-height:1.5}
+.done-info{
+  margin-top:18px;padding:12px 16px;
+  background:rgba(255,107,53,0.08);border:1px solid rgba(255,107,53,0.2);
+  border-radius:11px;font-size:.82rem;color:var(--fox2);font-family:var(--mono);
 }
 </style>
 </head>
@@ -211,7 +126,7 @@ button:disabled { opacity: .35; cursor: not-allowed; box-shadow: none; }
   <div class="step" id="step2">
     <div class="step-title">📱 Код подтверждения</div>
     <label>Код из Telegram</label>
-    <input type="text" id="code" placeholder="12345" maxlength="10" autocomplete="off">
+    <input type="text" id="code" placeholder="12345" maxlength="10" autocomplete="one-time-code">
     <p class="hint">Проверь личные сообщения в Telegram</p>
     <div class="error" id="err2"></div>
     <button id="btn2" onclick="signIn()">Войти →</button>
@@ -229,74 +144,64 @@ button:disabled { opacity: .35; cursor: not-allowed; box-shadow: none; }
     <div class="done-wrap">
       <div class="done-icon">🎉</div>
       <div class="done-title">Готово!</div>
-      <div class="done-sub">Kitsune запускается… можешь закрыть это окно</div>
+      <div class="done-sub">Kitsune запускается…<br>можешь закрыть это окно</div>
       <div class="done-info" id="done_info"></div>
     </div>
   </div>
 </div>
 
 <script>
-function setDots(active) {
-  for (let i = 1; i <= 3; i++) {
-    const d = document.getElementById('d' + i);
-    if (i < active)      d.className = 'dot done';
-    else if (i === active) d.className = 'dot active';
-    else                   d.className = 'dot';
+function setDots(a){
+  for(let i=1;i<=3;i++){
+    const d=document.getElementById('d'+i);
+    d.className='dot'+(i<a?' done':i===a?' active':'');
   }
 }
-function show(n) {
-  document.querySelectorAll('.step').forEach(s => s.classList.remove('active'));
-  document.getElementById('step' + n).classList.add('active');
+function show(n){
+  document.querySelectorAll('.step').forEach(s=>s.classList.remove('active'));
+  document.getElementById('step'+n).classList.add('active');
   setDots(n);
 }
-function showErr(n, msg) {
-  const el = document.getElementById('err' + n);
-  el.textContent = msg;
-  el.style.display = msg ? 'block' : 'none';
+function showErr(n,msg){
+  const el=document.getElementById('err'+n);
+  el.textContent=msg;el.style.display=msg?'block':'none';
 }
-function setBtn(id, text, disabled) {
-  const b = document.getElementById(id);
-  b.textContent = text;
-  b.disabled = disabled;
+function setBtn(id,text,disabled){
+  const b=document.getElementById(id);b.textContent=text;b.disabled=disabled;
 }
-async function post(url, data) {
-  const r = await fetch(url, {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify(data)
-  });
+async function post(url,data){
+  const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
   return r.json();
 }
-async function sendCode() {
-  const api_id   = document.getElementById('api_id').value.trim();
-  const api_hash = document.getElementById('api_hash').value.trim();
-  const phone    = document.getElementById('phone').value.trim();
-  if (!api_id || !api_hash) { showErr(1, 'Заполни API ID и API Hash'); return; }
-  if (!phone) { showErr(1, 'Введи номер телефона'); return; }
-  setBtn('btn1', 'Отправляем код…', true);
-  const res = await post('/api/sendcode', { api_id: parseInt(api_id), api_hash, phone });
-  setBtn('btn1', 'Получить код →', false);
-  if (res.ok) { showErr(1, ''); show(2); }
-  else showErr(1, res.error || 'Ошибка');
+async function sendCode(){
+  const api_id=document.getElementById('api_id').value.trim();
+  const api_hash=document.getElementById('api_hash').value.trim();
+  const phone=document.getElementById('phone').value.trim();
+  if(!api_id||!api_hash){showErr(1,'Заполни API ID и API Hash');return;}
+  if(!phone){showErr(1,'Введи номер телефона');return;}
+  setBtn('btn1','Отправляем код…',true);
+  const res=await post('/api/sendcode',{api_id:parseInt(api_id),api_hash,phone});
+  setBtn('btn1','Получить код →',false);
+  if(res.ok){showErr(1,'');show(2);}else showErr(1,res.error||'Ошибка');
 }
-async function signIn() {
-  const code = document.getElementById('code').value.trim();
-  if (!code) { showErr(2, 'Введи код'); return; }
-  setBtn('btn2', 'Проверяем…', true);
-  const res = await post('/api/signin', { code });
-  setBtn('btn2', 'Войти →', false);
-  if (res.ok) { showErr(2, ''); show(4); document.getElementById('done_info').textContent = res.message || ''; }
-  else if (res.need_2fa) { showErr(2, ''); show(3); }
-  else showErr(2, res.error || 'Неверный код');
+async function signIn(){
+  const code=document.getElementById('code').value.trim();
+  if(!code){showErr(2,'Введи код');return;}
+  setBtn('btn2','Проверяем…',true);
+  const res=await post('/api/signin',{code});
+  setBtn('btn2','Войти →',false);
+  if(res.ok){showErr(2,'');show(4);document.getElementById('done_info').textContent=res.message||'';}
+  else if(res.need_2fa){showErr(2,'');show(3);}
+  else showErr(2,res.error||'Неверный код');
 }
-async function check2fa() {
-  const pwd = document.getElementById('password').value;
-  if (!pwd) { showErr(3, 'Введи пароль'); return; }
-  setBtn('btn3', 'Проверяем…', true);
-  const res = await post('/api/2fa', { password: pwd });
-  setBtn('btn3', 'Подтвердить →', false);
-  if (res.ok) { showErr(3, ''); show(4); document.getElementById('done_info').textContent = res.message || ''; }
-  else showErr(3, res.error || 'Неверный пароль');
+async function check2fa(){
+  const pwd=document.getElementById('password').value;
+  if(!pwd){showErr(3,'Введи пароль');return;}
+  setBtn('btn3','Проверяем…',true);
+  const res=await post('/api/2fa',{password:pwd});
+  setBtn('btn3','Подтвердить →',false);
+  if(res.ok){showErr(3,'');show(4);document.getElementById('done_info').textContent=res.message||'';}
+  else showErr(3,res.error||'Неверный пароль');
 }
 </script>
 </body>
