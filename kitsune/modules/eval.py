@@ -23,6 +23,16 @@ class EvalModule(KitsuneModule):
             return
 
         expr = code[1].strip()
+
+        # Субкоманда r.text — извлечение ID премиум-эмодзи для custom_message
+        if expr.startswith("r.text"):
+            from .info import InfoModule
+            info_mod = InfoModule.__new__(InfoModule)
+            info_mod.client = self.client
+            info_mod.db     = self.db
+            await info_mod.emoji_cmd(event)
+            return
+
         result, err = await self._eval(expr, event)
         if err:
             out = f"❌ <b>Ошибка:</b>\n<code>{escape_html(err)}</code>"
