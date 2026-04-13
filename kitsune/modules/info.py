@@ -187,6 +187,36 @@ class InfoModule(KitsuneModule):
                 "Обнови ссылку в конфиге на: %s", banner
             )
 
+        # Если есть custom_message — всегда отправляем через Telethon (userbot),
+        # чтобы корректно отображались <tg-emoji> (premium emoji),
+        # цитаты и другие HTML-сущности, которые не поддерживает Bot API.
+        if self.config["custom_message"]:
+            from telethon.tl.types import InputMessagesFilterEmpty
+            markup = None
+            if mark:
+                from telethon.tl.types import ReplyInlineMarkup, KeyboardButtonUrl
+                from telethon.tl.types import KeyboardButtonRow
+                markup = ReplyInlineMarkup(rows=[
+                    KeyboardButtonRow(buttons=[
+                        KeyboardButtonUrl(text=mark["text"], url=mark["url"])
+                    ])
+                ])
+            if banner:
+                try:
+                    await self.client.send_file(
+                        event.peer_id,
+                        banner,
+                        caption=text,
+                        parse_mode="html",
+                        buttons=markup,
+                    )
+                    await event.delete()
+                    return
+                except Exception:
+                    pass
+            await event.edit(text, parse_mode="html", buttons=markup)
+            return
+
         if inline and inline._bot:
             markup = [[mark]] if mark else []
             kwargs = {"gif": banner} if banner else {}
