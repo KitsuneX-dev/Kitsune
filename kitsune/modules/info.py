@@ -174,69 +174,67 @@ class InfoModule(KitsuneModule):
         """
         Парсит HTML с поддержкой <tg-emoji emoji-id="..."> тегов.
         Telethon не умеет их обрабатывать нативно — делаем сами.
+
+        Алгоритм: разбиваем HTML на чанки по <tg-emoji> границам,
+        парсим каждый чанк отдельно и отслеживаем смещение точно.
         Возвращает (plain_text, entities).
         """
         import re
         from telethon.extensions import html as tl_html
         from telethon.tl.types import MessageEntityCustomEmoji
 
-        # Находим все <tg-emoji emoji-id="...">.....</tg-emoji>
         tg_pattern = re.compile(
-            r'<tg-emoji\s+emoji-id=["\'](\d+)["\']>(.*?)</tg-emoji>',
+            r'<tg-emoji\s+emoji-id=["\'](\d+)["\'\']>(.*?)</tg-emoji>',
             re.DOTALL,
         )
 
-        # Сначала парсим стандартный HTML (без tg-emoji) через Telethon
-        # Временно заменяем <tg-emoji ...> на плейсхолдеры, чтобы Telethon
-        # не сломал структуру, а потом восстанавливаем позиции.
-        placeholders: list[tuple[int, str, str]] = []  # (idx, emoji_id, inner_text)
+        if not tg_pattern.search(html_text):
+            return tl_html.parse(html_text)
 
-        def replace_with_placeholder(m: re.Match) -> str:
-            emoji_id   = m.group(1)
-            inner_text = m.group(2)
-            idx        = len(placeholders)
-            placeholders.append((idx, emoji_id, inner_text))
-            # Используем inner_text как есть — Telethon разберёт остальной HTML
-            return inner_text
+        result_text     = ""
+        result_entities = []
+        cursor          = 0
+        pos_in_html     = 0
 
-        sanitized = tg_pattern.sub(replace_with_placeholder, html_text)
+        for m in tg_pattern.finditer(html_text):
+            before_html = html_text[pos_in_html:m.start()]
+            if before_html:
+                plain_before, ents_before = tl_html.parse(before_html)
+                for e in (ents_before or []):
+                    e.offset += cursor
+                result_text     += plain_before
+                result_entities += list(ents_before or [])
+                cursor          += len(plain_before)
 
-        # Парсим стандартные теги через Telethon
-        plain_text, entities = tl_html.parse(sanitized)
+            emoji_id    = m.group(1)
+            inner_html  = m.group(2)
+            inner_plain, inner_ents = tl_html.parse(inner_html)
 
-        if not placeholders:
-            return plain_text, entities
+            for e in (inner_ents or []):
+                e.offset += cursor
 
-        # Теперь нам нужно найти позиции inner_text в plain_text и
-        # добавить MessageEntityCustomEmoji.
-        # Делаем это в обратном порядке прохода по исходному тексту,
-        # накапливая смещение.
-        # Пересчитываем позиции: ищем каждый inner_text последовательно.
-        search_from = 0
-        # Собираем все замены в порядке появления
-        custom_entities = []
-        for _, emoji_id, inner_text in placeholders:
-            # inner_text в plain_text (уже без HTML-тегов внутри)
-            # Парсим inner_text на предмет вложенных HTML-тегов
-            inner_plain, _ = tl_html.parse(inner_text)
-            pos = plain_text.find(inner_plain, search_from)
-            if pos == -1:
-                continue
-            length = len(inner_plain)
-            custom_entities.append(
+            result_entities.append(
                 MessageEntityCustomEmoji(
-                    offset=pos,
-                    length=length,
+                    offset=cursor,
+                    length=len(inner_plain),
                     document_id=int(emoji_id),
                 )
             )
-            search_from = pos + length
+            result_entities += list(inner_ents or [])
+            result_text     += inner_plain
+            cursor          += len(inner_plain)
+            pos_in_html      = m.end()
 
-        # Объединяем стандартные entities + custom emoji, сортируем по offset
-        all_entities = list(entities or []) + custom_entities
-        all_entities.sort(key=lambda e: e.offset)
+        tail_html = html_text[pos_in_html:]
+        if tail_html:
+            plain_tail, ents_tail = tl_html.parse(tail_html)
+            for e in (ents_tail or []):
+                e.offset += cursor
+            result_text     += plain_tail
+            result_entities += list(ents_tail or [])
 
-        return plain_text, all_entities
+        result_entities.sort(key=lambda e: e.offset)
+        return result_text, result_entities
 
     @command("info", required=OWNER)
     async def info_cmd(self, event) -> None:
