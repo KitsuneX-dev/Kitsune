@@ -210,6 +210,74 @@ class CommandDispatcher:
         sender_id = message.sender_id
         if not sender_id or sender_id == self._client.tg_id:
             return
+
+        # ── Перехват ввода для inline-конфига ──────────────────────────────────
+        # Когда пользователь вводит значение через бота (pending_input),
+        # перехватываем сообщение здесь через Telethon, пока entities доступны,
+        # и сохраняем HTML с форматированием (цитаты, жирный, прем-эмодзи).
+        pending = self._db.get("kitsune.config", "pending_input", None)
+        if pending:
+            owner_id = self._db.get("kitsune.notifier", "owner_id", None)
+            if sender_id == owner_id:
+                try:
+                    from telethon.extensions import html as tl_html
+                    import copy
+                    raw_text = message.raw_text or message.text or ""
+                    entities = list(message.entities or [])
+                    # Сериализуем в HTML сохраняя всё форматирование
+                    html_value = tl_html.unparse(raw_text, entities) if entities else raw_text
+
+                    mod_name = pending["mod"]
+                    key = pending["key"]
+                    await self._db.delete("kitsune.config", "pending_input")
+
+                    loader = getattr(self._client, "_kitsune_loader", None)
+                    if loader:
+                        mod = loader.modules.get(mod_name)
+                        if mod and key in mod.config:
+                            orig = mod.config.get_default(key)
+                            value = html_value
+                            try:
+                                if isinstance(orig, int):
+                                    value = int(raw_text)
+                                elif isinstance(orig, float):
+                                    value = float(raw_text)
+                            except (ValueError, TypeError):
+                                pass
+                            mod.config[key] = value
+                            await self._db.set(
+                                f"kitsune.config.{mod_name}", "values",
+                                {k: mod.config[k] for k in mod.config.keys()}
+                            )
+                            try:
+                                await self._db.force_save()
+                            except Exception:
+                                pass
+                            # Обновляем сообщение бота с подтверждением
+                            inline = getattr(self._client, "_kitsune_inline", None)
+                            if inline and inline._bot:
+                                from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+                                try:
+                                    await inline._bot.edit_message_text(
+                                        chat_id=pending["chat_id"],
+                                        message_id=pending["msg_id"],
+                                        text=f"✅ <b>{mod.name}</b> → <code>{key}</code> = <b>{value}</b>",
+                                        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                                            InlineKeyboardButton(text="◀️ Назад", callback_data=f"cfg_mod:{mod_name}")
+                                        ]]),
+                                        parse_mode="HTML",
+                                    )
+                                except Exception:
+                                    pass
+                            try:
+                                await message.delete()
+                            except Exception:
+                                pass
+                            return  # Не передаём дальше в bot_runner
+                except Exception:
+                    pass  # При ошибке — bot_runner обработает как обычно
+        # ── Конец перехвата ────────────────────────────────────────────────────
+
         sec = self._security
         sudo_users = sec.get_sudo_users() if sec else []
         co_owners  = self._db.get("kitsune.security", "co_owners", [])

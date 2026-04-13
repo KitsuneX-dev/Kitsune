@@ -444,6 +444,34 @@ class ConfigModule(KitsuneModule):
 
         default_val = mod.config.get_default(key)
         new_val = raw_val
+
+        # Для строковых значений — сохраняем HTML-форматирование из entities:
+        # жирный, цитата (blockquote), custom emoji (прем-эмодзи) и т.д.
+        if isinstance(default_val, (str, type(None))):
+            try:
+                from telethon.extensions import html as tl_html
+                import copy
+                msg = event.message
+                full_raw = msg.raw_text or ""
+                entities = list(msg.entities or [])
+                val_start_raw = full_raw.find(raw_val)
+                if val_start_raw >= 0 and entities:
+                    val_end_raw = val_start_raw + len(raw_val)
+                    relevant = [
+                        e for e in entities
+                        if e.offset >= val_start_raw and (e.offset + e.length) <= val_end_raw
+                    ]
+                    if relevant:
+                        shifted = []
+                        for e in relevant:
+                            ec = copy.copy(e)
+                            ec.offset = e.offset - val_start_raw
+                            shifted.append(ec)
+                        html_val = tl_html.unparse(raw_val, shifted)
+                        new_val = html_val
+            except Exception:
+                pass  # Если не получилось — оставляем raw_val
+
         if isinstance(default_val, bool):
             new_val = raw_val.lower() in ("1", "true", "yes", "да")
         elif isinstance(default_val, int):
