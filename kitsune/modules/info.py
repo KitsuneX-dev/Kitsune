@@ -278,19 +278,20 @@ class InfoModule(KitsuneModule):
 
             if banner:
                 try:
-                    await self.client.send_file(
+                    # Сначала отправляем файл без caption, потом редактируем —
+                    # так formatting_entities гарантированно применяются к тексту
+                    # (как в help.py через message.edit).
+                    sent = await self.client.send_file(
                         event.peer_id,
                         banner,
-                        caption=parsed_text,
-                        formatting_entities=entities,
-                        buttons=markup,
                     )
-                    await event.delete()
+                    await sent.edit(parsed_text, formatting_entities=entities, buttons=markup)
+                    await event.message.delete()
                     return
                 except Exception:
                     pass
 
-            await event.edit(parsed_text, formatting_entities=entities, buttons=markup)
+            await event.message.edit(parsed_text, formatting_entities=entities, buttons=markup)
             return
 
         if inline and inline._bot:
