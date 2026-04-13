@@ -14,6 +14,7 @@ _DB_OWNER = "kitsune.info"
 def _esc(s: str) -> str:
     return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
+
 class InfoModule(KitsuneModule):
 
     name        = "KitsuneInfo"
@@ -213,3 +214,74 @@ class InfoModule(KitsuneModule):
         self.config["custom_message"] = None
         await self.db.set(_DB_OWNER, "custom_message", None)
         await event.reply("✅ Info-сообщение сброшено.", parse_mode="html")
+
+    @command("e", required=OWNER)
+    async def emoji_cmd(self, event) -> None:
+        """
+        Субкоманда r.text: извлекает ID premium-эмодзи из текста.
+        Использование: .e r.text <текст с прем-эмодзи>
+        Возвращает строку с <tg-emoji emoji-id="..."> тегами для вставки в custom_message.
+        """
+        from telethon.tl.types import MessageEntityCustomEmoji
+
+        args = self.get_args(event).strip()
+
+        # Проверяем субкоманду r.text
+        if not args.startswith("r.text"):
+            await event.message.edit(
+                "\u274c Использование: <code>.e r.text &lt;текст с прем-эмодзи&gt;</code>",
+                parse_mode="html",
+            )
+            return
+
+        # Отрезаем "r.text " от начала
+        after_subcmd = args[len("r.text"):].lstrip()
+        if not after_subcmd:
+            await event.message.edit(
+                "\u274c Напиши текст с прем-эмодзи после команды:\n"
+                "<code>.e r.text ✨ Мой статус ✨</code>",
+                parse_mode="html",
+            )
+            return
+
+        # Entities из исходного сообщения
+        # Вычисляем смещение: убираем префикс + "e r.text " из позиций
+        raw_full = event.message.raw_text or ""
+        dispatcher = getattr(self.client, "_kitsune_dispatcher", None)
+        prefix = dispatcher._prefix if dispatcher else "."
+        # Смещение = длина команды до нашего after_subcmd
+        skip = len(raw_full) - len(after_subcmd)
+
+        entities = list(event.message.entities or [])
+        # Берём только custom emoji которые находятся в зоне after_subcmd
+        relevant = [
+            e for e in entities
+            if isinstance(e, MessageEntityCustomEmoji) and e.offset >= skip
+        ]
+
+        if not relevant:
+            await event.message.edit(
+                "\u2139\ufe0f Премиум-эмодзи не найдены в тексте.\n"
+                "Убедись что вставляешь кастомные эмодзи (не обычные Unicode).",
+                parse_mode="html",
+            )
+            return
+
+        # Строим результат — заменяем прем-эмодзи на теги, сдвигая позиции
+        # Сортируем с конца чтобы замены не сбивали позиции
+        replacements = sorted(
+            [(e.offset - skip, e.length, e.document_id) for e in relevant],
+            key=lambda x: x[0], reverse=True,
+        )
+
+        result = after_subcmd
+        for offset, length, doc_id in replacements:
+            emoji_char = result[offset:offset + length]
+            tag = f'<tg-emoji emoji-id="{doc_id}">{emoji_char}</tg-emoji>'
+            result = result[:offset] + tag + result[offset + length:]
+
+        await event.message.edit(
+            f"<code>{_esc(result)}</code>",
+            parse_mode="html",
+        )
+

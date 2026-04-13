@@ -109,7 +109,7 @@ class ConfigModule(KitsuneModule):
         "no_mod":    "❌ Модуль не найден.",
         "no_option": "❌ Параметр не найден.",
         "fconfig_args": "❌ Использование: <code>.fconfig &lt;модуль&gt; &lt;параметр&gt; &lt;значение&gt;</code>",
-        "fconfig_ok":   "✅ <code>{key}</code> = {val}",
+        "fconfig_ok":   "⚙️ <code>{key}</code> = <b>{val}</b>",
     }
 
     def _inline(self):
@@ -423,7 +423,7 @@ class ConfigModule(KitsuneModule):
         await event.message.edit("⚙️ <b>Загрузка...</b>", parse_mode="html")
         await self._screen_choose_category(event.message)
 
-    @command("fconfig", required=OWNER)
+    @command("fconfig", required=OWNER, aliases=["fcfg"])
     async def fconfig_cmd(self, event) -> None:
         args = self.get_args(event).split(maxsplit=2)
         if len(args) < 3:
