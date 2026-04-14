@@ -175,7 +175,7 @@ class InfoModule(KitsuneModule):
         from telethon.tl.types import MessageEntityCustomEmoji
 
         tg_pattern = re.compile(
-            r'<tg-emoji\s+emoji-id=["\'](\d+)["\'\']>(.*?)</tg-emoji>',
+            r'<tg-emoji\s+emoji-id=(?:["\'])?(\d+)(?:["\'])?>(.*?)</tg-emoji>',
             re.DOTALL,
         )
 
