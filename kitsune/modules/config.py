@@ -450,6 +450,7 @@ class ConfigModule(KitsuneModule):
         if isinstance(default_val, (str, type(None))):
             try:
                 from telethon.extensions import html as tl_html
+                from telethon.tl.types import MessageEntityCustomEmoji
                 import copy
                 msg = event.message
                 full_raw = msg.raw_text or ""
@@ -457,18 +458,66 @@ class ConfigModule(KitsuneModule):
                 val_start_raw = full_raw.find(raw_val)
                 if val_start_raw >= 0 and entities:
                     val_end_raw = val_start_raw + len(raw_val)
-                    relevant = [
-                        e for e in entities
-                        if e.offset >= val_start_raw and (e.offset + e.length) <= val_end_raw
-                    ]
+                    relevant = sorted(
+                        [
+                            e for e in entities
+                            if e.offset >= val_start_raw and (e.offset + e.length) <= val_end_raw
+                        ],
+                        key=lambda x: x.offset,
+                    )
                     if relevant:
-                        shifted = []
-                        for e in relevant:
-                            ec = copy.copy(e)
-                            ec.offset = e.offset - val_start_raw
-                            shifted.append(ec)
-                        html_val = tl_html.unparse(raw_val, shifted)
-                        new_val = html_val
+                        # Разделяем custom emoji и обычные entities
+                        custom_emojis = [e for e in relevant if isinstance(e, MessageEntityCustomEmoji)]
+                        other_entities = [e for e in relevant if not isinstance(e, MessageEntityCustomEmoji)]
+
+                        if not custom_emojis:
+                            # Нет прем-эмодзи — стандартный unparse
+                            shifted = []
+                            for e in other_entities:
+                                ec = copy.copy(e)
+                                ec.offset = e.offset - val_start_raw
+                                shifted.append(ec)
+                            new_val = tl_html.unparse(raw_val, shifted)
+                        else:
+                            # Есть прем-эмодзи — строим HTML вручную по кускам,
+                            # потому что стандартный telethon не умеет unparse
+                            # MessageEntityCustomEmoji в <tg-emoji> теги.
+                            result_html = ""
+                            cursor = 0  # позиция в raw_val
+
+                            for ce in sorted(custom_emojis, key=lambda x: x.offset):
+                                ce_off = ce.offset - val_start_raw  # смещение в raw_val
+
+                                # Кусок ДО текущего custom emoji
+                                if ce_off > cursor:
+                                    before = raw_val[cursor:ce_off]
+                                    before_ents = []
+                                    for oe in other_entities:
+                                        oe_off = oe.offset - val_start_raw
+                                        if oe_off >= cursor and (oe_off + oe.length) <= ce_off:
+                                            ec = copy.copy(oe)
+                                            ec.offset = oe_off - cursor
+                                            before_ents.append(ec)
+                                    result_html += tl_html.unparse(before, before_ents)
+
+                                # Сам custom emoji тег
+                                inner = raw_val[ce_off:ce_off + ce.length]
+                                result_html += f'<tg-emoji emoji-id="{ce.document_id}">{inner}</tg-emoji>'
+                                cursor = ce_off + ce.length
+
+                            # Хвост после последнего custom emoji
+                            if cursor < len(raw_val):
+                                tail = raw_val[cursor:]
+                                tail_ents = []
+                                for oe in other_entities:
+                                    oe_off = oe.offset - val_start_raw
+                                    if oe_off >= cursor:
+                                        ec = copy.copy(oe)
+                                        ec.offset = oe_off - cursor
+                                        tail_ents.append(ec)
+                                result_html += tl_html.unparse(tail, tail_ents)
+
+                            new_val = result_html
             except Exception:
                 pass  # Если не получилось — оставляем raw_val
 
