@@ -315,6 +315,16 @@ class InfoModule(KitsuneModule):
         await self.db.set(_DB_OWNER, "custom_message", args)
         await event.reply(self.strings("setinfo_success"), parse_mode="html")
 
+    @command("debuginfo", required=OWNER)
+    async def debuginfo_cmd(self, event) -> None:
+        """Показывает raw содержимое custom_message"""
+        msg = self.config.get("custom_message") or self.db.get(_DB_OWNER, "custom_message", None)
+        if not msg:
+            await event.reply("custom_message не задан", parse_mode="html")
+            return
+        preview = repr(msg[:300])
+        await event.reply(f"<code>{_esc(preview)}</code>", parse_mode="html")
+
     @command("resetinfo", required=OWNER)
     async def resetinfo_cmd(self, event) -> None:
         self.config["custom_message"] = None
