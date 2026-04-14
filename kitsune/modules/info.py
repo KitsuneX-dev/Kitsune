@@ -178,6 +178,9 @@ class InfoModule(KitsuneModule):
             """Длина строки в UTF-16 code units (именно так считает Telethon)."""
             return len(s.encode("utf-16-le")) // 2
 
+        # Telethon не понимает <br> — заменяем на перенос строки до парсинга
+        html_text = re.sub(r'<br\s*/?>', '\n', html_text)
+
         tg_pattern = re.compile(
             r'<tg-emoji\s+emoji-id=(?:["\'])?(\d+)(?:["\'])?>(.*?)</tg-emoji>',
             re.DOTALL,
@@ -417,10 +420,13 @@ class InfoModule(KitsuneModule):
         result = after_subcmd
         for offset, length, doc_id in replacements:
             emoji_char = result[offset:offset + length]
-            tag = f'<tg-emoji emoji-id="{doc_id}">{emoji_char}</tg-emoji>'
+            tag = f'<tg-emoji emoji-id={doc_id}>{emoji_char}</tg-emoji>'
             result = result[:offset] + tag + result[offset + length:]
 
+        # Заменяем переносы строк на <br> — для корректной вставки в custom_message
+        result_for_copy = result.replace('\n', '<br>\n')
+
         await event.message.edit(
-            f"<code>{_esc(result)}</code>",
+            f"<code>{_esc(result_for_copy)}</code>",
             parse_mode="html",
         )
