@@ -318,7 +318,7 @@ class InfoModule(KitsuneModule):
     @command("debuginfo", required=OWNER)
     async def debuginfo_cmd(self, event) -> None:
         """Показывает raw содержимое custom_message"""
-        msg = self.config.get("custom_message") or self.db.get(_DB_OWNER, "custom_message", None)
+        msg = self.config["custom_message"] or self.db.get(_DB_OWNER, "custom_message", None)
         if not msg:
             await event.reply("custom_message не задан", parse_mode="html")
             return
