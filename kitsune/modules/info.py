@@ -174,6 +174,10 @@ class InfoModule(KitsuneModule):
         from telethon.extensions import html as tl_html
         from telethon.tl.types import MessageEntityCustomEmoji
 
+        def _u16len(s: str) -> int:
+            """Длина строки в UTF-16 code units (именно так считает Telethon)."""
+            return len(s.encode("utf-16-le")) // 2
+
         tg_pattern = re.compile(
             r'<tg-emoji\s+emoji-id=(?:["\'])?(\d+)(?:["\'])?>(.*?)</tg-emoji>',
             re.DOTALL,
@@ -184,7 +188,7 @@ class InfoModule(KitsuneModule):
 
         result_text     = ""
         result_entities = []
-        cursor          = 0
+        cursor          = 0   # в UTF-16 code units
         pos_in_html     = 0
 
         for m in tg_pattern.finditer(html_text):
@@ -195,7 +199,7 @@ class InfoModule(KitsuneModule):
                     e.offset += cursor
                 result_text     += plain_before
                 result_entities += list(ents_before or [])
-                cursor          += len(plain_before)
+                cursor          += _u16len(plain_before)
 
             emoji_id    = m.group(1)
             inner_html  = m.group(2)
@@ -207,13 +211,13 @@ class InfoModule(KitsuneModule):
             result_entities.append(
                 MessageEntityCustomEmoji(
                     offset=cursor,
-                    length=len(inner_plain),
+                    length=_u16len(inner_plain),
                     document_id=int(emoji_id),
                 )
             )
             result_entities += list(inner_ents or [])
             result_text     += inner_plain
-            cursor          += len(inner_plain)
+            cursor          += _u16len(inner_plain)
             pos_in_html      = m.end()
 
         tail_html = html_text[pos_in_html:]
