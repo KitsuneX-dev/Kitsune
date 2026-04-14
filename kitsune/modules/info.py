@@ -138,8 +138,11 @@ class InfoModule(KitsuneModule):
 
         if self.config["custom_message"]:
             import re
-            # Убираем переносы строк внутри <tg-emoji ...>\n текст</tg-emoji>
-            tpl = re.sub(r'(<tg-emoji[^>]+>)\s*\n\s*', r'\1', self.config["custom_message"])
+            raw = self.config["custom_message"]
+            # Сначала нормализуем <br> → \n, чтобы не потерять переносы
+            raw = re.sub(r'<br\s*/?>', '\n', raw)
+            # Убираем лишние пробелы/переносы внутри <tg-emoji ...>\n текст</tg-emoji>
+            tpl = re.sub(r'(<tg-emoji[^>]+>)\s*\n\s*', r'\1', raw)
             return tpl.format(
                 me=me_link, version=version, build=build,
                 prefix=f"«<code>{_esc(prefix)}</code>»",
