@@ -425,12 +425,24 @@ class ConfigModule(KitsuneModule):
 
     @command("fconfig", required=OWNER, aliases=["fcfg"])
     async def fconfig_cmd(self, event) -> None:
-        args = self.get_args(event).split(maxsplit=2)
-        if len(args) < 3:
+        # Разбиваем только по пробелам (не по \n!), чтобы raw_val
+        # сохранял переносы строк из многострочного custom_message.
+        full_args = self.get_args(event)
+        space1 = full_args.find(" ")
+        if space1 == -1:
             await event.message.edit(self.strings("fconfig_args"), parse_mode="html")
             return
-
-        mod_name, key, raw_val = args
+        mod_name = full_args[:space1]
+        rest = full_args[space1 + 1:]
+        space2 = rest.find(" ")
+        if space2 == -1:
+            await event.message.edit(self.strings("fconfig_args"), parse_mode="html")
+            return
+        key = rest[:space2]
+        raw_val = rest[space2 + 1:]
+        if not raw_val:
+            await event.message.edit(self.strings("fconfig_args"), parse_mode="html")
+            return
         loader = getattr(self.client, "_kitsune_loader", None)
         if not loader:
             return
