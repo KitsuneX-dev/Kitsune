@@ -65,7 +65,7 @@ class InlineManager:
         self._started = True
         asyncio.ensure_future(self._dp.start_polling(self._bot, handle_signals=False))
         asyncio.ensure_future(self._cleaner())
-        await asyncio.sleep(1)
+        await asyncio.sleep(3)  # Termux/slow devices need more time to establish polling
         try:
             me = await self._bot.get_me()
             self._bot_username = me.username
@@ -227,13 +227,13 @@ class InlineManager:
             logger.error("InlineManager: cannot resolve entity", exc_info=True)
             return None
 
-        await asyncio.sleep(0.3)
+        await asyncio.sleep(1.5)
 
-        for attempt in range(3):
+        for attempt in range(5):
             try:
                 results = await self._client.inline_query(self._bot_username, unit_id)
                 if not results:
-                    await asyncio.sleep(0.3)
+                    await asyncio.sleep(1.0)
                     continue
                 sent = await results[0].click(entity, reply_to=reply_to)
                 try:
@@ -244,8 +244,12 @@ class InlineManager:
             except Exception as exc:
                 err = str(exc)
                 if "BotResponseTimeout" in err or "timeout" in err.lower():
-                    logger.warning("InlineManager._invoke_unit: timeout attempt %d/3", attempt + 1)
-                    await asyncio.sleep(0.5)
+                    delay = 1.5 * (attempt + 1)
+                    logger.warning(
+                        "InlineManager._invoke_unit: timeout attempt %d/5, retrying in %.1fs",
+                        attempt + 1, delay,
+                    )
+                    await asyncio.sleep(delay)
                     continue
                 logger.exception("InlineManager._invoke_unit failed")
                 return None
