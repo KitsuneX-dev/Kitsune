@@ -546,6 +546,11 @@ class ConfigModule(KitsuneModule):
             except ValueError:
                 pass
 
+        # Конвертируем <br> → \n перед сохранением (поддержка ручных переносов)
+        if isinstance(new_val, str):
+            import re as _re
+            new_val = _re.sub(r'<br\s*/?>', '\n', new_val)
+
         mod.config[key] = new_val
         await self._save_config(mod_name, mod)
         try:
