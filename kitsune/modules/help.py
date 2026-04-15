@@ -108,14 +108,15 @@ class HelpModule(KitsuneModule):
         plain_lines: list[str] = []
 
         for name, mod in sorted(loader.modules.items(), key=lambda x: x[0].lower()):
+            if name in hidden:
+                continue
             cmds = self._get_cmds(mod)
             if not cmds:
                 continue
             is_core = getattr(mod, "_is_builtin", False)
             icon    = self.config["core_emoji"] if is_core else self.config["plain_emoji"]
             display = mod.name or name.capitalize()
-            hidden_mark = " 🙈" if name in hidden else ""
-            line = f"\n{icon} <code>{display}</code>{hidden_mark}: ( {' | '.join(cmds)} )"
+            line = f"\n{icon} <code>{display}</code>: ( {' | '.join(cmds)} )"
             if is_core:
                 core_lines.append(line)
             else:
