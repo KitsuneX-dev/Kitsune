@@ -403,16 +403,33 @@ class InfoModule(KitsuneModule):
             )
             return
 
+        def utf16_to_py(text: str, utf16_offset: int) -> int:
+            """Конвертирует UTF-16 offset (как у Telegram) в Python-индекс строки."""
+            py_idx = 0
+            utf16_counted = 0
+            while utf16_counted < utf16_offset and py_idx < len(text):
+                cp = ord(text[py_idx])
+                utf16_counted += 2 if cp > 0xFFFF else 1
+                py_idx += 1
+            return py_idx
+
+        def utf16_slice(text: str, utf16_offset: int, utf16_length: int) -> tuple[int, int]:
+            """Возвращает (py_start, py_end) для UTF-16 offset+length."""
+            start = utf16_to_py(text, utf16_offset)
+            end   = utf16_to_py(text, utf16_offset + utf16_length)
+            return start, end
+
         replacements = sorted(
             [(e.offset - skip, e.length, e.document_id) for e in relevant],
             key=lambda x: x[0], reverse=True,
         )
 
         result = after_subcmd
-        for offset, length, doc_id in replacements:
-            emoji_char = result[offset:offset + length]
-            tag = f'<tg-emoji emoji-id="{doc_id}">{emoji_char}</tg-emoji>'
-            result = result[:offset] + tag + result[offset + length:]
+        for utf16_off, utf16_len, doc_id in replacements:
+            py_start, py_end = utf16_slice(result, utf16_off, utf16_len)
+            emoji_char = result[py_start:py_end]
+            tag = f'<tg-emoji emoji-id={doc_id}>{emoji_char}</tg-emoji>'
+            result = result[:py_start] + tag + result[py_end:]
 
         await event.message.edit(
             f"<code>{_esc(result)}</code>",
