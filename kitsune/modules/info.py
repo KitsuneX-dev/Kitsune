@@ -137,12 +137,7 @@ class InfoModule(KitsuneModule):
         ram      = self._get_ram_usage()
 
         if self.config["custom_message"]:
-            import re
-            raw = self.config["custom_message"]
-            # Сначала нормализуем <br> → \n, чтобы не потерять переносы
-            raw = re.sub(r'<br\s*/?>', '\n', raw)
-            # Убираем лишние пробелы/переносы внутри <tg-emoji ...>\n текст</tg-emoji>
-            tpl = re.sub(r'(<tg-emoji[^>]+>)\s*\n\s*', r'\1', raw)
+            tpl = self.config["custom_message"]
             return tpl.format(
                 me=me_link, version=version, build=build,
                 prefix=f"«<code>{_esc(prefix)}</code>»",
@@ -177,15 +172,8 @@ class InfoModule(KitsuneModule):
         from telethon.extensions import html as tl_html
         from telethon.tl.types import MessageEntityCustomEmoji
 
-        def _u16len(s: str) -> int:
-            """Длина строки в UTF-16 code units (именно так считает Telethon)."""
-            return len(s.encode("utf-16-le")) // 2
-
-        # Telethon не понимает <br> — заменяем на перенос строки до парсинга
-        html_text = re.sub(r'<br\s*/?>', '\n', html_text)
-
         tg_pattern = re.compile(
-            r'<tg-emoji\s+emoji-id=(?:["\'])?(\d+)(?:["\'])?>(.*?)</tg-emoji>',
+            r'<tg-emoji\s+emoji-id=["\'](\d+)["\'\']>(.*?)</tg-emoji>',
             re.DOTALL,
         )
 
@@ -194,7 +182,7 @@ class InfoModule(KitsuneModule):
 
         result_text     = ""
         result_entities = []
-        cursor          = 0   # в UTF-16 code units
+        cursor          = 0
         pos_in_html     = 0
 
         for m in tg_pattern.finditer(html_text):
@@ -205,7 +193,7 @@ class InfoModule(KitsuneModule):
                     e.offset += cursor
                 result_text     += plain_before
                 result_entities += list(ents_before or [])
-                cursor          += _u16len(plain_before)
+                cursor          += len(plain_before)
 
             emoji_id    = m.group(1)
             inner_html  = m.group(2)
@@ -217,13 +205,13 @@ class InfoModule(KitsuneModule):
             result_entities.append(
                 MessageEntityCustomEmoji(
                     offset=cursor,
-                    length=_u16len(inner_plain),
+                    length=len(inner_plain),
                     document_id=int(emoji_id),
                 )
             )
             result_entities += list(inner_ents or [])
             result_text     += inner_plain
-            cursor          += _u16len(inner_plain)
+            cursor          += len(inner_plain)
             pos_in_html      = m.end()
 
         tail_html = html_text[pos_in_html:]
@@ -314,16 +302,6 @@ class InfoModule(KitsuneModule):
         self.config["custom_message"] = args
         await self.db.set(_DB_OWNER, "custom_message", args)
         await event.reply(self.strings("setinfo_success"), parse_mode="html")
-
-    @command("debuginfo", required=OWNER)
-    async def debuginfo_cmd(self, event) -> None:
-        """Показывает raw содержимое custom_message"""
-        msg = self.config["custom_message"] or self.db.get(_DB_OWNER, "custom_message", None)
-        if not msg:
-            await event.reply("custom_message не задан", parse_mode="html")
-            return
-        preview = repr(msg[:300])
-        await event.reply(f"<code>{_esc(preview)}</code>", parse_mode="html")
 
     @command("resetinfo", required=OWNER)
     async def resetinfo_cmd(self, event) -> None:
@@ -433,13 +411,10 @@ class InfoModule(KitsuneModule):
         result = after_subcmd
         for offset, length, doc_id in replacements:
             emoji_char = result[offset:offset + length]
-            tag = f'<tg-emoji emoji-id={doc_id}>{emoji_char}</tg-emoji>'
+            tag = f'<tg-emoji emoji-id="{doc_id}">{emoji_char}</tg-emoji>'
             result = result[:offset] + tag + result[offset + length:]
 
-        # Заменяем переносы строк на <br> — для корректной вставки в custom_message
-        result_for_copy = result.replace('\n', '<br>\n')
-
         await event.message.edit(
-            f"<code>{_esc(result_for_copy)}</code>",
+            f"<code>{_esc(result)}</code>",
             parse_mode="html",
         )
