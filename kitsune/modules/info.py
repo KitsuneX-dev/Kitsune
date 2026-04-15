@@ -356,10 +356,10 @@ class InfoModule(KitsuneModule):
         open_tag, close_tag = tag_map[tag]
         result = f"{open_tag}{content}{close_tag}"
 
+        # Отправляем без parse_mode — чтобы пользователь скопировал
+        # сырые HTML-теги, а не их экранированную версию из <code>
         await event.message.edit(
-            f"✅ Скопируй и вставь в <code>fcfg kitsuneinfo custom_message</code>:\n\n"
-            f"<code>{_esc(result)}</code>",
-            parse_mode="html",
+            f"✅ Скопируй и вставь в fcfg kitsuneinfo custom_message:\n\n{result}",
         )
 
 
