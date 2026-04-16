@@ -261,7 +261,7 @@ class UpdaterModule(KitsuneModule):
         if is_termux:
             try:
                 with open(req_file, encoding="utf-8") as f:
-                    pkgs = [l.strip() for l in f if l.strip() and not l.strip().startswith("
+                    pkgs = [l.strip() for l in f if l.strip() and not l.strip().startswith("#")]
                 for pkg in pkgs:
                     p = await asyncio.create_subprocess_exec(
                         sys.executable, "-m", "pip", "install", pkg,

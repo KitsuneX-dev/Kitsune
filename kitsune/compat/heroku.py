@@ -70,17 +70,37 @@ def apply() -> None:
     security_shim.sudo            = SUDO
     security_shim.support         = SUPPORT
 
+    # --- fallback for is_serializable (in case of outdated kitsune.utils) ---
+    def _is_serializable_fallback(value: typing.Any) -> bool:
+        import json
+        try:
+            json.dumps(value)
+            return True
+        except (TypeError, ValueError):
+            return False
+
+    def _safe_bind(shim: types.ModuleType, attr: str, source: typing.Any, fallback: typing.Any = None) -> None:
+        val = getattr(source, attr, None)
+        if val is None:
+            if fallback is not None:
+                setattr(shim, attr, fallback)
+                logger.warning("heroku_compat: kitsune.utils.%s not found — using built-in fallback", attr)
+            else:
+                logger.warning("heroku_compat: kitsune.utils.%s not found — skipping (heroku modules may break)", attr)
+            return
+        setattr(shim, attr, val)
+
     utils_shim = types.ModuleType("heroku.utils")
-    utils_shim.escape_html     = kitsune_utils.escape_html
-    utils_shim.chunks          = kitsune_utils.chunks
-    utils_shim.run_sync        = kitsune_utils.run_sync
-    utils_shim.find_caller     = kitsune_utils.find_caller
-    utils_shim.is_serializable = kitsune_utils.is_serializable
-    utils_shim.get_args        = kitsune_utils.get_args
-    utils_shim.get_args_raw    = kitsune_utils.get_args_raw
-    utils_shim.get_args_html   = kitsune_utils.get_args_html
-    utils_shim.answer          = kitsune_utils.answer
-    utils_shim.answer_file     = kitsune_utils.answer_file
+    _safe_bind(utils_shim, "escape_html",     kitsune_utils)
+    _safe_bind(utils_shim, "chunks",          kitsune_utils)
+    _safe_bind(utils_shim, "run_sync",        kitsune_utils)
+    _safe_bind(utils_shim, "find_caller",     kitsune_utils)
+    _safe_bind(utils_shim, "is_serializable", kitsune_utils, _is_serializable_fallback)
+    _safe_bind(utils_shim, "get_args",        kitsune_utils)
+    _safe_bind(utils_shim, "get_args_raw",    kitsune_utils)
+    _safe_bind(utils_shim, "get_args_html",   kitsune_utils)
+    _safe_bind(utils_shim, "answer",          kitsune_utils)
+    _safe_bind(utils_shim, "answer_file",     kitsune_utils)
 
     heroku_shim = types.ModuleType("heroku")
     heroku_shim.loader   = loader_shim

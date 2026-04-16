@@ -243,3 +243,147 @@ def smart_split(
         bytes_offset += len(current_text.encode("utf-16le"))
 
 __all__ += ["smart_split"]
+
+# ---------------------------------------------------------------------------
+# Functions ported from kitsune/utils.py (flat module) that are required by
+# hikka/heroku compat shims and user modules.
+# ---------------------------------------------------------------------------
+
+import io as _io
+import typing as _typing
+
+def is_serializable(value: _typing.Any) -> bool:
+    """Return True if *value* can be serialised to JSON."""
+    import json as _json
+    try:
+        _json.dumps(value)
+        return True
+    except (TypeError, ValueError):
+        return False
+
+
+def get_chat_id(message: _typing.Any) -> _typing.Optional[int]:
+    """Return the chat/peer id from a Telethon message object."""
+    if isinstance(message, int):
+        return message
+
+    peer = getattr(message, "peer_id", None)
+    if peer is not None:
+        chat_id = (
+            getattr(peer, "channel_id", None)
+            or getattr(peer, "chat_id", None)
+            or getattr(peer, "user_id", None)
+        )
+        if chat_id:
+            return chat_id
+
+    chat = getattr(message, "chat", None)
+    if chat is not None:
+        return getattr(chat, "id", None)
+
+    return getattr(message, "chat_id", None)
+
+
+async def answer(
+    message: _typing.Any,
+    response: _typing.Union[str, bytes, _io.IOBase],
+    *,
+    parse_mode: str = "HTML",
+    link_preview: bool = False,
+    **kwargs: _typing.Any,
+) -> _typing.Any:
+    """Edit the caller's own message or respond to someone else's."""
+    if isinstance(message, int):
+        client = kwargs.pop("client", None)
+        if client is None:
+            raise ValueError("answer: int message requires client= kwarg")
+        return await client.send_message(
+            message, response, parse_mode=parse_mode, link_preview=link_preview, **kwargs
+        )
+
+    is_own = (
+        getattr(message, "out", False)
+        and not getattr(message, "via_bot_id", None)
+        and not getattr(message, "fwd_from", None)
+    )
+
+    if is_own:
+        try:
+            return await message.edit(
+                response, parse_mode=parse_mode, link_preview=link_preview, **kwargs
+            )
+        except Exception as exc:
+            if "message is not modified" in str(exc).lower():
+                return message
+            _logger.debug("answer: edit failed, falling back to respond", exc_info=True)
+
+    if "reply_to" not in kwargs:
+        reply_to = getattr(message, "reply_to_msg_id", None)
+        if reply_to:
+            kwargs["reply_to"] = reply_to
+
+    return await message.respond(
+        response, parse_mode=parse_mode, link_preview=link_preview, **kwargs
+    )
+
+
+async def answer_file(
+    message: _typing.Any,
+    file: _typing.Union[str, bytes, _io.IOBase],
+    caption: _typing.Optional[str] = None,
+    *,
+    force_document: bool = False,
+    **kwargs: _typing.Any,
+) -> _typing.Any:
+    """Send a file as a reply, deleting the original outgoing message."""
+    import contextlib as _ctx
+
+    client = message.client
+    peer = getattr(message, "peer_id", None) or getattr(message, "chat_id", None)
+    if peer is None:
+        raise ValueError("answer_file: cannot determine peer from message")
+
+    if "reply_to" not in kwargs:
+        reply_to = getattr(message, "reply_to_msg_id", None)
+        if reply_to:
+            kwargs["reply_to"] = reply_to
+
+    if isinstance(file, bytes):
+        file = _io.BytesIO(file)
+
+    try:
+        result = await client.send_file(
+            peer, file, caption=caption, force_document=force_document, **kwargs
+        )
+    except Exception:
+        if caption:
+            _logger.warning("answer_file: send failed, falling back to text", exc_info=True)
+            return await answer(message, caption)
+        raise
+
+    if getattr(message, "out", False):
+        with _ctx.suppress(Exception):
+            await message.delete()
+
+    return result
+
+
+def progress_bar(current: _typing.Union[int, float], total: _typing.Union[int, float], width: int = 12) -> str:
+    """Return a Unicode progress bar string with percentage."""
+    if total <= 0:
+        pct = 0.0
+    else:
+        pct = max(0.0, min(1.0, current / total))
+
+    filled = round(pct * width)
+    empty = width - filled
+    bar = "█" * filled + "░" * empty
+    percent = int(pct * 100)
+    return f"{bar}  {percent}%"
+
+
+__all__ += [
+    "is_serializable", "get_chat_id",
+    "answer", "answer_file",
+    "progress_bar",
+]
