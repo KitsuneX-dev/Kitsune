@@ -14,6 +14,17 @@ from types import ModuleType
 
 logger = logging.getLogger(__name__)
 
+# ─── адаптер сторонних модулей ────────────────────────────────────────────────
+# Импортируется лениво, чтобы не создавать циклических зависимостей при старте.
+def _get_adapter():
+    """Возвращает модуль module_adapter (ленивый импорт)."""
+    try:
+        from ..compat import module_adapter as _ma
+        return _ma
+    except Exception as _e:
+        logger.warning("Loader: module_adapter unavailable: %s", _e)
+        return None
+
 _BLOCKED_IMPORTS: frozenset[str] = frozenset({
     "subprocess", "pty", "ctypes", "multiprocessing",
     "socket", "importlib", "pickle", "marshal",
@@ -465,6 +476,31 @@ class Loader:
         if not is_builtin:
             _scan_ast(source, filename=str(path))
 
+        # ── Определяем фреймворк и устанавливаем шимы ────────────────────────
+        _adapter = _get_adapter()
+        _framework = "kitsune"
+        if _adapter and not is_builtin:
+            _framework = _adapter.detect_framework(source)
+            if _framework not in ("kitsune", "unknown"):
+                logger.info(
+                    "Loader: detected foreign framework %r in %s — installing shims",
+                    _framework, path.name,
+                )
+                if progress_cb:
+                    try:
+                        await progress_cb(
+                            f"🔧 Определён формат модуля: <b>{_framework.capitalize()}</b>. "
+                            f"Устанавливаю слой совместимости…"
+                        )
+                    except Exception:
+                        pass
+                _adapter.ensure_shims(_framework)
+            elif _framework == "unknown":
+                logger.warning(
+                    "Loader: framework unknown for %s — loading as-is", path.name
+                )
+        # ─────────────────────────────────────────────────────────────────────
+
         spec = importlib.util.spec_from_file_location(
             module_name, path,
             submodule_search_locations=[str(path.parent)] if is_pkg else None,
@@ -514,9 +550,41 @@ class Loader:
             raise ModuleLoadError(f"Execution failed: {exc}") from exc
 
         mod_class = self._find_module_class(py_module)
+
+        # ── Адаптация стороннего модуля ───────────────────────────────────────
+        if mod_class is None and _adapter and _framework not in ("kitsune", "unknown"):
+            logger.debug("Loader: KitsuneModule subclass not found directly — trying adapter wrap")
+            mod_class = _adapter.wrap_unknown_module(py_module)
+
         if mod_class is None:
             del sys.modules[module_name]
-            raise ModuleLoadError(f"No KitsuneModule subclass found in {path.name}")
+            _hint = (
+                f" (фреймворк {_framework!r} определён, но класс модуля не совместим)"
+                if _framework not in ("kitsune", "unknown")
+                else ""
+            )
+            raise ModuleLoadError(f"No KitsuneModule subclass found in {path.name}{_hint}")
+
+        # Применяем постобработку для сторонних модулей
+        if _adapter and _framework not in ("kitsune", "unknown"):
+            try:
+                mod_class = _adapter.post_process_class(mod_class, _framework)
+                logger.debug(
+                    "Loader: post_process_class applied for %s (%s)",
+                    mod_class.__name__, _framework,
+                )
+            except Exception as _pe:
+                logger.warning(
+                    "Loader: post_process_class failed for %s: %s — proceeding without it",
+                    mod_class.__name__, _pe,
+                )
+
+        # ── Восстанавливаем name из strings-словаря если не задан ─────────────
+        if not getattr(mod_class, "name", ""):
+            _hikka_strings = getattr(mod_class, "_hikka_strings", {}) or {}
+            _resolved = _hikka_strings.get("name") or mod_class.__name__
+            mod_class.name = _resolved
+        # ─────────────────────────────────────────────────────────────────────
 
         if mod_class.requires:
             missing = [r for r in mod_class.requires if r not in self._modules]
@@ -530,6 +598,7 @@ class Loader:
         mod.tg_id = self._client.tg_id
         mod._source_path = str(path)
         mod._is_builtin = is_builtin
+        mod._compat_framework = _framework  # для отображения в .info и .help
 
         mod._load_config_from_db()
 
@@ -571,3 +640,26 @@ class Loader:
             if getattr(method, "_is_watcher", False):
                 filter_func = method._watcher_filter
                 self._dispatcher.register_watcher(method, filter_func)
+
+            # Hikka/Heroku inline handlers — передаём в inline-систему если она есть
+            if getattr(method, "_is_inline_handler", False):
+                _inline = getattr(self._client, "inline", None)
+                if _inline and hasattr(_inline, "register_inline_handler"):
+                    try:
+                        _inline.register_inline_handler(method)
+                    except Exception as _ie:
+                        logger.debug(
+                            "Loader: register inline_handler %r failed: %s",
+                            getattr(method, "__name__", "?"), _ie,
+                        )
+
+            if getattr(method, "_is_callback_handler", False):
+                _inline = getattr(self._client, "inline", None)
+                if _inline and hasattr(_inline, "register_callback_handler"):
+                    try:
+                        _inline.register_callback_handler(method)
+                    except Exception as _ce:
+                        logger.debug(
+                            "Loader: register callback_handler %r failed: %s",
+                            getattr(method, "__name__", "?"), _ce,
+                        )

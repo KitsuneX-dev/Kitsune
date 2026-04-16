@@ -3,7 +3,7 @@ from __future__ import annotations
 import contextlib
 import os
 
-__version__ = (1, 2, 8)
+__version__ = (1, 2, 9)
 __version_str__ = ".".join(map(str, __version__))
 
 branch: str = "main"
