@@ -56,6 +56,40 @@ def apply() -> None:
     loader_shim.unrestricted     = EVERYONE
     loader_shim.inline_everyone  = EVERYONE
 
+    # Fake database for heroku.database module
+    class _FakeDB:
+        _data: typing.ClassVar[typing.Dict[str, typing.Dict[str, typing.Any]]] = {}
+        
+        @staticmethod
+        def get(owner: str, key: str, default: typing.Any = None) -> typing.Any:
+            return _FakeDB._data.get(owner, {}).get(key, default)
+        
+        @staticmethod
+        def set(owner: str, key: str, value: typing.Any) -> bool:
+            _FakeDB._data.setdefault(owner, {})[key] = value
+            return True
+
+    class Database:
+        def __init__(self, db_instance: typing.Any = None) -> None:
+            self._db = db_instance or _FakeDB
+        
+        def get(self, owner: str, key: str, default: typing.Any = None) -> typing.Any:
+            if hasattr(self._db, '_data'):
+                return self._db._data.get(owner, {}).get(key, default)
+            return default
+        
+        def set(self, owner: str, key: str, value: typing.Any) -> bool:
+            if hasattr(self._db, '_data'):
+                self._db._data.setdefault(owner, {})[key] = value
+                return True
+            return False
+
+    heroku_db_shim = types.ModuleType("heroku.database")
+    heroku_db_shim.Database = Database
+    heroku_db_shim.get = _FakeDB.get
+    heroku_db_shim.set = _FakeDB.set
+    sys.modules["heroku.database"] = heroku_db_shim
+
     security_shim = types.ModuleType("heroku.security")
     security_shim.OWNER           = OWNER
     security_shim.SUDO            = SUDO
@@ -70,7 +104,7 @@ def apply() -> None:
     security_shim.sudo            = SUDO
     security_shim.support         = SUPPORT
 
-    # --- fallback for is_serializable (in case of outdated kitsune.utils) ---
+    # Fallback for is_serializable
     def _is_serializable_fallback(value: typing.Any) -> bool:
         import json
         try:
@@ -86,7 +120,7 @@ def apply() -> None:
                 setattr(shim, attr, fallback)
                 logger.warning("heroku_compat: kitsune.utils.%s not found — using built-in fallback", attr)
             else:
-                logger.warning("heroku_compat: kitsune.utils.%s not found — skipping (heroku modules may break)", attr)
+                logger.warning("heroku_compat: kitsune.utils.%s not found — skipping", attr)
             return
         setattr(shim, attr, val)
 
