@@ -41,10 +41,17 @@ def _make_compat_module_base() -> type:
             return key
 
         def get(self, key: str, default: typing.Any = None) -> typing.Any:
-            return self.db.get(f"hikka.{type(self).__name__}", key, default)
+            key_full = f"hikka.{type(self).__name__}"
+            if hasattr(self.db, '_data'):
+                return self.db._data.get(key_full, {}).get(key, default)
+            return default
 
         def set(self, key: str, value: typing.Any) -> None:
-            self.db.set_sync(f"hikka.{type(self).__name__}", key, value)
+            key_full = f"hikka.{type(self).__name__}"
+            if hasattr(self.db, '_data'):
+                self.db._data.setdefault(key_full, {})[key] = value
+            elif hasattr(self.db, 'set_sync'):
+                self.db.set_sync(key_full, key, value)
 
         def lookup(self, name: str, *, include_dragon: bool = False) -> typing.Any:
             loader_obj = getattr(self.client, "_kitsune_loader", None)
@@ -249,7 +256,10 @@ def _make_compat_module_base() -> type:
             default: typing.Any = None,
             item_type: typing.Any = None,
         ) -> typing.Any:
-            return self.db.pointer(f"hikka.{type(self).__name__}", key, default, item_type)
+            key_full = f"hikka.{type(self).__name__}"
+            if hasattr(self.db, '_data'):
+                return self.db._data.setdefault(key_full, {}).setdefault(key, default)
+            return default
 
         async def _approve(self, call: typing.Any, channel: typing.Any, event: asyncio.Event) -> None:
             pass
