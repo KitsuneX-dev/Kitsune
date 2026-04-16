@@ -270,11 +270,52 @@ def apply() -> None:
 
     # Hikka modules loaded as kitsune.modules.X do relative imports:
     #   from .. import loader, utils   →   kitsune.loader / kitsune.utils
+    #   from ..types import CoreOverwriteError  →  kitsune.types
     #   from ..inline.types import …  →   kitsune.inline.types
-    # Register shims under those names so the imports resolve correctly.
+    #
+    # Two things are required for `from .. import X` to work:
+    #   1. sys.modules["kitsune.X"] must exist
+    #   2. the kitsune package object must have attribute X
+    # Without (2) CPython raises ImportError even when (1) is set.
+
+    # --- kitsune.types shim (CoreOverwriteError & friends) ---
+    _types_shim = sys.modules.get("kitsune.types")
+    if _types_shim is None:
+        _types_shim = types.ModuleType("kitsune.types")
+
+    class CoreOverwriteError(Exception):
+        """Stub: raised by Hikka when a core module is overwritten."""
+
+    class SelfUnload(Exception):
+        """Stub: module raises this to request its own unload."""
+
+    class StopLoop(Exception):
+        """Stub: raised inside a @loader.loop to stop iteration."""
+
+    _types_shim.CoreOverwriteError = CoreOverwriteError  # type: ignore[attr-defined]
+    _types_shim.SelfUnload         = SelfUnload           # type: ignore[attr-defined]
+    _types_shim.StopLoop           = StopLoop             # type: ignore[attr-defined]
+
+    sys.modules["kitsune.types"] = _types_shim
+
+    # --- kitsune.loader / kitsune.utils / kitsune.security ---
     sys.modules.setdefault("kitsune.loader",   loader_shim)
     sys.modules.setdefault("kitsune.utils",    utils_shim)
     sys.modules.setdefault("kitsune.security", security_shim)
+
+    # Bind as attributes on the live kitsune package object so that
+    # `from .. import loader` resolves correctly at the C-level.
+    _kitsune_pkg = sys.modules.get("kitsune")
+    if _kitsune_pkg is not None:
+        for _attr, _mod in (
+            ("loader",   sys.modules["kitsune.loader"]),
+            ("utils",    sys.modules["kitsune.utils"]),
+            ("security", sys.modules["kitsune.security"]),
+            ("types",    _types_shim),
+        ):
+            if not hasattr(_kitsune_pkg, _attr):
+                setattr(_kitsune_pkg, _attr, _mod)
+                logger.debug("hikka_compat: bound kitsune.%s onto package object", _attr)
 
     # kitsune.inline.types  (used by ImageGen and similar modules)
     try:
