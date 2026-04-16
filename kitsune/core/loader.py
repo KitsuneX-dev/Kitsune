@@ -586,7 +586,20 @@ class Loader:
                     f"Missing dependencies: {', '.join(missing)}"
                 )
 
-        mod = mod_class(self._client, self._db)
+        import inspect as _inspect
+        try:
+            _sig = _inspect.signature(mod_class.__init__)
+            _params = [p for p in _sig.parameters if p != "self"]
+            if len(_params) >= 2:
+                mod = mod_class(self._client, self._db)
+            else:
+                mod = mod_class()
+                mod.client = self._client
+                mod._client = self._client
+                mod.db = self._db
+                mod._db = self._db
+        except (ValueError, TypeError):
+            mod = mod_class(self._client, self._db)
         mod.tg_id = self._client.tg_id
         mod._source_path = str(path)
         mod._is_builtin = is_builtin
