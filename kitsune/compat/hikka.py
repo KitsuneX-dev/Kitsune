@@ -56,6 +56,10 @@ def _make_compat_module_base() -> type:
             return loader_obj.modules if loader_obj else {}
 
         @property
+        def database(self) -> typing.Any:
+            return self.db
+
+        @property
         def tg_id(self) -> int:
             return getattr(self.client, "tg_id", 0) or 0
 
@@ -245,7 +249,7 @@ def _make_compat_module_base() -> type:
             default: typing.Any = None,
             item_type: typing.Any = None,
         ) -> typing.Any:
-            return self.db.pointer(type(self).__name__, key, default, item_type)
+            return self.db.pointer(f"hikka.{type(self).__name__}", key, default, item_type)
 
         async def _approve(self, call: typing.Any, channel: typing.Any, event: asyncio.Event) -> None:
             pass

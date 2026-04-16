@@ -221,6 +221,15 @@ class DatabaseManager:
     ) -> JSONValue:
         return self._data.get(owner, {}).get(key, default)
 
+    def pointer(
+        self,
+        owner: str,
+        key: str,
+        default: JSONValue = None,
+        item_type: typing.Any = None,
+    ) -> JSONValue:
+        return self._data.setdefault(owner, {}).setdefault(key, default)
+
     async def set(
         self,
         owner: str,
