@@ -59,9 +59,33 @@ def _make_compat_module_base() -> type:
         def tg_id(self) -> int:
             return getattr(self.client, "tg_id", 0) or 0
 
+        @tg_id.setter
+        def tg_id(self, value: int) -> None:
+            pass
+
+        @property
+        def _tg_id(self) -> int:
+            return getattr(self.client, "tg_id", 0) or 0
+
+        @_tg_id.setter
+        def _tg_id(self, value: int) -> None:
+            pass
+
         @property
         def _client(self) -> typing.Any:
             return self.client
+
+        @_client.setter
+        def _client(self, value: typing.Any) -> None:
+            self.client = value
+
+        @property
+        def _db(self) -> typing.Any:
+            return self.db
+
+        @_db.setter
+        def _db(self, value: typing.Any) -> None:
+            self.db = value
 
         @property
         def inline(self) -> typing.Any:
