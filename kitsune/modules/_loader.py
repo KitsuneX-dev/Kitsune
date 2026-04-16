@@ -15,12 +15,7 @@ from types import ModuleType
 logger = logging.getLogger(__name__)
 
 def _get_adapter():
-    try:
-        from ..compat import module_adapter as _ma
-        return _ma
-    except Exception as _e:
-        logger.warning("Loader: module_adapter unavailable: %s", _e)
-        return None
+    return None
 
 _BLOCKED_IMPORTS: frozenset[str] = frozenset({
     "subprocess", "pty", "ctypes", "multiprocessing",
