@@ -136,25 +136,25 @@ class _ValidatorStub:
             return v
 
     @staticmethod
-    def String(**_: typing.Any) -> "_ValidatorStub._Base":    return _ValidatorStub._Base()
+    def String(*_: typing.Any, **__: typing.Any) -> "_ValidatorStub._Base":    return _ValidatorStub._Base()
     @staticmethod
-    def Integer(**_: typing.Any) -> "_ValidatorStub._Base":   return _ValidatorStub._Base()
+    def Integer(*_: typing.Any, **__: typing.Any) -> "_ValidatorStub._Base":   return _ValidatorStub._Base()
     @staticmethod
-    def Boolean(**_: typing.Any) -> "_ValidatorStub._Base":   return _ValidatorStub._Base()
+    def Boolean(*_: typing.Any, **__: typing.Any) -> "_ValidatorStub._Base":   return _ValidatorStub._Base()
     @staticmethod
-    def Choice(**_: typing.Any) -> "_ValidatorStub._Base":    return _ValidatorStub._Base()
+    def Choice(*_: typing.Any, **__: typing.Any) -> "_ValidatorStub._Base":    return _ValidatorStub._Base()
     @staticmethod
-    def Emoji(**_: typing.Any) -> "_ValidatorStub._Base":     return _ValidatorStub._Base()
+    def Emoji(*_: typing.Any, **__: typing.Any) -> "_ValidatorStub._Base":     return _ValidatorStub._Base()
     @staticmethod
-    def RegExp(**_: typing.Any) -> "_ValidatorStub._Base":    return _ValidatorStub._Base()
+    def RegExp(*_: typing.Any, **__: typing.Any) -> "_ValidatorStub._Base":    return _ValidatorStub._Base()
     @staticmethod
-    def Float(**_: typing.Any) -> "_ValidatorStub._Base":     return _ValidatorStub._Base()
+    def Float(*_: typing.Any, **__: typing.Any) -> "_ValidatorStub._Base":     return _ValidatorStub._Base()
     @staticmethod
-    def Series(**_: typing.Any) -> "_ValidatorStub._Base":    return _ValidatorStub._Base()
+    def Series(*_: typing.Any, **__: typing.Any) -> "_ValidatorStub._Base":    return _ValidatorStub._Base()
     @staticmethod
-    def Hidden(**_: typing.Any) -> "_ValidatorStub._Base":    return _ValidatorStub._Base()
+    def Hidden(*_: typing.Any, **__: typing.Any) -> "_ValidatorStub._Base":    return _ValidatorStub._Base()
     @staticmethod
-    def URL(**_: typing.Any) -> "_ValidatorStub._Base":       return _ValidatorStub._Base()
+    def URL(*_: typing.Any, **__: typing.Any) -> "_ValidatorStub._Base":       return _ValidatorStub._Base()
 
 def apply() -> None:
     global _SHIM_APPLIED
