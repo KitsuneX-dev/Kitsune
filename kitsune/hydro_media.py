@@ -21,8 +21,6 @@ async def send_file(
 ) -> typing.Any:
     hydro = _hydro(client)
 
-    # Сохраняем позицию буфера ДО попытки отправки,
-    # чтобы при fallback на Telethon сбросить его обратно
     buf_start: int = 0
     if hasattr(file, "seek") and hasattr(file, "tell"):
         try:
@@ -32,8 +30,7 @@ async def send_file(
 
     if hydro and not force_telethon:
         try:
-            # Для BytesIO-буфера сначала resolve peer через get_chat,
-            # чтобы Hydrogram успел закэшировать entity
+
             if hasattr(file, "read"):
                 try:
                     await hydro.get_chat(chat_id)
@@ -51,15 +48,13 @@ async def send_file(
             return result
         except Exception as exc:
             logger.warning("hydro_media: Hydrogram send failed (%s), falling back to Telethon", exc)
-            # Сбрасываем позицию буфера перед fallback
+
             if hasattr(file, "seek"):
                 try:
                     file.seek(buf_start)
                 except Exception:
                     pass
 
-    # Fallback: Telethon
-    # Убеждаемся что буфер читается с начала (или с сохранённой позиции)
     if hasattr(file, "seek"):
         try:
             file.seek(buf_start)
@@ -72,7 +67,6 @@ async def send_file(
         caption=caption,
         parse_mode=parse_mode,
     )
-
 
 async def download_media(
     client: typing.Any,
@@ -96,7 +90,6 @@ async def download_media(
             logger.warning("hydro_media: Hydrogram download failed (%s), falling back to Telethon", exc)
 
     return await message.download_media(bytes)
-
 
 def _get_hydro_file_id(message: typing.Any) -> str | None:
     media = getattr(message, "media", None)

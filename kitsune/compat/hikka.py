@@ -1,24 +1,3 @@
-"""
-Kitsune ← Hikka compatibility shim
-====================================
-Эмулирует пространства имён hikka.*, hikkatl.* и hikkapyro.*
-так, чтобы модули, написанные для Hikka, загружались в Kitsune.
-
-Структура шима повторяет публичный API Hikka:
-  hikka.loader.Module          → KitsuneCompatHikkaModule
-  hikka.loader.command         → совместимый декоратор команды
-  hikka.loader.watcher         → совместимый декоратор наблюдателя
-  hikka.loader.inline_handler  → совместимый декоратор inline-обработчика
-  hikka.loader.callback_handler→ совместимый декоратор callback-обработчика
-  hikka.loader.tds             → no-op декоратор (translatable docstrings)
-  hikka.loader.ModuleConfig    → KitsuneModuleConfig (alias)
-  hikka.loader.ConfigValue     → KitsuneConfigValue (alias)
-  hikka.loader.validators      → заглушка validators
-  hikka.utils.*                → Kitsune utils
-  hikka.security.*             → Kitsune security constants
-
-Добавление нового фреймворка — см. module_adapter.py.
-"""
 from __future__ import annotations
 
 import logging
@@ -30,27 +9,12 @@ logger = logging.getLogger(__name__)
 
 _SHIM_APPLIED = False
 
-
-# ─────────────────────────── совместимый базовый класс ───────────────────────
-
 def _make_compat_module_base() -> type:
-    """
-    Создаёт KitsuneCompatHikkaModule — базовый класс для Hikka-модулей.
-
-    Добавляет поверх KitsuneModule все методы, которые ожидают Hikka-модули:
-      strings(key)  — с учётом _hikka_strings dict
-      get / set     — хранение данных в БД
-      lookup        — поиск другого загруженного модуля
-      allmodules    — доступ ко всем модулям
-    """
     from ..core.loader import KitsuneModule, ModuleConfig, ConfigValue
 
     class KitsuneCompatHikkaModule(KitsuneModule):
-        """Базовый класс для модулей в стиле Hikka."""
 
-        # Hikka-модули делают strings = {"name": "X", ...} — это перекрывает
-        # метод strings() из KitsuneModule.  __init_subclass__ исправляет это.
-        def __init_subclass__(cls, **kw: typing.Any) -> None:  # type: ignore[override]
+        def __init_subclass__(cls, **kw: typing.Any) -> None:  
             super().__init_subclass__(**kw)
             raw = cls.__dict__.get("strings")
             if raw is not None and isinstance(raw, dict):
@@ -61,7 +25,7 @@ def _make_compat_module_base() -> type:
                     cls.__name__, len(raw),
                 )
 
-        def strings(self, key: str, **kwargs: typing.Any) -> str:  # type: ignore[override]
+        def strings(self, key: str, **kwargs: typing.Any) -> str:  
             db = getattr(self, "db", None)
             lang = db.get("kitsune.core", "lang", "ru") if db else "ru"
             candidates = [
@@ -86,7 +50,7 @@ def _make_compat_module_base() -> type:
             return loader_obj.get_module(name) if loader_obj else None
 
         @property
-        def allmodules(self) -> typing.Any:  # type: ignore[misc]
+        def allmodules(self) -> typing.Any:  
             loader_obj = getattr(self.client, "_kitsune_loader", None)
             return loader_obj.modules if loader_obj else {}
 
@@ -94,9 +58,6 @@ def _make_compat_module_base() -> type:
             super().__init__(client, db)
 
     return KitsuneCompatHikkaModule
-
-
-# ─────────────────────────── декораторы ──────────────────────────────────────
 
 def _command_decorator(*args: typing.Any, **kwargs: typing.Any) -> typing.Any:
     def _wrap(func: typing.Callable) -> typing.Callable:
@@ -118,7 +79,6 @@ def _command_decorator(*args: typing.Any, **kwargs: typing.Any) -> typing.Any:
         return _wrap(args[0])
     return _wrap
 
-
 def _watcher_decorator(*args: typing.Any, **kwargs: typing.Any) -> typing.Any:
     def _wrap(func: typing.Callable) -> typing.Callable:
         func.is_watcher      = True
@@ -132,7 +92,6 @@ def _watcher_decorator(*args: typing.Any, **kwargs: typing.Any) -> typing.Any:
         return _wrap(args[0])
     return _wrap
 
-
 def _inline_handler_decorator(*args: typing.Any, **kwargs: typing.Any) -> typing.Any:
     def _wrap(func: typing.Callable) -> typing.Callable:
         func.is_inline_handler  = True
@@ -142,7 +101,6 @@ def _inline_handler_decorator(*args: typing.Any, **kwargs: typing.Any) -> typing
     if len(args) == 1 and callable(args[0]) and not kwargs:
         return _wrap(args[0])
     return _wrap
-
 
 def _callback_handler_decorator(*args: typing.Any, **kwargs: typing.Any) -> typing.Any:
     def _wrap(func: typing.Callable) -> typing.Callable:
@@ -154,11 +112,8 @@ def _callback_handler_decorator(*args: typing.Any, **kwargs: typing.Any) -> typi
         return _wrap(args[0])
     return _wrap
 
-
 def _tds(cls: type) -> type:
-    """@loader.tds — no-op в Kitsune (строки поддерживаются нативно)."""
     return cls
-
 
 def _loop_decorator(
     interval: int = 5,
@@ -175,11 +130,7 @@ def _loop_decorator(
         return func
     return _wrap
 
-
-# ─────────────────────────── заглушка validators ─────────────────────────────
-
 class _ValidatorStub:
-    """Минимальная заглушка Hikka-валидаторов."""
     class _Base:
         def validate(self, v: typing.Any) -> typing.Any:
             return v
@@ -205,11 +156,7 @@ class _ValidatorStub:
     @staticmethod
     def URL(**_: typing.Any) -> "_ValidatorStub._Base":       return _ValidatorStub._Base()
 
-
-# ─────────────────────────── apply() ─────────────────────────────────────────
-
 def apply() -> None:
-    """Устанавливает Hikka-шимы в sys.modules (идемпотентно)."""
     global _SHIM_APPLIED
     if _SHIM_APPLIED:
         return
@@ -223,7 +170,6 @@ def apply() -> None:
 
     CompatModule = _make_compat_module_base()
 
-    # ── hikka.loader ─────────────────────────────────────────────────────────
     loader_shim = types.ModuleType("hikka.loader")
     loader_shim.Module           = CompatModule
     loader_shim.command          = _command_decorator
@@ -244,7 +190,6 @@ def apply() -> None:
     loader_shim.unrestricted     = EVERYONE
     loader_shim.inline_everyone  = EVERYONE
 
-    # ── hikka.security ───────────────────────────────────────────────────────
     security_shim = types.ModuleType("hikka.security")
     security_shim.OWNER           = OWNER
     security_shim.SUDO            = SUDO
@@ -259,7 +204,6 @@ def apply() -> None:
     security_shim.sudo            = SUDO
     security_shim.support         = SUPPORT
 
-    # ── hikka.utils ──────────────────────────────────────────────────────────
     utils_shim = types.ModuleType("hikka.utils")
     utils_shim.escape_html     = kitsune_utils.escape_html
     utils_shim.chunks          = kitsune_utils.chunks
@@ -272,7 +216,6 @@ def apply() -> None:
     utils_shim.answer          = kitsune_utils.answer
     utils_shim.answer_file     = kitsune_utils.answer_file
 
-    # ── hikka (корневой) ─────────────────────────────────────────────────────
     hikka_shim = types.ModuleType("hikka")
     hikka_shim.loader   = loader_shim
     hikka_shim.security = security_shim
@@ -283,7 +226,6 @@ def apply() -> None:
     sys.modules["hikka.security"] = security_shim
     sys.modules["hikka.utils"]    = utils_shim
 
-    # ── hikkatl → telethon ───────────────────────────────────────────────────
     try:
         import telethon
         sys.modules.setdefault("hikkatl",                 telethon)
@@ -297,7 +239,6 @@ def apply() -> None:
     except ImportError:
         logger.debug("hikka_compat: telethon not available")
 
-    # ── hikkapyro → pyrogram / hydrogram ─────────────────────────────────────
     for _pyro in ("hydrogram", "pyrogram"):
         try:
             _m = __import__(_pyro)

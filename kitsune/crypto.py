@@ -11,7 +11,6 @@ KEY_ENV  = "KITSUNE_KEY"
 KEY_PATH = Path.home() / ".kitsune" / "kitsune.key"
 MAGIC    = b"KBAK1:"
 
-# Импортируем оба независимо — приоритет: AES-GCM > Fernet > XOR
 _AES_GCM_AVAILABLE = False
 _FERNET_AVAILABLE  = False
 
@@ -27,7 +26,6 @@ try:
 except ImportError:
     pass
 
-
 def _load_or_create_key() -> bytes:
     env_key = os.environ.get(KEY_ENV, "").strip()
     if env_key:
@@ -36,7 +34,6 @@ def _load_or_create_key() -> bytes:
     if KEY_PATH.exists():
         return KEY_PATH.read_bytes().strip()
 
-    # Генерируем ключ совместимый с обоими бэкендами
     key = base64.urlsafe_b64encode(os.urandom(32))
 
     KEY_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -47,20 +44,16 @@ def _load_or_create_key() -> bytes:
         pass
     return key
 
-
 def _aes_gcm_encrypt(data: bytes, key: bytes) -> bytes:
-    """AES-256-GCM шифрование. Приоритетный метод."""
     raw_key = base64.urlsafe_b64decode(key + b"==")
     aes_key = hashlib.sha256(raw_key).digest()
-    nonce = os.urandom(12)  # 96-битный nonce для GCM
+    nonce = os.urandom(12)  
     aesgcm = _AESGCM(aes_key)
     ciphertext = aesgcm.encrypt(nonce, data, None)
-    # Формат: 4 байта длины nonce + nonce + ciphertext
+
     return struct.pack(">I", len(nonce)) + nonce + ciphertext
 
-
 def _aes_gcm_decrypt(data: bytes, key: bytes) -> bytes:
-    """AES-256-GCM расшифровка."""
     raw_key = base64.urlsafe_b64decode(key + b"==")
     aes_key = hashlib.sha256(raw_key).digest()
     nonce_len = struct.unpack(">I", data[:4])[0]
@@ -69,13 +62,7 @@ def _aes_gcm_decrypt(data: bytes, key: bytes) -> bytes:
     aesgcm = _AESGCM(aes_key)
     return aesgcm.decrypt(nonce, ciphertext, None)
 
-
 def _xor_encrypt(data: bytes, key: bytes) -> bytes:
-    """
-    XOR-fallback — используется только если cryptography вообще не установлена.
-    HMAC защищает от подделки, но XOR с фиксированным ключом уязвим
-    к known-plaintext при наличии двух бэкапов. Устанавливай cryptography!
-    """
     raw_key = base64.urlsafe_b64decode(key + b"==")
     digest   = hashlib.sha256(raw_key).digest()
     result   = bytearray(len(data))
@@ -83,7 +70,6 @@ def _xor_encrypt(data: bytes, key: bytes) -> bytes:
         result[i] = byte ^ digest[i % 32]
     mac = hmac.new(raw_key, bytes(result), hashlib.sha256).digest()
     return mac + bytes(result)
-
 
 def _xor_decrypt(data: bytes, key: bytes) -> bytes:
     raw_key  = base64.urlsafe_b64decode(key + b"==")
@@ -98,15 +84,13 @@ def _xor_decrypt(data: bytes, key: bytes) -> bytes:
         result[i] = byte ^ digest[i % 32]
     return bytes(result)
 
-
 def encrypt(data: bytes) -> bytes:
     key = _load_or_create_key()
-    if _AES_GCM_AVAILABLE:                                         # 1. AES-256-GCM
+    if _AES_GCM_AVAILABLE:                                         
         return MAGIC + b"AESGCM1:" + _aes_gcm_encrypt(data, key)
-    if _FERNET_AVAILABLE:                                          # 2. Fernet
+    if _FERNET_AVAILABLE:                                          
         return MAGIC + _Fernet(key).encrypt(data)
-    return MAGIC + b"XOR1:" + _xor_encrypt(data, key)             # 3. XOR+HMAC
-
+    return MAGIC + b"XOR1:" + _xor_encrypt(data, key)             
 
 def decrypt(data: bytes) -> bytes:
     if not data.startswith(MAGIC):
@@ -124,10 +108,8 @@ def decrypt(data: bytes) -> bytes:
         "Install it: pkg install python-cryptography"
     )
 
-
 def is_encrypted(data: bytes) -> bool:
     return data.startswith(MAGIC)
-
 
 def key_path() -> Path:
     return KEY_PATH

@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 import asyncio
@@ -24,7 +23,6 @@ class EvalModule(KitsuneModule):
 
         expr = code[1].strip()
 
-        # Субкоманда r.text — извлечение ID премиум-эмодзи для custom_message
         if expr.startswith("r.text"):
             from .info import InfoModule
             info_mod = InfoModule.__new__(InfoModule)

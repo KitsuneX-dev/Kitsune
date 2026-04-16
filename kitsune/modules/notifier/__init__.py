@@ -1,4 +1,3 @@
-"""Notifier — тонкий оркестратор. Логика разбита по подмодулям."""
 from __future__ import annotations
 
 import asyncio
@@ -14,7 +13,6 @@ from .update_checker import UpdateChecker
 logger = logging.getLogger(__name__)
 
 _DB_KEY = "kitsune.notifier"
-
 
 class NotifierModule(KitsuneModule):
     name        = "notifier"
@@ -61,8 +59,6 @@ class NotifierModule(KitsuneModule):
             self._updater.stop()
         if self._runner:
             await self._runner.stop()
-
-    # ── Commands ──────────────────────────────────────────────────────────────
 
     @command("resetbot", required=OWNER)
     async def resetbot_cmd(self, event) -> None:
@@ -170,8 +166,6 @@ class NotifierModule(KitsuneModule):
         except Exception as exc:
             await m.edit(f"❌ Ошибка: <code>{exc}</code>", parse_mode="html")
 
-    # ── Public API (используется из других модулей) ───────────────────────────
-
     async def notify_update(self, current: str, new: str, changes: str = "") -> None:
         if self._updater:
             await self._updater.notify_update(current=current, new=new, changes=changes)
@@ -179,8 +173,6 @@ class NotifierModule(KitsuneModule):
     async def send_restart_report(self, restart_time: str, total_time: str, mod_count: int) -> None:
         if self._updater:
             await self._updater.send_restart_report(restart_time, total_time, mod_count)
-
-    # ── Internal ──────────────────────────────────────────────────────────────
 
     async def _auto_setup(self) -> None:
         try:

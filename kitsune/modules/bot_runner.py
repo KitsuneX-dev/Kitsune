@@ -1,4 +1,3 @@
-"""aiogram polling: запуск бота, все callback/message handlers."""
 from __future__ import annotations
 
 import asyncio
@@ -9,7 +8,6 @@ import typing
 logger = logging.getLogger(__name__)
 
 _DB_KEY = "kitsune.notifier"
-
 
 def _make_bot(token: str) -> typing.Any:
     from aiogram import Bot
@@ -34,9 +32,7 @@ def _make_bot(token: str) -> typing.Any:
         session=_NoSSLSession(timeout=30),
     )
 
-
 class BotRunner:
-    """Запускает aiogram polling и регистрирует все handlers."""
 
     def __init__(self, client, db) -> None:
         self._client = client
@@ -117,8 +113,6 @@ class BotRunner:
     async def send_message(self, chat_id: int, text: str, **kwargs) -> None:
         if self.bot:
             await self.bot.send_message(chat_id=chat_id, text=text, **kwargs)
-
-    # ── Handlers ─────────────────────────────────────────────────────────────
 
     def _register_handlers(self, router) -> None:
         from aiogram.filters import Command
@@ -343,13 +337,10 @@ class BotRunner:
             return
         pending = self._db.get("kitsune.config", "pending_input", None)
         if not pending:
-            # Если pending_input уже нет — диспетчер (Telethon) уже обработал
-            # сообщение с сохранением HTML-форматирования. Пропускаем.
+
             return
         await self._db.delete("kitsune.config", "pending_input")
         mod_name, key, value = pending["mod"], pending["key"], msg.text or ""
-        # Примечание: здесь нет entities, поэтому форматирование (цитаты, прем-эмодзи)
-        # будет потеряно. Используй .fcfg или inline-конфиг (Telethon перехват).
 
         from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
         from ..config import _get_configurable

@@ -1,4 +1,3 @@
-"""BotFather взаимодействие: создание, поиск, inline mode, token management."""
 from __future__ import annotations
 
 import logging
@@ -8,7 +7,6 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 _DB_KEY = "kitsune.notifier"
-
 
 def _extract_buttons(message) -> list[str]:
     result = []
@@ -26,15 +24,11 @@ def _extract_buttons(message) -> list[str]:
         pass
     return result
 
-
 class BotSetup:
-    """Всё что связано с BotFather и токенами."""
 
     def __init__(self, client, db) -> None:
         self._client = client
         self._db = db
-
-    # ── Token config ─────────────────────────────────────────────────────────
 
     def load_token_from_config(self) -> str | None:
         try:
@@ -58,10 +52,7 @@ class BotSetup:
         except Exception:
             logger.warning("BotSetup: could not write token to config.toml")
 
-    # ── BotFather helpers ─────────────────────────────────────────────────────
-
     async def find_existing_bot(self, tg_id: int) -> tuple[str | None, str | None]:
-        """Ищет существующего Kitsune-бота через @BotFather. → (token, username)"""
         try:
             async with self._client.conversation("@BotFather", timeout=40) as conv:
                 await conv.send_message("/mybots")
@@ -92,7 +83,6 @@ class BotSetup:
         return None, None
 
     async def create_bot(self, me, bot_name: str) -> tuple[str | None, str | None]:
-        """Создаёт нового бота через @BotFather. → (token, username)"""
         try:
             async with self._client.conversation("@BotFather", timeout=30) as conv:
                 await conv.send_message("/start")
@@ -119,7 +109,6 @@ class BotSetup:
         return None, None
 
     async def get_token_for_bot(self, username: str) -> str | None:
-        """Получает токен для уже существующего бота по username."""
         username = username.lstrip("@")
         try:
             async with self._client.conversation("@BotFather", timeout=40) as conv:
@@ -143,7 +132,6 @@ class BotSetup:
         return None
 
     async def list_kitsune_bots(self) -> list[tuple[str, str | None]]:
-        """Перечисляет всех ботов пользователя через @BotFather."""
         results = []
         try:
             async with self._client.conversation("@BotFather", timeout=40) as conv:
@@ -181,8 +169,6 @@ class BotSetup:
                 await conv.get_response()
         except Exception as exc:
             logger.warning("BotSetup: could not enable inline mode — %s", exc)
-
-    # ── Internal ──────────────────────────────────────────────────────────────
 
     async def _get_token_via_conv(self, conv, username: str, buttons: list[str]) -> str | None:
         try:

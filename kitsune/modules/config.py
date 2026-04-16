@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 import ast
@@ -33,11 +32,7 @@ def _fmt_value(value) -> str:
 def _chunks(lst: list, n: int) -> list:
     return [lst[i:i + n] for i in range(0, len(lst), n)]
 
-
-# ── Helpers используемые из bot_runner (aiogram cfg_ callbacks) ───────────────
-
 def _get_configurable(client) -> dict:
-    """Возвращает словарь {mod_name: mod} для модулей с ModuleConfig."""
     from ..core.loader import ModuleConfig
     loader = getattr(client, "_kitsune_loader", None)
     if not loader:
@@ -48,9 +43,7 @@ def _get_configurable(client) -> dict:
         if isinstance(getattr(mod, "config", None), ModuleConfig)
     }
 
-
 def _mod_text(mod_name: str, mod) -> str:
-    """Текст карточки модуля для cfg_ callback."""
     lines = ""
     for k in mod.config.keys():
         lines += f"▫️ <code>{_esc(k)}</code>: <b>{_fmt_value(mod.config[k])}</b>\n"
@@ -59,9 +52,7 @@ def _mod_text(mod_name: str, mod) -> str:
         f"{lines or '—'}"
     )
 
-
 def _list_text(configurable: dict) -> str:
-    """Текст списка модулей для cfg_ callback."""
     if not configurable:
         return "⚙️ <b>Нет модулей с настройками.</b>"
     names = ", ".join(f"<code>{_esc(n)}</code>" for n in sorted(configurable.keys()))
@@ -425,8 +416,7 @@ class ConfigModule(KitsuneModule):
 
     @command("fconfig", required=OWNER, aliases=["fcfg"])
     async def fconfig_cmd(self, event) -> None:
-        # Разбиваем только по пробелам (не по \n!), чтобы raw_val
-        # сохранял переносы строк из многострочного custom_message.
+
         full_args = self.get_args(event)
         space1 = full_args.find(" ")
         if space1 == -1:
@@ -457,8 +447,6 @@ class ConfigModule(KitsuneModule):
         default_val = mod.config.get_default(key)
         new_val = raw_val
 
-        # Для строковых значений — сохраняем HTML-форматирование из entities:
-        # жирный, цитата (blockquote), custom emoji (прем-эмодзи) и т.д.
         if isinstance(default_val, (str, type(None))):
             try:
                 from telethon.extensions import html as tl_html
@@ -478,12 +466,12 @@ class ConfigModule(KitsuneModule):
                         key=lambda x: x.offset,
                     )
                     if relevant:
-                        # Разделяем custom emoji и обычные entities
+
                         custom_emojis = [e for e in relevant if isinstance(e, MessageEntityCustomEmoji)]
                         other_entities = [e for e in relevant if not isinstance(e, MessageEntityCustomEmoji)]
 
                         if not custom_emojis:
-                            # Нет прем-эмодзи — стандартный unparse
+
                             shifted = []
                             for e in other_entities:
                                 ec = copy.copy(e)
@@ -491,16 +479,13 @@ class ConfigModule(KitsuneModule):
                                 shifted.append(ec)
                             new_val = tl_html.unparse(raw_val, shifted)
                         else:
-                            # Есть прем-эмодзи — строим HTML вручную по кускам,
-                            # потому что стандартный telethon не умеет unparse
-                            # MessageEntityCustomEmoji в <tg-emoji> теги.
+
                             result_html = ""
-                            cursor = 0  # позиция в raw_val
+                            cursor = 0  
 
                             for ce in sorted(custom_emojis, key=lambda x: x.offset):
-                                ce_off = ce.offset - val_start_raw  # смещение в raw_val
+                                ce_off = ce.offset - val_start_raw  
 
-                                # Кусок ДО текущего custom emoji
                                 if ce_off > cursor:
                                     before = raw_val[cursor:ce_off]
                                     before_ents = []
@@ -512,12 +497,10 @@ class ConfigModule(KitsuneModule):
                                             before_ents.append(ec)
                                     result_html += tl_html.unparse(before, before_ents)
 
-                                # Сам custom emoji тег
                                 inner = raw_val[ce_off:ce_off + ce.length]
                                 result_html += f'<tg-emoji emoji-id="{ce.document_id}">{inner}</tg-emoji>'
                                 cursor = ce_off + ce.length
 
-                            # Хвост после последнего custom emoji
                             if cursor < len(raw_val):
                                 tail = raw_val[cursor:]
                                 tail_ents = []
@@ -531,7 +514,7 @@ class ConfigModule(KitsuneModule):
 
                             new_val = result_html
             except Exception:
-                pass  # Если не получилось — оставляем raw_val
+                pass  
 
         if isinstance(default_val, bool):
             new_val = raw_val.lower() in ("1", "true", "yes", "да")
@@ -546,7 +529,6 @@ class ConfigModule(KitsuneModule):
             except ValueError:
                 pass
 
-        # Конвертируем <br> → \n перед сохранением (поддержка ручных переносов)
         if isinstance(new_val, str):
             import re as _re
             new_val = _re.sub(r'<br\s*/?>', '\n', new_val)

@@ -10,8 +10,7 @@ from ..core.security import OWNER, SUDO
 logger = logging.getLogger(__name__)
 
 _DB_KEY  = "kitsune.security"
-_TTL     = 60  # секунд до таймаута подтверждения
-
+_TTL     = 60  
 
 class SecurityModule(KitsuneModule):
     name        = "security"
@@ -56,8 +55,6 @@ class SecurityModule(KitsuneModule):
         "perm_none":    "👤 Обычный пользователь",
     }
 
-    # ── helpers ──────────────────────────────────────────────────────────────
-
     def _sec(self):
         return getattr(self.client, "_kitsune_security", None)
 
@@ -100,8 +97,6 @@ class SecurityModule(KitsuneModule):
 
     async def _set_co_owners(self, owners: list[int]) -> None:
         await self.db.set(_DB_KEY, "co_owners", owners)
-
-    # ── sudo commands ─────────────────────────────────────────────────────────
 
     @command("addsudo", required=OWNER)
     async def addsudo_cmd(self, event) -> None:
@@ -169,8 +164,6 @@ class SecurityModule(KitsuneModule):
             parse_mode="html",
         )
 
-    # ── owneradd ─────────────────────────────────────────────────────────────
-
     @command("owneradd", required=OWNER)
     async def owneradd_cmd(self, event) -> None:
         if event.sender_id != self.client.tg_id:
@@ -202,7 +195,7 @@ class SecurityModule(KitsuneModule):
             msg = await inline.form(text, event.message, markup)
             asyncio.ensure_future(self._owneradd_timeout(msg, uid))
         else:
-            # Fallback: нет inline-бота, просто добавляем сразу с предупреждением
+
             owners.append(uid)
             await self._set_co_owners(owners)
             await event.edit(
@@ -235,8 +228,6 @@ class SecurityModule(KitsuneModule):
                 with contextlib.suppress(Exception):
                     await inline.edit(msg, self.strings("timeout"))
 
-    # ── ownerrm ──────────────────────────────────────────────────────────────
-
     @command("ownerrm", required=OWNER)
     async def ownerrm_cmd(self, event) -> None:
         if event.sender_id != self.client.tg_id:
@@ -268,7 +259,7 @@ class SecurityModule(KitsuneModule):
             msg = await inline.form(text, event.message, markup)
             asyncio.ensure_future(self._ownerrm_timeout(msg, uid))
         else:
-            # Fallback: нет inline-бота, удаляем сразу
+
             owners.remove(uid)
             await self._set_co_owners(owners)
             await event.edit(
@@ -301,8 +292,6 @@ class SecurityModule(KitsuneModule):
                 with contextlib.suppress(Exception):
                     await inline.edit(msg, self.strings("timeout"))
 
-    # ── ownerlist ─────────────────────────────────────────────────────────────
-
     @command("ownerlist", required=OWNER)
     async def ownerlist_cmd(self, event) -> None:
         owners = self._get_co_owners()
@@ -324,8 +313,6 @@ class SecurityModule(KitsuneModule):
             self.strings("owner_list").format(users="\n".join(lines)),
             parse_mode="html",
         )
-
-    # ── checkperms ────────────────────────────────────────────────────────────
 
     @command("checkperms", required=OWNER)
     async def checkperms_cmd(self, event) -> None:

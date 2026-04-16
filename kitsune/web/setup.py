@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 import asyncio
@@ -21,12 +20,12 @@ _HTML = """<!DOCTYPE html>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 :root{
-  --bg:#080810;--s1:#0e0e1a;--s2:#13131f;
+  --bg:
   --bd:rgba(255,255,255,0.07);--bd2:rgba(255,255,255,0.13);
-  --tx:#e8e8f4;--mu:#5a5a78;--mu2:#8080a0;
-  --fox:#ff6b35;--fox2:#ff9960;
-  --green:#3dffaa;--gr-dim:rgba(61,255,170,0.1);
-  --red:#ff4a6b;
+  --tx:
+  --fox:
+  --green:
+  --red:
   --mono:'Space Mono',monospace;--body:'DM Sans',sans-serif;
   --r:16px;--ease:.18s cubic-bezier(.4,0,.2,1);
 }
@@ -71,9 +70,9 @@ input::placeholder{color:var(--mu)}
 .hint a:hover{text-decoration:underline}
 button{
   width:100%;margin-top:22px;padding:13px;
-  background:linear-gradient(135deg,#d94f1a,#ff7a40);
+  background:linear-gradient(135deg,
   border:none;border-radius:11px;
-  color:#fff;font-size:.92rem;font-weight:700;font-family:var(--body);
+  color:
   cursor:pointer;letter-spacing:.2px;
   transition:filter var(--ease),transform .1s,box-shadow var(--ease);
   box-shadow:0 4px 20px rgba(255,107,53,0.35);
@@ -84,7 +83,7 @@ button:disabled{opacity:.35;cursor:not-allowed;box-shadow:none;filter:none}
 .error{
   display:none;margin-top:13px;padding:10px 14px;
   background:rgba(255,74,107,0.1);border:1px solid rgba(255,74,107,0.25);
-  border-radius:9px;font-size:.8rem;color:#ff8a9e;line-height:1.4;
+  border-radius:9px;font-size:.8rem;color:
 }
 .done-wrap{text-align:center;padding:8px 0}
 .done-icon{font-size:3.5rem;margin-bottom:14px;filter:drop-shadow(0 0 20px rgba(61,255,170,0.5))}
@@ -228,11 +227,10 @@ class SetupServer:
         site = web.TCPSite(self._runner, host, port)
         await site.start()
         url = f"http://127.0.0.1:{port}"
-        # Определяем среду
+
         import os as _os
         is_termux = bool(_os.environ.get("PREFIX", "").find("com.termux") != -1)
 
-        # В Termux пробуем получить LAN IP чтобы открыть с телефона
         lan_url = url
         if is_termux:
             try:
@@ -253,7 +251,6 @@ class SetupServer:
             print(f"  🌐  Открой в браузере: \033[1;36m{url}\033[0m")
         print(f"{'━' * 42}\n")
 
-        # Открываем браузер только НЕ в Termux (там это не работает)
         if not is_termux:
             try:
                 webbrowser.open(url)
