@@ -57,6 +57,28 @@ def _make_compat_module_base() -> type:
         def __init__(self, client: typing.Any, db: typing.Any) -> None:
             super().__init__(client, db)
 
+        async def on_load(self) -> None:
+            await super().on_load()
+            # Hikka calls client_ready(client, db) instead of on_load()
+            cr = None
+            for klass in type(self).__mro__:
+                if klass is KitsuneCompatHikkaModule:
+                    break
+                v = klass.__dict__.get("client_ready")
+                if v is not None:
+                    cr = v
+                    break
+            if cr is not None:
+                import inspect as _inspect
+                sig = _inspect.signature(cr)
+                params = [p for p in sig.parameters if p != "self"]
+                if len(params) >= 2:
+                    await cr(self, self.client, self.db)
+                elif len(params) == 1:
+                    await cr(self, self.client)
+                else:
+                    await cr(self)
+
     return KitsuneCompatHikkaModule
 
 def _command_decorator(*args: typing.Any, **kwargs: typing.Any) -> typing.Any:
