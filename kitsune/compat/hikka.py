@@ -246,6 +246,31 @@ def apply() -> None:
     sys.modules["hikka.security"] = security_shim
     sys.modules["hikka.utils"]    = utils_shim
 
+    # Hikka modules loaded as kitsune.modules.X do relative imports:
+    #   from .. import loader, utils   →   kitsune.loader / kitsune.utils
+    #   from ..inline.types import …  →   kitsune.inline.types
+    # Register shims under those names so the imports resolve correctly.
+    sys.modules.setdefault("kitsune.loader",   loader_shim)
+    sys.modules.setdefault("kitsune.utils",    utils_shim)
+    sys.modules.setdefault("kitsune.security", security_shim)
+
+    # kitsune.inline.types  (used by ImageGen and similar modules)
+    try:
+        from ..inline import types as _inline_types  # type: ignore
+        sys.modules.setdefault("kitsune.inline.types", _inline_types)
+    except Exception:
+        _inline_types_stub = types.ModuleType("kitsune.inline.types")
+
+        class _InlineCall:  # minimal stub
+            async def edit(self, *a, **kw): ...
+            async def answer(self, *a, **kw): ...
+            async def delete(self, *a, **kw): ...
+
+        _inline_types_stub.InlineCall = _InlineCall
+        sys.modules.setdefault("kitsune.inline",       types.ModuleType("kitsune.inline"))
+        sys.modules.setdefault("kitsune.inline.types", _inline_types_stub)
+        logger.warning("hikka_compat: kitsune.inline.types not found — using stub")
+
     try:
         import telethon
         sys.modules.setdefault("hikkatl",                 telethon)
