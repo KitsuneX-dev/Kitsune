@@ -299,7 +299,12 @@ async def _pip_install(package: str) -> bool:
     pip_name = _IMPORT_TO_PIP.get(package, package)
     import os as _os
     is_termux = "com.termux" in _os.environ.get("PREFIX", "") or _os.path.isdir("/data/data/com.termux")
+    # Namespace packages (e.g. google-generativeai) need --upgrade to rebuild the
+    # google namespace so that sub-packages like genai become importable right away.
+    _NAMESPACE_PKGS = {"google-generativeai", "google-cloud-storage", "google-auth"}
     args = [sys.executable, "-m", "pip", "install", pip_name, "--quiet", "--no-warn-script-location"]
+    if pip_name in _NAMESPACE_PKGS:
+        args.append("--upgrade")
     if is_termux:
         args += ["--prefer-binary", "--no-build-isolation"]
     try:
@@ -311,6 +316,7 @@ async def _pip_install(package: str) -> bool:
         _, stderr = await proc.communicate()
         if proc.returncode == 0:
             logger.info("Loader: installed %r successfully", pip_name)
+            importlib.invalidate_caches()
             return True
         logger.warning("Loader: pip install %r failed: %s", pip_name, stderr.decode(errors="replace")[:300])
         return False
@@ -519,6 +525,11 @@ class Loader:
                             await progress_cb(f"✅ Зависимость <code>{missing_pkg}</code> установлена. Загружаю модуль...")
                         except Exception:
                             pass
+                    # Purge any stale/broken namespace-package entries so the
+                    # freshly installed package is discovered from scratch.
+                    _stale = [k for k in list(sys.modules) if k == missing_pkg or k.startswith(missing_pkg + ".")]
+                    for _k in _stale:
+                        sys.modules.pop(_k, None)
                     try:
                         spec.loader.exec_module(py_module)
                     except Exception as exc2:
