@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import sys
 import types
@@ -54,8 +55,195 @@ def _make_compat_module_base() -> type:
             loader_obj = getattr(self.client, "_kitsune_loader", None)
             return loader_obj.modules if loader_obj else {}
 
+        @property
+        def tg_id(self) -> int:
+            return getattr(self.client, "tg_id", 0) or 0
+
+        @property
+        def _client(self) -> typing.Any:
+            return self.client
+
+        @property
+        def inline(self) -> typing.Any:
+            return getattr(self, "_inline", None) or getattr(self.client, "_kitsune_inline", None)
+
+        @property
+        def bot_username(self) -> typing.Optional[str]:
+            inline = self.inline
+            return getattr(inline, "_bot_username", None) if inline else None
+
+        @property
+        def bot_id(self) -> typing.Optional[int]:
+            inline = self.inline
+            if inline and hasattr(inline, "_bot"):
+                bot = inline._bot
+                return getattr(bot, "id", None) if bot else None
+            return None
+
+        @property
+        def commands(self) -> typing.Dict[str, typing.Any]:
+            return {}
+
+        @property
+        def hikka_commands(self) -> typing.Dict[str, typing.Any]:
+            return {}
+
+        @property
+        def inline_handlers(self) -> typing.Dict[str, typing.Any]:
+            return {}
+
+        @property
+        def hikka_inline_handlers(self) -> typing.Dict[str, typing.Any]:
+            return {}
+
+        @property
+        def callback_handlers(self) -> typing.Dict[str, typing.Any]:
+            return {}
+
+        @property
+        def hikka_callback_handlers(self) -> typing.Dict[str, typing.Any]:
+            return {}
+
+        @property
+        def watchers(self) -> typing.Dict[str, typing.Any]:
+            return {}
+
+        @property
+        def hikka_watchers(self) -> typing.Dict[str, typing.Any]:
+            return {}
+
+        async def request_join(
+            self,
+            peer: typing.Any,
+            reason: str,
+            assure_joined: bool = False,
+        ) -> bool:
+            """
+            Request to join a channel.
+            :param peer: The channel to join.
+            :param reason: The reason for joining.
+            :param assure_joined: If set, module will not be loaded unless the required channel is joined.
+            :return: Status of the request.
+            """
+            try:
+                channel = await self.client.get_entity(peer)
+            except Exception:
+                return False
+
+            if hasattr(channel, "left") and not channel.left:
+                return True
+
+            inline = self.inline
+            if inline and hasattr(inline, "_bot_username"):
+                bot_username = inline._bot_username
+                if bot_username:
+                    try:
+                        await self.client.send_message(
+                            bot_username,
+                            f"Request to join {peer}: {reason}",
+                        )
+                    except Exception:
+                        pass
+
+            return True
+
+        async def animate(
+            self,
+            message: typing.Any,
+            frames: typing.List[str],
+            interval: typing.Union[float, int],
+            *,
+            inline: bool = False,
+        ) -> None:
+            if interval < 0.1:
+                interval = 0.1
+
+            from .. import utils as kitsune_utils
+
+            for frame in frames:
+                if inline and hasattr(self, "inline") and self.inline:
+                    try:
+                        message = await self.inline.form(
+                            message=message,
+                            text=frame,
+                            reply_markup={"text": " ", "data": "empty"},
+                        )
+                    except Exception:
+                        pass
+                else:
+                    try:
+                        message = await kitsune_utils.answer(message, frame)
+                    except Exception:
+                        pass
+
+                await asyncio.sleep(interval)
+
+            return message
+
+        async def invoke(
+            self,
+            command: str,
+            args: typing.Optional[str] = None,
+            peer: typing.Optional[typing.Any] = None,
+            message: typing.Optional[typing.Any] = None,
+            edit: bool = False,
+        ) -> typing.Any:
+            loader_obj = getattr(self.client, "_kitsune_loader", None)
+            if not loader_obj:
+                raise ValueError("Loader not found")
+            
+            modules = loader_obj.modules
+            commands_found = False
+            for mod in modules.values():
+                if hasattr(mod, "hikka_commands") and command in mod.hikka_commands:
+                    commands_found = True
+                    break
+            
+            if not commands_found:
+                raise ValueError(f"Command {command} not found")
+
+            prefix = loader_obj.get_prefix()
+            cmd = f"{prefix}{command} {args or ''}".strip()
+
+            if peer:
+                message = await self.client.send_message(peer, cmd)
+            elif message:
+                if edit:
+                    message = await message.edit(cmd)
+                else:
+                    message = await message.respond(cmd)
+
+            return message
+
+        def pointer(
+            self,
+            key: str,
+            default: typing.Any = None,
+            item_type: typing.Any = None,
+        ) -> typing.Any:
+            return self.db.pointer(type(self).__name__, key, default, item_type)
+
+        async def _approve(self, call: typing.Any, channel: typing.Any, event: asyncio.Event) -> None:
+            pass
+
+        async def _decline(self, call: typing.Any, channel: typing.Any, event: asyncio.Event) -> None:
+            pass
+
         def __init__(self, client: typing.Any, db: typing.Any) -> None:
             super().__init__(client, db)
+
+        def internal_init(self) -> None:
+            self._db = self.db
+            self._client = self.client
+            loader_obj = getattr(self.client, "_kitsune_loader", None)
+            if loader_obj:
+                self.lookup = loader_obj.get_module
+                self.get_prefix = loader_obj.get_prefix
+                self.inline = getattr(self.client, "_kitsune_inline", None)
+                self._inline = self.inline
+                self.allclients = getattr(self.client, "allclients", [])
+            self.tg_id = getattr(self.client, "tg_id", 0) or 0
+            self._tg_id = self.tg_id
 
         async def on_load(self) -> None:
             await super().on_load()

@@ -5,27 +5,12 @@ import sys
 import types
 import logging
 import typing
-from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
 _SHIM_APPLIED = False
 
-class HikkaCompatModule:
-    def __init__(self, client: typing.Any, db: typing.Any) -> None:
-        self.client = client
-        self.db = db
-        self.tg_id: int = 0
-        self.inline: typing.Any = None
-        if not hasattr(self, "config"):
-            self.config: typing.Any = None
-
-    async def on_load(self) -> None:
-        pass
-
-    async def on_unload(self) -> None:
-        pass
-
+class _HikkaCompatMixin:
     async def request_join(self, username: str, message: str = "") -> None:
         try:
             from telethon.functions.channels import JoinChannelRequest
@@ -152,50 +137,40 @@ class HikkaCompatModule:
         loader_obj = getattr(self.client, "_kitsune_loader", None)
         return loader_obj.modules if loader_obj else {}
 
-    def strings(self, key: str, **kwargs: typing.Any) -> str:
-        db = getattr(self, "db", None)
-        lang = db.get("kitsune.core", "lang", "ru") if db else "ru"
-        candidates = [
-            getattr(self, f"strings_{lang}", None) if lang != "en" else None,
-            getattr(self, "strings_ru", None),
-            getattr(self, "_hikka_strings", None),
-        ]
-        for d in candidates:
-            if isinstance(d, dict) and key in d:
-                text = d[key]
-                return text.format(**kwargs) if kwargs else text
-        return key
+def _patch_module_class(cls: type) -> type:
+    for name in dir(_HikkaCompatMixin):
+        if not name.startswith("_"):
+            setattr(cls, name, getattr(_HikkaCompatMixin, name))
+    return cls
+
+def _make_compat_module_base() -> type:
+    from ..core.loader import KitsuneModule
+    
+    class HikkaCompatModule(KitsuneModule, _HikkaCompatMixin):
+        pass
+    
+    return HikkaCompatModule
 
 def apply() -> None:
     global _SHIM_APPLIED
     if _SHIM_APPLIED:
         return
 
-    from ..core.loader import KitsuneModule, command, watcher
-    from ..core.security import (
-        OWNER, SUDO, SUPPORT, GROUP_OWNER, GROUP_ADMIN,
-        GROUP_ADMIN_ANY, GROUP_MEMBER, PM, EVERYONE, BITMAP,
-    )
-
-    class HikkaCompatModuleSubclass(HikkaCompatModule, KitsuneModule):
-        pass
+    HikkaCompatModule = _make_compat_module_base()
 
     loader_shim = types.ModuleType("hikka.loader")
-    loader_shim.Module  = HikkaCompatModuleSubclass
-    loader_shim.command = command
-    loader_shim.watcher = watcher
+    loader_shim.Module  = HikkaCompatModule
 
     security_shim = types.ModuleType("hikka.security")
-    security_shim.OWNER           = OWNER
-    security_shim.SUDO            = SUDO
-    security_shim.SUPPORT         = SUPPORT
-    security_shim.GROUP_OWNER     = GROUP_OWNER
-    security_shim.GROUP_ADMIN     = GROUP_ADMIN
-    security_shim.GROUP_ADMIN_ANY = GROUP_ADMIN_ANY
-    security_shim.GROUP_MEMBER    = GROUP_MEMBER
-    security_shim.PM              = PM
-    security_shim.EVERYONE        = EVERYONE
-    security_shim.BITMAP          = BITMAP
+    security_shim.OWNER           = 1 << 0
+    security_shim.SUDO            = 1 << 1
+    security_shim.SUPPORT         = 1 << 2
+    security_shim.GROUP_OWNER     = 1 << 3
+    security_shim.GROUP_ADMIN     = 1 << 4
+    security_shim.GROUP_ADMIN_ANY = 1 << 5
+    security_shim.GROUP_MEMBER    = 1 << 6
+    security_shim.PM              = 1 << 7
+    security_shim.EVERYONE        = 1 << 8
 
     from .. import utils as kitsune_utils
     utils_shim = types.ModuleType("hikka.utils")
