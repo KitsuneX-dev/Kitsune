@@ -44,7 +44,7 @@ def _make_compat_module_base() -> type:
             return self.db.get(f"hikka.{type(self).__name__}", key, default)
 
         def set(self, key: str, value: typing.Any) -> None:
-            self.db.set(f"hikka.{type(self).__name__}", key, value)
+            self.db.set_sync(f"hikka.{type(self).__name__}", key, value)
 
         def lookup(self, name: str, *, include_dragon: bool = False) -> typing.Any:
             loader_obj = getattr(self.client, "_kitsune_loader", None)
