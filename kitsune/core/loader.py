@@ -533,16 +533,16 @@ class Loader:
                     try:
                         spec.loader.exec_module(py_module)
                     except Exception as exc2:
-                        del sys.modules[module_name]
+                        sys.modules.pop(module_name, None)
                         raise ModuleLoadError(f"Execution failed after install: {exc2}") from exc2
                 else:
-                    del sys.modules[module_name]
+                    sys.modules.pop(module_name, None)
                     raise ModuleLoadError(f"Failed to install dependency {missing_pkg!r}: {exc}") from exc
             else:
-                del sys.modules[module_name]
+                sys.modules.pop(module_name, None)
                 raise ModuleLoadError(f"Execution failed: {exc}") from exc
         except Exception as exc:
-            del sys.modules[module_name]
+            sys.modules.pop(module_name, None)
             raise ModuleLoadError(f"Execution failed: {exc}") from exc
 
         mod_class = self._find_module_class(py_module)
@@ -552,7 +552,7 @@ class Loader:
             mod_class = _adapter.wrap_unknown_module(py_module)
 
         if mod_class is None:
-            del sys.modules[module_name]
+            sys.modules.pop(module_name, None)
             _hint = (
                 f" (фреймворк {_framework!r} определён, но класс модуля не совместим)"
                 if _framework not in ("kitsune", "unknown")
@@ -581,7 +581,7 @@ class Loader:
         if mod_class.requires:
             missing = [r for r in mod_class.requires if r not in self._modules]
             if missing:
-                del sys.modules[module_name]
+                sys.modules.pop(module_name, None)
                 raise ModuleLoadError(
                     f"Missing dependencies: {', '.join(missing)}"
                 )
