@@ -292,6 +292,7 @@ _IMPORT_TO_PIP: dict[str, str] = {
     "magic": "python-magic",
     "usb": "pyusb",
     "serial": "pyserial",
+    "google": "google-generativeai",
 }
 
 async def _pip_install(package: str) -> bool:
