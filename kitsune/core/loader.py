@@ -347,6 +347,11 @@ class Loader:
     def get_module(self, name: str) -> KitsuneModule | None:
         return self._modules.get(name.lower())
 
+    def get_prefix(self, userbot: typing.Optional[str] = None) -> str:
+        key = "dragon.prefix" if userbot == "dragon" else "kitsune.main"
+        default = "," if userbot == "dragon" else "."
+        return self._db.get(key, "command_prefix", default)
+
     async def _load_one_builtin(self, path: Path) -> None:
         try:
             await self._load_from_path(path, is_builtin=True)
