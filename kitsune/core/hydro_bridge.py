@@ -1,10 +1,3 @@
-"""
-HydrogramBridge — подключает Hydrogram к единому CommandDispatcher.
-
-Вместо двух параллельных клиентов с разными системами обработки событий,
-Hydrogram-события конвертируются в формат совместимый с dispatcher'ом
-и передаются туда напрямую.
-"""
 from __future__ import annotations
 
 import asyncio
@@ -13,19 +6,11 @@ import typing
 
 logger = logging.getLogger(__name__)
 
-
 class _HydroMessageAdapter:
-    """
-    Адаптер Hydrogram Message → интерфейс совместимый с Telethon.
-    Dispatcher и модули используют: chat_id, sender_id, text, raw_text,
-    reply_to_msg_id, out, edit(), reply(), respond(), delete().
-    """
 
     def __init__(self, hydro_msg, telethon_client) -> None:
         self._msg = hydro_msg
         self._client = telethon_client
-
-    # ── Базовые атрибуты ─────────────────────────────────────────────────────
 
     @property
     def chat_id(self) -> int:
@@ -63,10 +48,7 @@ class _HydroMessageAdapter:
     def __getattr__(self, name: str) -> typing.Any:
         return getattr(self._msg, name)
 
-    # ── Методы отправки (через Telethon — от основного аккаунта) ─────────────
-
     async def edit(self, text: str, **kwargs) -> typing.Any:
-        """Отправляет новое сообщение (Hydrogram-сообщения нельзя редактировать через Telethon)."""
         parse_mode = kwargs.pop("parse_mode", "html")
         return await self._client.send_message(self.chat_id, text, parse_mode=parse_mode, **kwargs)
 
@@ -103,9 +85,7 @@ class _HydroMessageAdapter:
         except Exception:
             return None
 
-
 class _HydroEventAdapter:
-    """Адаптер Hydrogram event → Telethon NewMessage.Event."""
 
     def __init__(self, hydro_msg, telethon_client) -> None:
         self.message = _HydroMessageAdapter(hydro_msg, telethon_client)
@@ -115,14 +95,7 @@ class _HydroEventAdapter:
     def __getattr__(self, name: str) -> typing.Any:
         return getattr(self.message, name)
 
-
 class HydrogramBridge:
-    """
-    Подключает Hydrogram к существующему CommandDispatcher.
-
-    Регистрирует один обработчик на все входящие сообщения Hydrogram,
-    конвертирует их в адаптеры и передаёт в dispatcher._handle_message.
-    """
 
     def __init__(
         self,
@@ -137,7 +110,6 @@ class HydrogramBridge:
         self._db = db
 
     def attach(self) -> None:
-        """Регистрирует обработчик в Hydrogram."""
         try:
             from hydrogram import filters
             from hydrogram.handlers import MessageHandler
@@ -160,7 +132,7 @@ class HydrogramBridge:
             is_own = sender_id == me_id
 
             if not is_own:
-                # Проверяем co-owner и sudo
+
                 co_owners = self._db.get("kitsune.security", "co_owners", [])
                 sec = getattr(self._tl, "_kitsune_security", None)
                 sudo_users = sec.get_sudo_users() if sec else []
@@ -178,14 +150,12 @@ class HydrogramBridge:
         except Exception:
             logger.exception("HydrogramBridge: error handling message")
 
-
 async def setup_hydrogram_bridge(
     hydro_client,
     telethon_client,
     dispatcher: typing.Any,
     db: typing.Any,
 ) -> HydrogramBridge:
-    """Создаёт и подключает мост. Вызывается из main.py после старта клиентов."""
     bridge = HydrogramBridge(hydro_client, telethon_client, dispatcher, db)
     bridge.attach()
     return bridge

@@ -109,8 +109,6 @@ class SecurityModule(KitsuneModule):
                 pass
         return None
 
-    # ── owneradd ─────────────────────────────────────────────────────────────
-
     @command("owneradd", required=OWNER)
     async def owneradd_cmd(self, event) -> None:
         inline = self._inline()
@@ -171,8 +169,6 @@ class SecurityModule(KitsuneModule):
             await inline.edit(call, "❌ Действие отменено. Права не выданы.")
         await call.answer("❌ Отменено")
 
-    # ── ownerrm ──────────────────────────────────────────────────────────────
-
     @command("ownerrm", required=OWNER)
     async def ownerrm_cmd(self, event) -> None:
         inline = self._inline()
@@ -230,8 +226,6 @@ class SecurityModule(KitsuneModule):
             await inline.edit(call, "❌ Действие отменено. Пользователь остался в списке.")
         await call.answer("❌ Отменено")
 
-    # ── ownerlist ─────────────────────────────────────────────────────────────
-
     @command("ownerlist", required=OWNER)
     async def ownerlist_cmd(self, event) -> None:
         owners = self.db.get(_DB_OWNER, "co_owners", [])
@@ -247,8 +241,6 @@ class SecurityModule(KitsuneModule):
             self.strings("coowner_list").format(list="\n".join(lines) or "—"),
             parse_mode="html",
         )
-
-    # ── sudo ──────────────────────────────────────────────────────────────────
 
     @command("sudoadd", required=OWNER)
     async def sudoadd_cmd(self, event) -> None:
@@ -303,8 +295,6 @@ class SecurityModule(KitsuneModule):
             parse_mode="html",
         )
 
-    # ── blacklist ─────────────────────────────────────────────────────────────
-
     @command("blacklist", required=OWNER)
     async def blacklist_cmd(self, event) -> None:
         chat_id = event.message.chat_id
@@ -352,8 +342,6 @@ class SecurityModule(KitsuneModule):
             f"✅ <a href=\"tg://user?id={user.id}\">{_esc(get_display_name(user))}</a> убран из чёрного списка.",
             parse_mode="html",
         )
-
-    # ── tsec ──────────────────────────────────────────────────────────────────
 
     @command("tsec", required=OWNER)
     async def tsec_cmd(self, event) -> None:

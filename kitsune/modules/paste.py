@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 from ..core.loader import KitsuneModule, command

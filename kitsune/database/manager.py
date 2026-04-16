@@ -32,15 +32,14 @@ class SQLiteBackend:
         self._conn: sqlite3.Connection | None = None
 
     def _get_conn(self) -> sqlite3.Connection:
-        """Возвращает постоянное соединение, создавая его при необходимости."""
         if self._conn is None:
             conn = sqlite3.connect(str(self._path), timeout=10, check_same_thread=False)
-            # Производительность: WAL + кэш + RAM для temp + mmap
+
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA synchronous=NORMAL")
-            conn.execute("PRAGMA cache_size=-8000")       # 8 МБ page cache
-            conn.execute("PRAGMA temp_store=MEMORY")      # temp таблицы в RAM
-            conn.execute("PRAGMA mmap_size=67108864")     # memory-mapped I/O 64 МБ
+            conn.execute("PRAGMA cache_size=-8000")       
+            conn.execute("PRAGMA temp_store=MEMORY")      
+            conn.execute("PRAGMA mmap_size=67108864")     
             conn.execute(
                 "CREATE TABLE IF NOT EXISTS kitsune_db "
                 "(owner TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, "
@@ -86,13 +85,13 @@ class SQLiteBackend:
                 for owner, sub in data.items()
                 for key, value in sub.items()
             ]
-            # UPSERT вместо DELETE+INSERT — обновляем только изменившиеся записи
+
             conn.executemany(
                 "INSERT INTO kitsune_db (owner, key, value) VALUES (?, ?, ?) "
                 "ON CONFLICT(owner, key) DO UPDATE SET value=excluded.value",
                 rows,
             )
-            # Удаляем строки которых больше нет в data
+
             if rows:
                 placeholders = ",".join("(?,?)" for _ in rows)
                 params = [v for owner, key, _ in rows for v in (owner, key)]
@@ -267,7 +266,7 @@ class DatabaseManager:
         async with self._lock:
             snapshot = dict(self._data)
         result = await self._backend.save(snapshot)
-        # Закрываем постоянное соединение при завершении
+
         if isinstance(self._backend, SQLiteBackend):
             self._backend.close()
         return result

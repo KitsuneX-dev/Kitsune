@@ -108,14 +108,7 @@ def _check_tag(tag: str, func: typing.Callable, m: Message) -> bool:
 def _should_skip_watcher(func: typing.Callable, message: Message) -> bool:
     return any(_check_tag(tag, func, message) for tag in ALL_TAGS)
 
-
 class _CoOwnerMessageProxy:
-    """
-    Прокси над сообщением co-owner.
-    edit() / respond() / reply() — отправляют новое сообщение от основного клиента,
-    потому что редактировать чужое сообщение невозможно.
-    Все остальные атрибуты проксируются к оригинальному message.
-    """
 
     def __init__(self, message: typing.Any, client: typing.Any) -> None:
         object.__setattr__(self, "_msg", message)
@@ -150,9 +143,8 @@ class _CoOwnerMessageProxy:
         )
 
     async def delete(self) -> None:
-        # Не удаляем сообщение co-owner — просто игнорируем
-        pass
 
+        pass
 
 class CommandDispatcher:
 
@@ -211,10 +203,6 @@ class CommandDispatcher:
         if not sender_id or sender_id == self._client.tg_id:
             return
 
-        # ── Перехват ввода для inline-конфига ──────────────────────────────────
-        # Когда пользователь вводит значение через бота (pending_input),
-        # перехватываем сообщение здесь через Telethon, пока entities доступны,
-        # и сохраняем HTML с форматированием (цитаты, жирный, прем-эмодзи).
         pending = self._db.get("kitsune.config", "pending_input", None)
         if pending:
             owner_id = self._db.get("kitsune.notifier", "owner_id", None)
@@ -224,7 +212,7 @@ class CommandDispatcher:
                     import copy
                     raw_text = message.raw_text or message.text or ""
                     entities = list(message.entities or [])
-                    # Сериализуем в HTML сохраняя всё форматирование
+
                     html_value = tl_html.unparse(raw_text, entities) if entities else raw_text
 
                     mod_name = pending["mod"]
@@ -253,7 +241,7 @@ class CommandDispatcher:
                                 await self._db.force_save()
                             except Exception:
                                 pass
-                            # Обновляем сообщение бота с подтверждением
+
                             inline = getattr(self._client, "_kitsune_inline", None)
                             if inline and inline._bot:
                                 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -273,10 +261,9 @@ class CommandDispatcher:
                                 await message.delete()
                             except Exception:
                                 pass
-                            return  # Не передаём дальше в bot_runner
+                            return  
                 except Exception:
-                    pass  # При ошибке — bot_runner обработает как обычно
-        # ── Конец перехвата ────────────────────────────────────────────────────
+                    pass  
 
         sec = self._security
         sudo_users = sec.get_sudo_users() if sec else []
@@ -318,9 +305,6 @@ class CommandDispatcher:
 
             handler, required = entry
 
-            # Co-owner выполняет команду от лица основного аккаунта.
-            # Редактировать его сообщение нельзя, поэтому оборачиваем message
-            # в прокси: edit()/respond() → send_message от нашего клиента.
             if is_co_owner:
                 message._sender_id = self._client.tg_id
                 message._client = self._client
@@ -329,7 +313,6 @@ class CommandDispatcher:
                 is_own = True
                 is_co_owner = False
 
-            # Sudo-пользователи (не co-owner) не могут выполнять OWNER-команды
             if not is_own and not is_co_owner and required >= OWNER:
                 return
 

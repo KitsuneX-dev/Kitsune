@@ -147,12 +147,10 @@ async def _start_hydrogram(api_id: int, api_hash: str, session_name: str) -> Any
             api_id=api_id,
             api_hash=api_hash,
             workdir=str(DATA_DIR),
-            # На Termux не держим постоянный апдейт-коннект — bridge перехватывает через telethon.
-            # На Ubuntu/Linux оставляем полный режим.
+
             no_updates=is_termux,
         )
 
-        # Параметры стабильности соединения (если hydrogram их поддерживает)
         try:
             import inspect
             sig = inspect.signature(HydroClient.__init__)
@@ -213,7 +211,7 @@ async def _startup(args: argparse.Namespace) -> None:
         decrypt_session_file, _fix_session_permissions,
         _ensure_data_dir, _fix_db_readonly, _fix_all_permissions,
     )
-    # Выдаём права на все файлы/директории до чего-либо ещё
+
     _fix_all_permissions()
     decrypt_session_file()
 

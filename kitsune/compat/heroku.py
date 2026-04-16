@@ -1,22 +1,3 @@
-"""
-Kitsune ← Heroku compatibility shim
-=====================================
-Эмулирует пространства имён heroku.*, herokutl.*
-для модулей, написанных под Heroku Userbot (форк Hikka).
-
-Heroku очень близок к Hikka, поэтому большинство шимов
-просто переиспользуются с переименованием пространств имён.
-
-  heroku.loader.Module     → KitsuneCompatHikkaModule (shared)
-  heroku.loader.command    → совместимый @command
-  heroku.utils.*           → Kitsune utils
-  heroku.security.*        → Kitsune security
-  herokutl.*               → telethon (alias)
-
-Добавление нового форка Hikka:
-  1. Скопируй этот файл, замени "heroku" на имя нового фреймворка.
-  2. Зарегистрируй в module_adapter.SHIM_INSTALLERS.
-"""
 from __future__ import annotations
 
 import logging
@@ -28,15 +9,11 @@ logger = logging.getLogger(__name__)
 
 _SHIM_APPLIED = False
 
-
 def apply() -> None:
-    """Устанавливает Heroku-шимы в sys.modules (идемпотентно)."""
     global _SHIM_APPLIED
     if _SHIM_APPLIED:
         return
 
-    # Сначала убеждаемся, что Hikka-шимы установлены:
-    # Heroku повторяет их структуру, мы просто создаём алиасы.
     from .hikka import (
         apply as _hikka_apply,
         _command_decorator,
@@ -59,7 +36,6 @@ def apply() -> None:
 
     CompatModule = _make_compat_module_base()
 
-    # ── heroku.loader ─────────────────────────────────────────────────────────
     loader_shim = types.ModuleType("heroku.loader")
     loader_shim.Module           = CompatModule
     loader_shim.command          = _command_decorator
@@ -80,7 +56,6 @@ def apply() -> None:
     loader_shim.unrestricted     = EVERYONE
     loader_shim.inline_everyone  = EVERYONE
 
-    # ── heroku.security ───────────────────────────────────────────────────────
     security_shim = types.ModuleType("heroku.security")
     security_shim.OWNER           = OWNER
     security_shim.SUDO            = SUDO
@@ -95,7 +70,6 @@ def apply() -> None:
     security_shim.sudo            = SUDO
     security_shim.support         = SUPPORT
 
-    # ── heroku.utils ──────────────────────────────────────────────────────────
     utils_shim = types.ModuleType("heroku.utils")
     utils_shim.escape_html     = kitsune_utils.escape_html
     utils_shim.chunks          = kitsune_utils.chunks
@@ -108,7 +82,6 @@ def apply() -> None:
     utils_shim.answer          = kitsune_utils.answer
     utils_shim.answer_file     = kitsune_utils.answer_file
 
-    # ── heroku (корневой) ─────────────────────────────────────────────────────
     heroku_shim = types.ModuleType("heroku")
     heroku_shim.loader   = loader_shim
     heroku_shim.security = security_shim
@@ -119,7 +92,6 @@ def apply() -> None:
     sys.modules["heroku.security"] = security_shim
     sys.modules["heroku.utils"]    = utils_shim
 
-    # ── herokutl → telethon ───────────────────────────────────────────────────
     try:
         import telethon
         sys.modules.setdefault("herokutl",                 telethon)

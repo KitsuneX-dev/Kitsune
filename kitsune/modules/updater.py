@@ -10,7 +10,7 @@ from ..core.security import OWNER
 from ..utils import escape_html
 
 _DB_OWNER = "kitsune.updater"
-_TTL = 120  # секунд до таймаута кнопок
+_TTL = 120  
 
 class UpdaterModule(KitsuneModule):
     name        = "updater"
@@ -166,11 +166,9 @@ class UpdaterModule(KitsuneModule):
                 "msg_id":    m.id,
             })
 
-            # Регистрируем обработчик кнопок
             from telethon import events as _events
             self.client.add_event_handler(self._on_callback, _events.CallbackQuery)
 
-            # Inline кнопки через telethon
             from telethon.tl.types import KeyboardButtonCallback
             from telethon.tl.types import ReplyInlineMarkup, KeyboardButtonRow
 
@@ -263,7 +261,7 @@ class UpdaterModule(KitsuneModule):
         if is_termux:
             try:
                 with open(req_file, encoding="utf-8") as f:
-                    pkgs = [l.strip() for l in f if l.strip() and not l.strip().startswith("#")]
+                    pkgs = [l.strip() for l in f if l.strip() and not l.strip().startswith("
                 for pkg in pkgs:
                     p = await asyncio.create_subprocess_exec(
                         sys.executable, "-m", "pip", "install", pkg,
@@ -322,7 +320,6 @@ class UpdaterModule(KitsuneModule):
             "msg_id":     msg_id,
         })
         await self.db.force_save()
-
 
 def _fmt_time(seconds: float) -> str:
     if seconds < 1:

@@ -1,4 +1,3 @@
-
 from .args     import get_args, get_args_raw, get_args_html, split_args
 from .entity   import (
     get_display_name, get_entity_id, mention_html,
@@ -55,11 +54,6 @@ IS_TERMUX = is_termux()
 IS_DOCKER = is_docker()
 
 async def auto_delete(message, delay: float | None = None) -> None:
-    """
-    Удаляет сообщение через delay секунд.
-    Если delay не передан — читает настройку auto_delete_delay из БД.
-    Если задержка = 0 (по умолчанию) — ничего не удаляет.
-    """
     import contextlib as _ctx
     if delay is None:
         try:

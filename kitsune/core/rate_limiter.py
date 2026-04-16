@@ -85,8 +85,7 @@ class RateLimiter:
             self._cleanup_task = asyncio.ensure_future(self._cleanup_loop(interval))
 
     async def _cleanup_loop(self, interval: float) -> None:
-        """Удаляет bucket'ы неактивные более 1 часа — исправляет утечку памяти."""
-        _IDLE_TTL = 3600.0  # 1 час
+        _IDLE_TTL = 3600.0  
         while True:
             await asyncio.sleep(interval)
             now = time.monotonic()

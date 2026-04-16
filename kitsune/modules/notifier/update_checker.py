@@ -1,4 +1,3 @@
-"""Проверка обновлений и выполнение git-обновления."""
 from __future__ import annotations
 
 import asyncio
@@ -13,9 +12,7 @@ logger = logging.getLogger(__name__)
 
 _DB_KEY = "kitsune.notifier"
 
-
 class UpdateChecker:
-    """Периодическая проверка обновлений + выполнение git pull."""
 
     def __init__(self, client, db) -> None:
         self._client = client
@@ -31,8 +28,6 @@ class UpdateChecker:
     def stop(self) -> None:
         if self._check_task and not self._check_task.done():
             self._check_task.cancel()
-
-    # ── Update loop ───────────────────────────────────────────────────────────
 
     async def _loop(self) -> None:
         await asyncio.sleep(300)
@@ -103,8 +98,6 @@ class UpdateChecker:
 
         await self.notify_update(current=__version_str__, new=new_ver, changes=changes)
 
-    # ── Notify ────────────────────────────────────────────────────────────────
-
     async def notify_update(self, current: str, new: str, changes: str = "") -> None:
         token = self._db.get(_DB_KEY, "bot_token", None)
         owner_id = self._db.get(_DB_KEY, "owner_id", None)
@@ -131,8 +124,6 @@ class UpdateChecker:
         except Exception:
             logger.exception("UpdateChecker: failed to send update notification")
 
-    # ── do_update ─────────────────────────────────────────────────────────────
-
     async def do_update(self, msg=None) -> None:
         async def edit(text: str) -> None:
             if msg:
@@ -141,7 +132,6 @@ class UpdateChecker:
                 except Exception:
                     pass
 
-        # Git pull
         try:
             import git
             repo = git.Repo(self._repo_path)
@@ -159,7 +149,6 @@ class UpdateChecker:
             except TypeError:
                 branch = "main"
 
-            # Сохраняем config.toml
             config_path = os.path.join(self._repo_path, "config.toml")
             config_backup = None
             if os.path.exists(config_path):

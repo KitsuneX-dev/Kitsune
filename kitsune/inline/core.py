@@ -65,7 +65,7 @@ class InlineManager:
         self._started = True
         asyncio.ensure_future(self._dp.start_polling(self._bot, handle_signals=False))
         asyncio.ensure_future(self._cleaner())
-        await asyncio.sleep(3)  # Termux/slow devices need more time to establish polling
+        await asyncio.sleep(3)  
         try:
             me = await self._bot.get_me()
             self._bot_username = me.username

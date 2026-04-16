@@ -13,7 +13,6 @@ _DB_OWNER = "kitsune.info"
 def _esc(s: str) -> str:
     return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
-
 class InfoModule(KitsuneModule):
 
     name        = "KitsuneInfo"
@@ -167,7 +166,6 @@ class InfoModule(KitsuneModule):
 
     @staticmethod
     def _parse_html_with_tg_emoji(html_text: str):
-        """Парсит HTML с поддержкой <tg-emoji emoji-id="..."> тегов."""
         import re
         from telethon.extensions import html as tl_html
         from telethon.tl.types import MessageEntityCustomEmoji
@@ -247,7 +245,6 @@ class InfoModule(KitsuneModule):
                 "Обнови ссылку в конфиге на: %s", banner
             )
 
-        # Если есть custom_message — используем Telethon + премиум-эмодзи
         if self.config["custom_message"]:
             from telethon.tl.types import ReplyInlineMarkup, KeyboardButtonUrl, KeyboardButtonRow
 
@@ -263,7 +260,7 @@ class InfoModule(KitsuneModule):
 
             if banner:
                 try:
-                    # Отправляем баннер СРАЗУ с подписью и эмодзи
+
                     await self.client.send_file(
                         event.peer_id,
                         banner,
@@ -276,11 +273,9 @@ class InfoModule(KitsuneModule):
                 except Exception:
                     logger.exception("info: не удалось отправить баннер с подписью")
 
-            # Если баннера нет или он упал — просто редактируем сообщение
             await event.message.edit(parsed_text, formatting_entities=entities, buttons=markup)
             return
 
-        # Старый режим (без custom_message)
         if inline and inline._bot:
             markup = [[mark]] if mark else []
             kwargs = {"gif": banner} if banner else {}
@@ -311,7 +306,6 @@ class InfoModule(KitsuneModule):
 
     @command("fmt", required=OWNER)
     async def fmt_cmd(self, event) -> None:
-        """Форматирует текст в HTML-теги для custom_message"""
         args = self.get_args(event).strip()
 
         if not args:
@@ -356,15 +350,11 @@ class InfoModule(KitsuneModule):
         open_tag, close_tag = tag_map[tag]
         result = f"{open_tag}{content}{close_tag}"
 
-        # Отправляем без parse_mode — чтобы пользователь скопировал
-        # сырые HTML-теги, а не их экранированную версию из <code>
         await event.message.edit(
             f"✅ Скопируй и вставь в fcfg kitsuneinfo custom_message:\n\n{result}",
         )
 
-
     async def emoji_cmd(self, event) -> None:
-        """Субкоманда .e r.text — вытаскивает ID премиум-эмодзи"""
         from telethon.tl.types import MessageEntityCustomEmoji
 
         args = self.get_args(event).strip()
@@ -404,7 +394,6 @@ class InfoModule(KitsuneModule):
             return
 
         def utf16_to_py(text: str, utf16_offset: int) -> int:
-            """Конвертирует UTF-16 offset (как у Telegram) в Python-индекс строки."""
             py_idx = 0
             utf16_counted = 0
             while utf16_counted < utf16_offset and py_idx < len(text):
@@ -414,7 +403,6 @@ class InfoModule(KitsuneModule):
             return py_idx
 
         def utf16_slice(text: str, utf16_offset: int, utf16_length: int) -> tuple[int, int]:
-            """Возвращает (py_start, py_end) для UTF-16 offset+length."""
             start = utf16_to_py(text, utf16_offset)
             end   = utf16_to_py(text, utf16_offset + utf16_length)
             return start, end

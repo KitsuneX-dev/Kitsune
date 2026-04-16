@@ -27,7 +27,6 @@ def _fmt_uptime(seconds: float) -> str:
     parts.append(f"{minutes}м")
     return " ".join(parts)
 
-
 class PingModule(KitsuneModule):
     name        = "ping"
     description = "Пинг и базовая информация"
@@ -124,7 +123,7 @@ class PingModule(KitsuneModule):
                     ram=ram,
                 )
             except KeyError:
-                text = custom  # если ключ неверный — показываем как есть
+                text = custom  
         else:
             text = _DEFAULT_PONG.format(
                 ms=ms,
