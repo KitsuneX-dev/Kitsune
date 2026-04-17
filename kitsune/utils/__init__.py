@@ -111,19 +111,19 @@ def find_caller(stack: list) -> str:
             return module
     return "unknown"
 
-async def asset_channel(client, title: str = "Kitsune Assets", *, silent: bool = True, description: str = "", archive: bool = False):
+async def asset_channel(client, title: str = "Kitsune Assets", *, silent: bool = True, description: str = "", archive: bool = False, megagroup: bool = False):
     try:
         from telethon.tl.functions.channels import CreateChannelRequest
         from telethon.tl.types import InputMessagesFilterEmpty
 
         async for dialog in client.iter_dialogs():
-            if dialog.is_channel and dialog.title == title and dialog.entity.creator:
+            if (dialog.is_channel or dialog.is_group) and dialog.title == title and dialog.entity.creator:
                 return dialog.entity.id, False
 
         result = await client(CreateChannelRequest(
             title=title,
             about=description or "Kitsune internal asset storage",
-            megagroup=False,
+            megagroup=megagroup,
         ))
         channel = result.chats[0]
         if archive:
