@@ -419,8 +419,8 @@ rotating_handler.setFormatter(_main_formatter)
 _tg_channel_handler: TelegramChannelHandler | None = None
 
 async def _get_aiogram_bot(client: typing.Any) -> typing.Any:
-    """Ждёт запуска aiogram-бота и возвращает его (или None)."""
-    for _ in range(30):  # ждём до 15 секунд
+    """Ждёт запуска aiogram-бота и возвращает его (или None). Таймаут — 90 секунд."""
+    for _ in range(180):
         try:
             loader = getattr(client, "_kitsune_loader", None)
             if loader:
@@ -433,26 +433,52 @@ async def _get_aiogram_bot(client: typing.Any) -> typing.Any:
     return None
 
 
-async def _ensure_bot_in_group(client: typing.Any, group_id: int) -> None:
-    """Добавляет бота в группу Kitsune-logs, если его там нет."""
+async def _ensure_bot_in_group(client: typing.Any, group_id: int) -> bool:
+    """Ждёт bot_username до 90 секунд, затем добавляет бота в группу Kitsune-logs."""
     import contextlib
-    try:
-        db = getattr(client, "_kitsune_db", None)
-        if not db:
-            return
-        bot_username = db.get("kitsune.notifier", "bot_username", None)
-        if not bot_username:
-            return
 
+    log = logging.getLogger(__name__)
+
+    # Ждём пока notifier запишет bot_username в БД
+    bot_username: str | None = None
+    for _ in range(90):
+        try:
+            db = getattr(client, "_kitsune_db", None)
+            if db:
+                bot_username = db.get("kitsune.notifier", "bot_username", None)
+                if bot_username:
+                    break
+        except Exception:
+            pass
+        await asyncio.sleep(1)
+
+    if not bot_username:
+        log.warning("log: bot_username не найден за 90с — бот не добавлен в Kitsune-logs")
+        return False
+
+    try:
         from telethon.tl.functions.channels import InviteToChannelRequest
         from telethon.errors import UserAlreadyParticipantError
 
         bot_entity = await client.get_entity(f"@{bot_username}")
-        with contextlib.suppress(UserAlreadyParticipantError, Exception):
+        try:
             await client(InviteToChannelRequest(channel=group_id, users=[bot_entity]))
-            logging.getLogger(__name__).info("log: bot @%s added to Kitsune-logs", bot_username)
+            log.info("log: бот @%s добавлен в Kitsune-logs", bot_username)
+        except UserAlreadyParticipantError:
+            log.info("log: бот @%s уже в Kitsune-logs", bot_username)
+        return True
     except Exception as exc:
-        logging.getLogger(__name__).debug("log: could not add bot to group — %s", exc)
+        log.warning("log: не удалось добавить бота в группу — %s", exc)
+        return False
+
+
+def _to_bot_api_id(telethon_id: int) -> int:
+    """Конвертирует Telethon channel/megagroup ID в Bot API формат (-100xxxxxxx)."""
+    peer_id = abs(telethon_id)
+    # Если уже в bot-api формате (>= 10^12) — возвращаем как есть с минусом
+    if peer_id >= 1_000_000_000_000:
+        return -peer_id
+    return int(f"-100{peer_id}")
 
 
 async def setup_tg_logging(client: typing.Any) -> None:
@@ -461,7 +487,7 @@ async def setup_tg_logging(client: typing.Any) -> None:
     try:
         from .utils import asset_channel
 
-        # Ищем существующую группу, иначе создаём (megagroup=True, чтобы можно было добавить бота)
+        # Создаём мегагруппу (или находим существующую)
         group_id, created = await asset_channel(
             client,
             title="Kitsune-logs",
@@ -470,23 +496,36 @@ async def setup_tg_logging(client: typing.Any) -> None:
             megagroup=True,
         )
 
-        # Добавляем бота в группу (он будет отправлять баннер и логи)
-        await _ensure_bot_in_group(client, group_id)
+        if not group_id:
+            logging.getLogger(__name__).error("log: не удалось создать/найти группу Kitsune-logs")
+            return
 
+        # Настраиваем хендлер логов (через клиент пользователя — всегда работает)
         handler = TelegramChannelHandler(client, group_id, level=logging.WARNING)
         handler.setFormatter(_tg_formatter)
         handler.start()
-
         logging.getLogger().addHandler(handler)
         _tg_channel_handler = handler
 
-        # Баннер отправляем через бота (не от имени пользователя)
-        asyncio.ensure_future(_send_startup_banner_via_bot(client, group_id))
-
         logging.getLogger(__name__).info("log: TG logging active (group_id=%d)", group_id)
+
+        # Добавляем бота и отправляем баннер в фоне
+        asyncio.ensure_future(_setup_bot_and_banner(client, group_id))
 
     except Exception:
         logging.getLogger(__name__).exception("log: failed to set up TG channel logging")
+
+
+async def _setup_bot_and_banner(client: typing.Any, group_id: int) -> None:
+    """Добавляет бота в группу и отправляет стартовый баннер от его имени."""
+    # Шаг 1: ждём bot_username и добавляем бота в группу
+    bot_added = await _ensure_bot_in_group(client, group_id)
+
+    # Шаг 2: ждём пока aiogram бот поднимется
+    bot = await _get_aiogram_bot(client)
+
+    # Шаг 3: отправляем баннер
+    await _send_startup_banner_via_bot(client, group_id, bot=bot, bot_added=bot_added)
 
 async def _send_startup_banner_via_bot(client: typing.Any, group_id: int) -> None:
     """Отправляет стартовый баннер через бота (не от имени пользователя)."""
