@@ -87,7 +87,10 @@ class BackupModule(KitsuneModule):
         async with ProgressMessage(event, "⏳ Восстанавливаю из резервной копии...", total=3) as prog:
             try:
                 await prog.update(1)
-                raw = await hydro_download(self.client, reply)
+                raw = await asyncio.wait_for(
+                    hydro_download(self.client, reply),
+                    timeout=120,
+                )
 
                 if crypto.is_encrypted(raw):
                     try:
@@ -133,8 +136,10 @@ class BackupModule(KitsuneModule):
                 "names": list(user_mods.keys()),
             }
             import io as _io
-            buf = _io.BytesIO(json.dumps(payload, ensure_ascii=False).encode())
-            buf.name = f"kitsune_mods_{int(time.time())}.json"
+            mods_plain = json.dumps(payload, ensure_ascii=False).encode()
+            mods_encrypted = crypto.encrypt(mods_plain)
+            buf = _io.BytesIO(mods_encrypted)
+            buf.name = f"kitsune_mods_{int(time.time())}.kbak"
             buf.seek(0)
             await hydro_send_file(
                 self.client, dest, buf,
@@ -152,7 +157,10 @@ class BackupModule(KitsuneModule):
         async with ProgressMessage(event, self.strings("mods_restoring"), total=3) as prog:
             try:
                 await prog.update(1)
-                raw = await hydro_download(self.client, reply)
+                raw = await asyncio.wait_for(
+                    hydro_download(self.client, reply),
+                    timeout=120,
+                )
                 payload = json.loads(raw.decode())
                 if not payload.get("kitsune_mods_backup"):
                     await prog.done(self.strings("mods_bad_file"))
@@ -162,6 +170,9 @@ class BackupModule(KitsuneModule):
                 loader = getattr(self.client, "_kitsune_loader", None)
                 count = 0
                 for url in urls:
+                    if loader is None:
+                        logger.error("restoremods: loader не найден, пропускаю %s", url)
+                        continue
                     try:
                         await loader.load_from_url(url)
                         count += 1
@@ -269,12 +280,19 @@ class BackupModule(KitsuneModule):
 
         # Сначала ищем существующую группу KitsuneBackup среди диалогов
         try:
-            async for dialog in self.client.iter_dialogs():
-                if dialog.is_group and dialog.title == "KitsuneBackup":
-                    gid = dialog.id
-                    await self.db.set(_DB_OWNER, "group_id", gid)
-                    logger.info("Backup: found existing KitsuneBackup group id=%d", gid)
-                    return gid
+            from telethon.errors import FloodWaitError as _FloodWait
+            for _attempt in range(3):
+                try:
+                    async for dialog in self.client.iter_dialogs():
+                        if dialog.is_group and dialog.title == "KitsuneBackup":
+                            gid = dialog.id
+                            await self.db.set(_DB_OWNER, "group_id", gid)
+                            logger.info("Backup: found existing KitsuneBackup group id=%d", gid)
+                            return gid
+                    break  # успешно прошли все диалоги
+                except _FloodWait as _fw:
+                    logger.warning("Backup: FloodWait при поиске диалогов — ждём %ds", _fw.seconds)
+                    await asyncio.sleep(_fw.seconds + 1)
         except Exception as exc:
             logger.debug("Backup: could not search dialogs — %s", exc)
 
@@ -313,9 +331,9 @@ class BackupModule(KitsuneModule):
         return gid
 
     async def _send_backup(self, dest: int, *, auto: bool = False) -> None:
-        raw = self.db._data
+        raw = self.db.export_data()
         if not raw:
-            raise RuntimeError("no data")
+            raise RuntimeError("нет данных в базе — бэкап не создан")
 
         interval_h = self.db.get(_DB_OWNER, "interval_h", None)
         h_str      = f"каждые {interval_h} ч" if interval_h else "вручную"
