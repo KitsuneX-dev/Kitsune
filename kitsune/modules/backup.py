@@ -47,7 +47,7 @@ class BackupModule(KitsuneModule):
         "mods_restoring": "⏳ Восстанавливаю модули...",
         "mods_restored":  "✅ Модули восстановлены: {count} шт.",
         "mods_bad_file":  "❌ Неверный формат файла бэкапа модулей.",
-        "backup_caption": "🦊 <b>Kitsune Backup</b>\n🔐 Зашифрован\n🕐 {ts}\n🔁 Интервал: каждые {h} ч",
+        "backup_caption": "🦊 <b>Kitsune Backup</b>\n🔐 Зашифрован\n🕐 {ts}\n🔁 Интервал: {h}",
     }
 
     def __init__(self, *args, **kwargs) -> None:
@@ -318,7 +318,7 @@ class BackupModule(KitsuneModule):
             raise RuntimeError("no data")
 
         interval_h = self.db.get(_DB_OWNER, "interval_h", None)
-        h_str      = f"{interval_h} ч" if interval_h else "вручную"
+        h_str      = f"каждые {interval_h} ч" if interval_h else "вручную"
 
         payload = {
             "kitsune_backup": True,
@@ -328,12 +328,19 @@ class BackupModule(KitsuneModule):
         plain     = json.dumps(payload, indent=2, ensure_ascii=False).encode()
         encrypted = crypto.encrypt(plain)
 
+        if not encrypted:
+            raise RuntimeError("Шифрование не вернуло данных — бэкап не создан")
+
+        filename = f"kitsune_backup_{int(time.time())}.kbak"
         buf      = io.BytesIO(encrypted)
-        buf.name = f"kitsune_backup_{int(time.time())}.kbak"
+        buf.name = filename
         buf.seek(0)
 
         caption = self.strings("backup_caption").format(
             ts=time.strftime("%Y-%m-%d %H:%M:%S"),
             h=h_str,
         )
-        await hydro_send_file(self.client, dest, buf, caption=caption, parse_mode="html")
+        sent = await hydro_send_file(self.client, dest, buf, caption=caption, parse_mode="html")
+        if sent is None:
+            raise RuntimeError("Файл бэкапа не был отправлен (hydro_send_file вернул None)")
+        logger.info("Backup: файл отправлен: %s (%d байт)", filename, len(encrypted))
