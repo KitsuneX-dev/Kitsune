@@ -406,6 +406,30 @@ class _NetworkNoiseFilter(logging.Filter):
                 return False
         return True
 
+class _ConsoleStartupFilter(logging.Filter):
+    """
+    Подавляет в консоли INFO-сообщения о запуске внутренних служб (web/log),
+    которые засоряют вывод. Они по-прежнему пишутся в файл лога.
+    """
+    _SUPPRESS = (
+        "WebCore: listening on",
+        "log: TG logging active",
+        "log: чат является каналом",
+        "log: бот @",
+        "log: баннер отправлен",
+        "log: бот недоступен",
+        "log: бот добавлен",
+        "log: бот уже в",
+    )
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.levelno == logging.INFO:
+            msg = record.getMessage()
+            if any(s in msg for s in self._SUPPRESS):
+                return False
+        return True
+
+
 rotating_handler = RotatingFileHandler(
     filename=str(LOG_FILE),
     mode="a",
@@ -657,6 +681,7 @@ def init() -> None:
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setLevel(logging.INFO)
     console_handler.setFormatter(_main_formatter)
+    console_handler.addFilter(_ConsoleStartupFilter())
 
     root = logging.getLogger()
     root.handlers = []

@@ -18,7 +18,32 @@ step() { echo -e "\n${MAGENTA}${BOLD}── $* ──${RESET}"; }
 
 trap 'echo -e "${RED}❌ Ошибка на строке $LINENO — установка прервана${RESET}" >&2' ERR
 
-clear 2>/dev/null || true
+IS_TERMUX=false
+IS_UBUNTU=false
+IS_USERLAND=false
+SUDO="sudo"
+
+# ── Определяем среду ──────────────────────────────────────────────────────────
+if [[ -n "${PREFIX:-}" && "$PREFIX" == *"com.termux"* ]]; then
+    IS_TERMUX=true
+elif [[ -d "/data/user/0/tech.ula" \
+     || -n "${USERLAND_VERSION:-}" \
+     || -f "/etc/userland-release" \
+     || "$(cat /proc/version 2>/dev/null)" == *"android"* \
+     || "$(uname -r 2>/dev/null)" == *"android"* \
+     || "$(uname -o 2>/dev/null)" == *"ndroid"* \
+     || -f "/proc/1/cmdline" && "$(cat /proc/1/cmdline 2>/dev/null)" == *"bash"* ]]; then
+    IS_USERLAND=true
+    IS_UBUNTU=true
+elif command -v apt-get &>/dev/null; then
+    IS_UBUNTU=true
+fi
+
+# Очистка экрана только если не в UserLand (чтобы не терять вывод установщика)
+if ! $IS_USERLAND; then
+    clear 2>/dev/null || true
+fi
+
 echo -e "${MAGENTA}${BOLD}"
 cat << 'EOF'
   ██╗  ██╗██╗████████╗███████╗██╗   ██╗███╗   ██╗███████╗
@@ -30,79 +55,63 @@ cat << 'EOF'
 EOF
 echo -e "${RESET}${CYAN}           Userbot by Yushi (@Mikasu32)${RESET}\n"
 
-IS_TERMUX=false
-IS_UBUNTU=false
-IS_USERLAND=false
-SUDO="sudo"
+if $IS_TERMUX;   then info "Среда: Termux"
+elif $IS_USERLAND; then info "Среда: UserLand (Ubuntu on Android)"
+elif $IS_UBUNTU;   then info "Среда: Ubuntu / Debian"
+else warn "Неизвестная среда — попытка продолжить..."; fi
 
-# Определяем среду
-if [[ -n "${PREFIX:-}" && "$PREFIX" == *"com.termux"* ]]; then
-    IS_TERMUX=true
-    info "Обнаружена среда: Termux"
-elif [[ -d "/data/user/0/tech.ula" \
-     || -n "${USERLAND_VERSION:-}" \
-     || -f "/etc/userland-release" \
-     || "$(cat /proc/version 2>/dev/null)" == *"android"* \
-     || "$(uname -r 2>/dev/null)" == *"android"* ]]; then
-    IS_USERLAND=true
-    IS_UBUNTU=true
-    info "Обнаружена среда: UserLand (Ubuntu on Android)"
-elif command -v apt-get &>/dev/null; then
-    IS_UBUNTU=true
-    info "Обнаружена среда: Ubuntu / Debian"
-else
-    warn "Неизвестная среда — попытка продолжить..."
-fi
-
-# Выбираем sudo
+# ── Определяем sudo ───────────────────────────────────────────────────────────
 if [[ "$(id -u)" == "0" ]]; then
     SUDO=""
-    info "Запуск от root — sudo не нужен"
+    info "Запущен от root — sudo не нужен"
 elif $IS_USERLAND; then
-    # В UserLand есть кастомный /usr/local/bin/sudo — используем его напрямую
-    if [[ -x "/usr/local/bin/sudo" ]]; then
+    # UserLand: пробуем стандартный sudo, затем /usr/local/bin/sudo, затем proot
+    if command -v sudo &>/dev/null && sudo -n true 2>/dev/null; then
+        SUDO="sudo"
+        info "UserLand: используем sudo"
+    elif [[ -x "/usr/local/bin/sudo" ]]; then
         SUDO="/usr/local/bin/sudo"
         info "UserLand: используем /usr/local/bin/sudo"
-    elif command -v sudo &>/dev/null; then
-        SUDO="sudo"
     else
-        SUDO=""
-        warn "sudo не найден в UserLand — продолжаю без него"
+        # Последняя попытка: запустить с proot (если есть)
+        if command -v proot &>/dev/null; then
+            SUDO="proot -0"
+            info "UserLand: используем proot -0 вместо sudo"
+        else
+            SUDO=""
+            warn "sudo / proot не найдены. Попробуй запустить скрипт через: sudo bash install.sh"
+        fi
     fi
 elif ! command -v sudo &>/dev/null; then
     SUDO=""
-    warn "sudo не найден — пробуем без него"
+    warn "sudo не найден — попытка без него"
 fi
 
-# Хелпер: apt-get с подавлением fatal-ошибок прав
+# ── Хелпер: безопасный apt-get ───────────────────────────────────────────────
 apt_install() {
-    # В UserLand кастомный sudo работает без пароля — не пропускаем пакеты
     if [[ -z "$SUDO" && "$(id -u)" != "0" ]]; then
-        warn "Нет прав для apt-get — пропускаю системные пакеты (установи вручную при необходимости)"
-        return 0
+        warn "Нет прав root для apt-get. Попробуй: sudo apt install $*"
+        warn "После ручной установки запусти скрипт повторно."
+        return 1
     fi
     $SUDO apt-get update -qq 2>/dev/null || true
-    $SUDO apt-get install -y --no-install-recommends "$@" 2>/dev/null \
-        || warn "Не удалось установить: $* — попробуй вручную: apt install $*"
+    $SUDO apt-get install -y --no-install-recommends "$@" \
+        || { warn "Не удалось установить: $* — попробуй вручную: sudo apt install $*"; return 1; }
 }
 
-# Проверяем git отдельно — без него установка невозможна
+# ── Git ───────────────────────────────────────────────────────────────────────
 if ! command -v git &>/dev/null; then
     warn "git не найден — устанавливаю..."
     if $IS_TERMUX; then
         pkg install -y git || err "Не удалось установить git. Запусти: pkg install git"
     elif $IS_UBUNTU; then
-        if [[ -n "$SUDO" || "$(id -u)" == "0" ]]; then
-            $SUDO apt-get update -qq 2>/dev/null || true
-            $SUDO apt-get install -y --no-install-recommends git 2>/dev/null \
-                || err "Не удалось установить git. Запусти вручную: apt install git"
-        else
-            err "git не найден и нет прав для установки. Запусти: apt install git"
-        fi
+        apt_install git || err "Установи git вручную: sudo apt install git, затем перезапусти скрипт"
     fi
-    command -v git &>/dev/null && ok "git установлен" || err "git всё ещё не найден — установи вручную"
+    command -v git &>/dev/null && ok "git установлен" \
+        || err "git не найден. Установи вручную и перезапусти скрипт."
 fi
 
+# ── Python ────────────────────────────────────────────────────────────────────
 step "Проверка Python"
 PYTHON=""
 for cmd in python3.12 python3.11 python3.10 python3; do
@@ -117,55 +126,63 @@ for cmd in python3.12 python3.11 python3.10 python3; do
 done
 
 if [[ -z "$PYTHON" ]]; then
-    warn "Python 3.10+ не найден. Устанавливаю..."
+    warn "Python 3.10+ не найден — устанавливаю..."
     if $IS_TERMUX; then
-        pkg install python -y
-        PYTHON="python3"
+        pkg install python -y; PYTHON="python3"
     elif $IS_UBUNTU; then
-        apt_install python3.11 python3.11-venv python3-pip
+        apt_install python3.11 python3.11-venv python3-pip \
+            || err "Установи Python вручную: sudo apt install python3.11 python3.11-venv"
         PYTHON="python3.11"
     else
         err "Установи Python 3.10+ вручную: https://python.org"
     fi
-    ok "Python установлен: $PYTHON"
+    ok "Python: $PYTHON"
 fi
 
+# ── Проверяем python3-venv отдельно (частая проблема в UserLand) ──────────────
+if $IS_UBUNTU && ! $PYTHON -m venv --help &>/dev/null 2>&1; then
+    warn "python3-venv не найден — устанавливаю..."
+    PYVER=$($PYTHON -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+    apt_install "python${PYVER}-venv" python3-venv \
+        || warn "Не удалось установить venv — попробуй: sudo apt install python3-venv"
+fi
+
+# ── Системные зависимости ─────────────────────────────────────────────────────
 step "Системные зависимости"
 if $IS_TERMUX; then
     pkg install -y git libjpeg-turbo openssl libffi 2>/dev/null || true
     ARCH=$(uname -m)
-    if [[ "$ARCH" == "aarch64" ]]; then
-        export LDFLAGS="-L/system/lib64/"
-    else
-        export LDFLAGS="-L/system/lib/"
-    fi
+    export LDFLAGS="-L${ARCH/#aarch64//system/lib64/}"
     export CFLAGS="-I${PREFIX}/include/"
-    ok "Termux-пакеты установлены"
+    ok "Termux-пакеты готовы"
 elif $IS_UBUNTU; then
     apt_install git curl build-essential libssl-dev libffi-dev \
-        libjpeg-dev zlib1g-dev libpq-dev
-    ok "Системные пакеты — готово"
+        libjpeg-dev zlib1g-dev libpq-dev && ok "Системные пакеты — готово" || true
 fi
 
+# ── Исходный код ──────────────────────────────────────────────────────────────
 step "Исходный код"
 INSTALL_DIR="$HOME/Kitsune"
 
 if [[ -d "$INSTALL_DIR/.git" ]]; then
-    info "Репозиторий уже существует, обновляю..."
+    info "Репозиторий уже есть — обновляю..."
     cd "$INSTALL_DIR"
     git pull --ff-only origin main 2>/dev/null || warn "git pull не удался, продолжаю с текущей версией"
     ok "Код обновлён"
 else
     info "Клонирую репозиторий..."
-    git clone https://github.com/KitsuneX-dev/Kitsune "$INSTALL_DIR"
+    git clone https://github.com/KitsuneX-dev/Kitsune "$INSTALL_DIR" \
+        || err "Не удалось клонировать репозиторий. Проверь интернет-соединение."
     cd "$INSTALL_DIR"
     ok "Репозиторий склонирован: $INSTALL_DIR"
 fi
 
+# ── Виртуальное окружение ─────────────────────────────────────────────────────
 step "Виртуальное окружение"
 VENV_DIR="$INSTALL_DIR/venv"
 if [[ ! -d "$VENV_DIR" ]]; then
-    $PYTHON -m venv "$VENV_DIR"
+    $PYTHON -m venv "$VENV_DIR" \
+        || err "Не удалось создать venv. Проверь: sudo apt install python3-venv"
     ok "venv создан: $VENV_DIR"
 else
     ok "venv существует, пропускаю"
@@ -177,21 +194,23 @@ PYTHON_VENV="$VENV_DIR/bin/python"
 step "Python зависимости"
 "$PIP" install --upgrade pip --quiet
 "$PIP" install --no-cache-dir -r requirements.txt \
-    --no-warn-script-location --disable-pip-version-check \
-    --quiet
+    --no-warn-script-location --disable-pip-version-check --quiet \
+    || err "Не удалось установить зависимости. Проверь requirements.txt"
 ok "Зависимости установлены"
 
 "$PIP" install --no-cache-dir hydrogram tgcrypto --quiet 2>/dev/null \
     && ok "Hydrogram установлен" \
-    || warn "Hydrogram не удалось установить, продолжаю без него"
+    || warn "Hydrogram не установлен — продолжаю без него"
 
-step "Директория данных и права"
+# ── Директории ────────────────────────────────────────────────────────────────
+step "Директории и права"
 mkdir -p "$HOME/.kitsune/modules" "$HOME/.kitsune/logs"
 chmod 755 "$HOME/.kitsune" "$HOME/.kitsune/modules" "$HOME/.kitsune/logs"
 [[ -f "$HOME/.kitsune/kitsune.session" ]]     && chmod 644 "$HOME/.kitsune/kitsune.session"     || true
 [[ -f "$HOME/.kitsune/kitsune.session.enc" ]] && chmod 600 "$HOME/.kitsune/kitsune.session.enc" || true
-ok "Директории созданы: ~/.kitsune/"
+ok "Директории: ~/.kitsune/"
 
+# ── Скрипт запуска ────────────────────────────────────────────────────────────
 step "Скрипт запуска"
 if $IS_TERMUX; then
     if [[ -z "${NO_AUTOSTART:-}" ]]; then
@@ -201,10 +220,9 @@ clear
 echo -e "\033[1;35mKitsune Userbot\033[0m"
 cd "$INSTALL_DIR" && "$PYTHON_VENV" -m kitsune
 PROFILE
-        ok "Автозапуск настроен (Termux ~/.bash_profile)"
+        ok "Автозапуск настроен (~/.bash_profile)"
     fi
 elif $IS_USERLAND; then
-    # UserLand не имеет systemd — создаём скрипт запуска
     cat > "$HOME/start_kitsune.sh" << ULSCRIPT
 #!/usr/bin/env bash
 cd "$INSTALL_DIR"
@@ -235,18 +253,22 @@ SERVICE
     ok "systemd сервис создан"
 fi
 
+# ── Итог ─────────────────────────────────────────────────────────────────────
 echo ""
 echo -e "${MAGENTA}${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-echo -e "  ${GREEN}${BOLD}🦊 Kitsune установлен!${RESET}"
+echo -e "  ${GREEN}${BOLD}🦊 Kitsune успешно установлен!${RESET}"
 echo -e "  ${CYAN}Директория:${RESET} $INSTALL_DIR"
-echo -e "  ${CYAN}Запуск:${RESET}"
+echo ""
 if $IS_USERLAND; then
-    echo -e "    bash ~/start_kitsune.sh"
+    echo -e "  ${YELLOW}${BOLD}▶ ЗАПУСК (вставь в терминал):${RESET}"
+    echo -e "  ${GREEN}bash ~/start_kitsune.sh${RESET}"
 else
-    echo -e "    cd $INSTALL_DIR && $PYTHON_VENV -m kitsune"
+    echo -e "  ${YELLOW}${BOLD}▶ ЗАПУСК:${RESET}"
+    echo -e "  ${GREEN}cd $INSTALL_DIR && $PYTHON_VENV -m kitsune${RESET}"
 fi
-echo -e ""
+echo ""
 echo -e "  ${YELLOW}Перед запуском добавь в config.toml:${RESET}"
 echo -e "    api_id   = <твой api_id>"
 echo -e "    api_hash = \"<твой api_hash>\""
-echo -e "${MAGENTA}${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}\n"
+echo -e "${MAGENTA}${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+echo ""

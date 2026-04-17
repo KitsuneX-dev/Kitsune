@@ -298,6 +298,11 @@ class DatabaseManager:
         msgs = await self._client.get_messages(self._assets_channel, ids=[asset_id])
         return msgs[0] if msgs else None
 
+    def export_data(self) -> dict:
+        """Возвращает безопасную копию всей БД для резервного копирования."""
+        with self._lock if hasattr(self, "_lock") else __import__("contextlib").nullcontext():
+            return {owner: dict(sub) for owner, sub in self._data.items()}
+
     def _maybe_snapshot(self) -> None:
         now = time.monotonic()
         if now >= self._next_revision_at:
