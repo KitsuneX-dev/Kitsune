@@ -16,7 +16,7 @@ warn() { echo -e "${YELLOW}⚠️  $*${RESET}"; }
 err()  { echo -e "${RED}❌ $*${RESET}"; exit 1; }
 step() { echo -e "\n${MAGENTA}${BOLD}── $* ──${RESET}"; }
 
-clear
+clear 2>/dev/null || true
 echo -e "${MAGENTA}${BOLD}"
 cat << 'EOF'
   ██╗  ██╗██╗████████╗███████╗██╗   ██╗███╗   ██╗███████╗
@@ -30,15 +30,31 @@ echo -e "${RESET}${CYAN}           Userbot by Yushi (@Mikasu32)${RESET}\n"
 
 IS_TERMUX=false
 IS_UBUNTU=false
+IS_USERLAND=false
+SUDO="sudo"
 
+# Определяем среду
 if [[ -n "${PREFIX:-}" && "$PREFIX" == *"com.termux"* ]]; then
     IS_TERMUX=true
     info "Обнаружена среда: Termux"
+elif [[ -d "/data/user/0/tech.ula" || -n "${USERLAND_VERSION:-}" || -f "/etc/userland-release" ]]; then
+    IS_USERLAND=true
+    IS_UBUNTU=true
+    info "Обнаружена среда: UserLand (Ubuntu)"
 elif command -v apt-get &>/dev/null; then
     IS_UBUNTU=true
     info "Обнаружена среда: Ubuntu / Debian"
 else
     warn "Неизвестная среда. Попытка продолжить..."
+fi
+
+# В UserLand и в контейнерах пользователь часто уже root — $SUDO не нужен
+if [[ "$(id -u)" == "0" ]] || $IS_USERLAND; then
+    SUDO=""
+    info "Режим без $SUDO (root или UserLand)"
+elif ! command -v $SUDO &>/dev/null; then
+    SUDO=""
+    warn "$SUDO не найден — пробуем без него"
 fi
 
 step "Проверка Python"
@@ -60,8 +76,8 @@ if [[ -z "$PYTHON" ]]; then
         pkg install python -y
         PYTHON="python3"
     elif $IS_UBUNTU; then
-        sudo apt-get update -qq
-        sudo apt-get install -y python3.11 python3.11-venv python3-pip
+        $SUDO apt-get update -qq
+        $SUDO apt-get install -y python3.11 python3.11-venv python3-pip
         PYTHON="python3.11"
     else
         err "Установи Python 3.10+ вручную: https://python.org"
@@ -82,8 +98,8 @@ if $IS_TERMUX; then
     export CFLAGS="-I${PREFIX}/include/"
     ok "Termux-пакеты установлены"
 elif $IS_UBUNTU; then
-    sudo apt-get update -qq
-    sudo apt-get install -y --no-install-recommends \
+    $SUDO apt-get update -qq
+    $SUDO apt-get install -y --no-install-recommends \
         git curl build-essential libssl-dev libffi-dev \
         libjpeg-dev zlib1g-dev libpq-dev 2>/dev/null || true
     ok "Системные пакеты установлены"
@@ -148,7 +164,7 @@ PROFILE
 elif $IS_UBUNTU; then
     if [[ -z "${NO_AUTOSTART:-}" && -d "/etc/systemd/system" ]]; then
         SERVICE_FILE="/etc/systemd/system/kitsune.service"
-        sudo tee "$SERVICE_FILE" > /dev/null << SERVICE
+        $SUDO tee "$SERVICE_FILE" > /dev/null << SERVICE
 [Unit]
 Description=Kitsune Userbot
 After=network.target
@@ -164,9 +180,19 @@ RestartSec=5
 [Install]
 WantedBy=multi-user.target
 SERVICE
-        sudo systemctl daemon-reload
-        sudo systemctl enable kitsune
-        ok "systemd сервис создан: sudo systemctl start kitsune"
+        $SUDO systemctl daemon-reload
+        $SUDO systemctl enable kitsune
+        ok "systemd сервис создан: $SUDO systemctl start kitsune"
+    elif $IS_USERLAND; then
+        # В UserLand systemd недоступен — создаём скрипт запуска
+        cat > "$HOME/start_kitsune.sh" << ULSCRIPT
+#!/usr/bin/env bash
+cd "$INSTALL_DIR"
+"$PYTHON_VENV" -m kitsune
+ULSCRIPT
+        chmod +x "$HOME/start_kitsune.sh"
+        ok "Скрипт запуска создан: ~/start_kitsune.sh"
+        info "Запуск: bash ~/start_kitsune.sh"
     fi
 fi
 

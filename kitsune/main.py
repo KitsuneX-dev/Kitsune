@@ -363,6 +363,7 @@ async def _startup(args: argparse.Namespace) -> None:
             logger.exception("main: web startup failed")
 
     asyncio.ensure_future(log.setup_tg_logging(client))
+    asyncio.ensure_future(_setup_kitsune_folder(client, db))
 
     _print_banner(me)
 
@@ -392,25 +393,50 @@ async def _startup(args: argparse.Namespace) -> None:
         logger.info("main: goodbye 🦊")
 
 async def _keepalive(client: Any) -> None:
+    """
+    Поддерживает соединение с Telegram.
+    При переключении VPN / смене локации — ждёт стабилизации сети
+    и переподключается с экспоненциальной задержкой.
+    """
     import contextlib
+    _fail_count = 0
+
     while True:
         await asyncio.sleep(30)
         try:
             if not client.is_connected():
-                logger.warning("keepalive: disconnected — reconnecting")
-                await client.connect()
-                logger.info("keepalive: reconnected")
-            else:
-                await client.get_me()
+                raise ConnectionError("client disconnected")
+            await asyncio.wait_for(client.get_me(), timeout=15)
+            _fail_count = 0  # успешный пинг — сбрасываем счётчик
         except asyncio.CancelledError:
             break
         except Exception as exc:
-            logger.warning("keepalive: ping failed (%s) — reconnecting", exc)
+            _fail_count += 1
+            # Экспоненциальная задержка: 5, 10, 20, 40, 60 сек (макс)
+            backoff = min(5 * (2 ** (_fail_count - 1)), 60)
+            logger.debug(
+                "keepalive: attempt %d failed (%s) — retry in %ds",
+                _fail_count, type(exc).__name__, backoff,
+            )
             with contextlib.suppress(Exception):
                 await client.disconnect()
-            await asyncio.sleep(5)
-            with contextlib.suppress(Exception):
+            await asyncio.sleep(backoff)
+            try:
                 await client.connect()
+                _fail_count = 0
+                logger.info("keepalive: reconnected after %d attempt(s)", _fail_count + 1)
+            except Exception as exc2:
+                logger.debug("keepalive: reconnect failed (%s)", type(exc2).__name__)
+
+async def _setup_kitsune_folder(client: Any, db: Any) -> None:
+    """Создаёт папку Kitsune в Telegram после старта."""
+    await asyncio.sleep(8)  # ждём пока группы будут созданы
+    try:
+        from .utils import ensure_kitsune_folder
+        await ensure_kitsune_folder(client, db)
+    except Exception:
+        pass  # не критично
+
 
 def _print_banner(me: Any) -> None:
     from .version import __version_str__
