@@ -434,9 +434,7 @@ async def _get_aiogram_bot(client: typing.Any) -> typing.Any:
 
 
 async def _ensure_bot_in_group(client: typing.Any, group_id: int) -> bool:
-    """Ждёт bot_username до 90 секунд, затем добавляет бота в группу Kitsune-logs."""
-    import contextlib
-
+    """Ждёт bot_username до 90 секунд, затем добавляет бота в группу/канал Kitsune-logs."""
     log = logging.getLogger(__name__)
 
     # Ждём пока notifier запишет bot_username в БД
@@ -457,18 +455,41 @@ async def _ensure_bot_in_group(client: typing.Any, group_id: int) -> bool:
         return False
 
     try:
-        from telethon.tl.functions.channels import InviteToChannelRequest
-        from telethon.errors import UserAlreadyParticipantError
-
         bot_entity = await client.get_entity(f"@{bot_username}")
+
+        # Сначала пробуем добавить как участника (работает для супергрупп)
         try:
-            await client(InviteToChannelRequest(channel=group_id, users=[bot_entity]))
-            log.info("log: бот @%s добавлен в Kitsune-logs", bot_username)
-        except UserAlreadyParticipantError:
-            log.info("log: бот @%s уже в Kitsune-logs", bot_username)
-        return True
+            from telethon.tl.functions.channels import InviteToChannelRequest
+            from telethon.errors import UserAlreadyParticipantError
+            try:
+                await client(InviteToChannelRequest(channel=group_id, users=[bot_entity]))
+                log.info("log: бот @%s добавлен в Kitsune-logs как участник", bot_username)
+                return True
+            except UserAlreadyParticipantError:
+                log.info("log: бот @%s уже в Kitsune-logs", bot_username)
+                return True
+        except Exception as invite_exc:
+            # Если чат — канал (не супергруппа), бота можно добавить только как админа
+            if "admin" in str(invite_exc).lower() or "channel" in str(invite_exc).lower():
+                log.info("log: чат является каналом — добавляем бота как админа")
+                try:
+                    from telethon.tl.functions.channels import EditAdminRequest
+                    from telethon.tl.types import ChatAdminRights
+                    rights = ChatAdminRights(post_messages=True, delete_messages=False,
+                                            ban_users=False, invite_users=False,
+                                            change_info=False, pin_messages=False,
+                                            add_admins=False, anonymous=False,
+                                            manage_call=False, other=False)
+                    await client(EditAdminRequest(channel=group_id, user_id=bot_entity, admin_rights=rights, rank="Logger"))
+                    log.info("log: бот @%s назначен админом в Kitsune-logs", bot_username)
+                    return True
+                except Exception as admin_exc:
+                    log.warning("log: не удалось назначить бота админом — %s", admin_exc)
+                    return False
+            log.warning("log: не удалось добавить бота в группу — %s", invite_exc)
+            return False
     except Exception as exc:
-        log.warning("log: не удалось добавить бота в группу — %s", exc)
+        log.warning("log: ошибка при добавлении бота — %s", exc)
         return False
 
 
@@ -527,13 +548,18 @@ async def _setup_bot_and_banner(client: typing.Any, group_id: int) -> None:
     # Шаг 3: отправляем баннер
     await _send_startup_banner_via_bot(client, group_id, bot=bot, bot_added=bot_added)
 
-async def _send_startup_banner_via_bot(client: typing.Any, group_id: int) -> None:
+async def _send_startup_banner_via_bot(
+    client: typing.Any,
+    group_id: int,
+    *,
+    bot: typing.Any = None,
+    bot_added: bool = False,
+) -> None:
     """Отправляет стартовый баннер через бота (не от имени пользователя)."""
     import contextlib
     import os
 
-    # Ждём запуска бота
-    bot = await _get_aiogram_bot(client)
+    log = logging.getLogger(__name__)
 
     try:
         from .version import __version_str__, branch
@@ -569,28 +595,49 @@ async def _send_startup_banner_via_bot(client: typing.Any, group_id: int) -> Non
         )
 
         me = await client.get_me()
+        display_name = (me.first_name or "")
+        if me.last_name:
+            display_name = f"{display_name} {me.last_name}".strip()
         text = (
             f"🌘 <b>Kitsune {__version_str__} запущен!</b>\n\n"
-            f"👤 Аккаунт: <b>{me.first_name}</b> (id: <code>{me.id}</code>)\n"
+            f"👤 Аккаунт: <b>{display_name}</b> (id: <code>{me.id}</code>)\n"
             f"🌳 Commit: {sha_line}\n"
             f"✊ Обновление: {update_status}\n"
             f"🌐 Web: <code>http://127.0.0.1:{cfg_web_port}</code>"
         )
 
-        gif_path = os.path.join(os.path.dirname(__file__), "..", "banner.gif")
+        gif_path = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "..", "banner.gif")
+        )
 
-        if bot:
-            # Отправляем через бота (не от лица пользователя)
+        # Bot API требует ID вида -100xxxxxxxxxx для супергрупп/каналов
+        bot_api_id = _to_bot_api_id(group_id)
+
+        # Отправляем через бота (от его имени)
+        if bot and bot_added:
             if os.path.exists(gif_path):
                 with contextlib.suppress(Exception):
                     from aiogram.types import FSInputFile
-                    await bot.send_animation(group_id, FSInputFile(gif_path), caption=text)
+                    await bot.send_animation(
+                        bot_api_id,
+                        FSInputFile(gif_path),
+                        caption=text,
+                        parse_mode="HTML",
+                    )
+                    log.info("log: баннер отправлен ботом (animation) в Kitsune-logs")
                     return
             with contextlib.suppress(Exception):
-                await bot.send_message(group_id, text, disable_web_page_preview=True)
+                await bot.send_message(
+                    bot_api_id,
+                    text,
+                    parse_mode="HTML",
+                    disable_web_page_preview=True,
+                )
+                log.info("log: баннер отправлен ботом (text) в Kitsune-logs")
                 return
 
         # Фолбэк — отправляем через клиент пользователя
+        log.info("log: бот недоступен/не добавлен, баннер отправляется от пользователя")
         if os.path.exists(gif_path):
             with contextlib.suppress(Exception):
                 await client.send_file(group_id, gif_path, caption=text, parse_mode="html")
@@ -598,7 +645,7 @@ async def _send_startup_banner_via_bot(client: typing.Any, group_id: int) -> Non
         await client.send_message(group_id, text, parse_mode="html", link_preview=False)
 
     except Exception:
-        logging.getLogger(__name__).exception("log: failed to send startup banner")
+        log.exception("log: не удалось отправить стартовый баннер")
 
 
 async def _send_startup_banner(client: typing.Any, channel_id: int) -> None:
