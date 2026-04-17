@@ -10,7 +10,8 @@ from ..core.security import OWNER
 from ..utils import escape_html
 
 _DB_OWNER = "kitsune.updater"
-_TTL = 120  
+_TTL = 120
+
 
 class UpdaterModule(KitsuneModule):
     name        = "updater"
@@ -20,14 +21,25 @@ class UpdaterModule(KitsuneModule):
     REPO_URL = "https://github.com/KitsuneX-dev/Kitsune"
 
     strings_ru = {
-        "checking":    "🔍 Проверяю обновления...",
-        "up_to_date":  "✅ У тебя последняя версия.",
-        "confirm": (
+        "checking":   "🔍 Проверяю обновления...",
+        "up_to_date": "✅ У тебя последняя версия.",
+        "notify_sent": (
+            "🆕 <b>Обнаружена новая версия!</b>\n\n"
+            "Текущая: <code>{current}</code>\n"
+            "Новая: <code>{new}</code>\n"
+            "Коммитов впереди: <code>{count}</code>\n\n"
+            "📬 Уведомление с кнопкой отправлено в <b>{group}</b>"
+        ),
+        "no_notifier": (
             "🆕 <b>Обнаружена новая версия!</b>\n\n"
             "Текущая: <code>{current}</code>\n"
             "Коммитов впереди: <code>{count}</code>\n\n"
             "<b>Изменения:</b>\n{changes}\n\n"
-            "Хотите обновиться?"
+            "Напиши <code>.update confirm</code> для обновления."
+        ),
+        "confirm_direct": (
+            "🔄 Обновляю до версии <code>{new}</code>...\n\n"
+            "<b>Изменения:</b>\n{changes}"
         ),
         "cancelled":  "❌ Обновление отменено.",
         "no_git":     "❌ Git-репозиторий не найден.",
@@ -48,9 +60,9 @@ class UpdaterModule(KitsuneModule):
 
         await self.db.delete(_DB_OWNER, "pending_restart")
 
-        restart_start = restart_data.get("start_time", 0)
-        now = time.time()
-        total_elapsed = now - restart_start
+        restart_start  = restart_data.get("start_time", 0)
+        now            = time.time()
+        total_elapsed  = now - restart_start
         restart_elapsed = total_elapsed * 0.4
 
         restart_time = _fmt_time(restart_elapsed)
@@ -58,9 +70,6 @@ class UpdaterModule(KitsuneModule):
 
         loader    = getattr(self.client, "_kitsune_loader", None)
         mod_count = len(loader.modules) if loader else 0
-
-        from telethon import events as _events
-        self.client.add_event_handler(self._on_callback, _events.CallbackQuery)
 
         report = self.strings("boot_done").format(
             restart_time=restart_time,
@@ -84,38 +93,30 @@ class UpdaterModule(KitsuneModule):
                 mod_count=mod_count,
             )
 
-    async def _on_callback(self, event) -> None:
-        data = event.data
-        if data == b"update_yes":
-            await event.answer()
-            pending = self.db.get(_DB_OWNER, "pending_update", None)
-            if not pending:
-                return
-            await self.db.delete(_DB_OWNER, "pending_update")
-            asyncio.ensure_future(self._do_update(
-                repo_path=pending["repo_path"],
-                chat_id=pending["chat_id"],
-                msg_id=pending["msg_id"],
-            ))
-        elif data == b"update_no":
-            await event.answer("Отменено")
-            await self.db.delete(_DB_OWNER, "pending_update")
-            try:
-                await self.client.edit_message(
-                    event.chat_id, event.message_id,
-                    self.strings("cancelled"), parse_mode="html",
-                    buttons=None,
-                )
-            except Exception:
-                pass
+    # ------------------------------------------------------------------
+    # .update command
+    # ------------------------------------------------------------------
 
     @command("update", required=OWNER)
     async def update_cmd(self, event) -> None:
+        args = self.get_args(event).strip().lower()
+
+        # .update confirm — прямое обновление без кнопок (fallback)
+        if args == "confirm":
+            pending = self.db.get(_DB_OWNER, "pending_update", None)
+            if not pending:
+                await event.reply("❌ Нет ожидающего обновления. Сначала запусти <code>.update</code>", parse_mode="html")
+                return
+            await self.db.delete(_DB_OWNER, "pending_update")
+            m = await event.reply("⬇️ <b>Обновляю...</b>", parse_mode="html")
+            await self._do_update(repo_path=pending["repo_path"], chat_id=event.chat_id, msg_id=m.id)
+            return
+
         m = await event.reply(self.strings("checking"), parse_mode="html")
         try:
             import git
         except ImportError:
-            await m.edit("❌ GitPython не установлен.", parse_mode="html")
+            await m.edit("❌ GitPython не установлен.\n<code>pip install gitpython</code>", parse_mode="html")
             return
 
         try:
@@ -153,50 +154,72 @@ class UpdaterModule(KitsuneModule):
 
             from ..version import __version_str__
             changes = "\n".join(f"• {escape_html(c.summary)}" for c in behind[:5])
+            if len(behind) > 5:
+                changes += f"\n<i>...и ещё {len(behind) - 5} коммитов</i>"
 
-            confirm_text = self.strings("confirm").format(
-                current=__version_str__,
-                count=len(behind),
-                changes=changes,
-            )
+            # Получаем новую версию из удалённого repo
+            try:
+                remote_version = repo.git.show(f"origin/{branch}:kitsune/version.py")
+                import re as _re
+                vm = _re.search(r"__version__\s*=\s*\((\d+),\s*(\d+),\s*(\d+)\)", remote_version)
+                new_ver = f"{vm.group(1)}.{vm.group(2)}.{vm.group(3)}" if vm else f"{__version_str__}+{len(behind)}"
+            except Exception:
+                new_ver = f"{__version_str__}+{len(behind)}"
 
+            # Сохраняем pending для подтверждения через кнопку или .update confirm
             await self.db.set(_DB_OWNER, "pending_update", {
                 "repo_path": repo_path,
                 "chat_id":   event.chat_id,
                 "msg_id":    m.id,
             })
 
-            from telethon import events as _events
-            self.client.add_event_handler(self._on_callback, _events.CallbackQuery)
+            # Пробуем отправить через бот (notifier) с inline-кнопкой
+            notifier = self._get_notifier()
+            group_name = None
+            if notifier and notifier._runner and notifier._runner.bot:
+                group_name = await notifier._updater.notify_update(
+                    current=__version_str__,
+                    new=new_ver,
+                    changes=changes,
+                )
 
-            from telethon.tl.types import KeyboardButtonCallback
-            from telethon.tl.types import ReplyInlineMarkup, KeyboardButtonRow
+            if group_name:
+                # Кнопка отправлена через бот — сообщаем пользователю
+                await m.edit(
+                    self.strings("notify_sent").format(
+                        current=__version_str__,
+                        new=new_ver,
+                        count=len(behind),
+                        group=escape_html(group_name),
+                    ),
+                    parse_mode="html",
+                )
+            else:
+                # Fallback: нет бота — показываем текстовое сообщение
+                await m.edit(
+                    self.strings("no_notifier").format(
+                        current=__version_str__,
+                        count=len(behind),
+                        changes=changes,
+                    ),
+                    parse_mode="html",
+                )
 
-            markup = ReplyInlineMarkup(rows=[
-                KeyboardButtonRow(buttons=[
-                    KeyboardButtonCallback(text="✅ Установить", data=b"update_yes"),
-                    KeyboardButtonCallback(text="❌ Отмена",    data=b"update_no"),
-                ])
-            ])
-
-            await m.edit(confirm_text, parse_mode="html", buttons=markup)
+            # Таймаут сброса pending
             asyncio.ensure_future(self._update_timeout(event.chat_id, m.id))
 
         except Exception as exc:
             await m.edit(self.strings("git_err").format(err=escape_html(str(exc))), parse_mode="html")
+
+    def _get_notifier(self):
+        loader = getattr(self.client, "_kitsune_loader", None)
+        return loader.modules.get("notifier") if loader else None
 
     async def _update_timeout(self, chat_id: int, msg_id: int) -> None:
         await asyncio.sleep(_TTL)
         pending = self.db.get(_DB_OWNER, "pending_update", None)
         if pending and pending.get("msg_id") == msg_id:
             await self.db.delete(_DB_OWNER, "pending_update")
-            try:
-                await self.client.edit_message(
-                    chat_id, msg_id,
-                    self.strings("timeout"), parse_mode="html", buttons=None,
-                )
-            except Exception:
-                pass
 
     async def _do_update(self, repo_path: str, chat_id: int, msg_id: int) -> None:
         import shutil
@@ -208,8 +231,7 @@ class UpdaterModule(KitsuneModule):
             except Exception:
                 pass
 
-        bar1 = "████░░░░░░░░  33%"
-        await edit(f"⬇️ <b>Скачиваю обновление...</b>\n{bar1}")
+        await edit("⬇️ <b>Скачиваю обновление...</b>\n████░░░░░░░░  33%")
         try:
             import git
             repo = git.Repo(repo_path)
@@ -218,7 +240,7 @@ class UpdaterModule(KitsuneModule):
             except TypeError:
                 branch = "main"
 
-            config_path = os.path.join(repo_path, "config.toml")
+            config_path   = os.path.join(repo_path, "config.toml")
             config_backup = None
             if os.path.exists(config_path):
                 tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".toml")
@@ -228,24 +250,20 @@ class UpdaterModule(KitsuneModule):
 
             origin = repo.remote("origin")
             origin.fetch()
-
             try:
                 repo.git.rm("--cached", "config.toml", "--ignore-unmatch")
             except Exception:
                 pass
-
             repo.git.reset("--hard", f"origin/{branch}")
 
             if config_backup and os.path.exists(config_backup):
                 shutil.copy2(config_backup, config_path)
                 os.unlink(config_backup)
-
         except Exception as exc:
             await edit(self.strings("git_err").format(err=escape_html(str(exc))))
             return
 
-        bar2 = "████████░░░░  67%"
-        await edit(f"📦 <b>Обновляю зависимости...</b>\n{bar2}")
+        await edit("📦 <b>Обновляю зависимости...</b>\n████████░░░░  67%")
 
         is_termux = "com.termux" in os.environ.get("PREFIX", "") or os.path.isdir("/data/data/com.termux")
         req_file  = os.path.join(repo_path, "requirements-termux.txt" if is_termux else "requirements.txt")
@@ -253,11 +271,6 @@ class UpdaterModule(KitsuneModule):
             req_file = os.path.join(repo_path, "requirements.txt")
 
         pip_errors = []
-        pip_args = [sys.executable, "-m", "pip", "install", "-r", req_file,
-                    "--quiet", "--no-warn-script-location"]
-        if is_termux:
-            pip_args += ["--prefer-binary", "--no-build-isolation"]
-
         if is_termux:
             try:
                 with open(req_file, encoding="utf-8") as f:
@@ -280,7 +293,9 @@ class UpdaterModule(KitsuneModule):
                 pip_errors.append(str(exc))
         else:
             proc = await asyncio.create_subprocess_exec(
-                *pip_args, cwd=repo_path,
+                sys.executable, "-m", "pip", "install", "-r", req_file,
+                "--quiet", "--no-warn-script-location",
+                cwd=repo_path,
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -299,8 +314,7 @@ class UpdaterModule(KitsuneModule):
             await self.db.set(_DB_OWNER, "last_update_error", err_summary[:300])
             await self.db.force_save()
 
-        bar3 = "████████████  100%"
-        await edit(f"🔄 <b>Перезапускаю...</b>\n{bar3}")
+        await edit("🔄 <b>Перезапускаю...</b>\n████████████  100%")
         await self._save_restart_start(chat_id=chat_id, msg_id=msg_id)
         await asyncio.sleep(1)
         os.execl(sys.executable, sys.executable, "-m", "kitsune")
@@ -320,6 +334,7 @@ class UpdaterModule(KitsuneModule):
             "msg_id":     msg_id,
         })
         await self.db.force_save()
+
 
 def _fmt_time(seconds: float) -> str:
     if seconds < 1:
