@@ -12,13 +12,19 @@ logger = logging.getLogger(__name__)
 
 _DB_KEY = "kitsune.notifier"
 
+# Проверять обновления каждые 60 минут
+_CHECK_INTERVAL = 3600
+# Первая проверка через 5 минут после старта
+_FIRST_CHECK_DELAY = 300
+
+
 class UpdateChecker:
 
     def __init__(self, client, db) -> None:
-        self._client = client
-        self._db = db
+        self._client     = client
+        self._db         = db
         self._check_task: asyncio.Task | None = None
-        self._repo_path = os.path.abspath(
+        self._repo_path  = os.path.abspath(
             os.path.join(os.path.dirname(__file__), "..", "..", "..", "..")
         )
 
@@ -29,8 +35,12 @@ class UpdateChecker:
         if self._check_task and not self._check_task.done():
             self._check_task.cancel()
 
+    # ------------------------------------------------------------------
+    # Background loop
+    # ------------------------------------------------------------------
+
     async def _loop(self) -> None:
-        await asyncio.sleep(300)
+        await asyncio.sleep(_FIRST_CHECK_DELAY)
         while True:
             try:
                 await self._check()
@@ -38,7 +48,7 @@ class UpdateChecker:
                 break
             except Exception:
                 logger.exception("UpdateChecker: check failed")
-            await asyncio.sleep(600)
+            await asyncio.sleep(_CHECK_INTERVAL)
 
     async def _check(self) -> None:
         try:
@@ -73,19 +83,20 @@ class UpdateChecker:
         except Exception:
             return
 
+        # Уже уведомляли про этот коммит — пропускаем
         if remote_sha == self._db.get(_DB_KEY, "last_notified_commit", None):
             return
 
         await self._db.set(_DB_KEY, "last_notified_commit", remote_sha)
 
-        log_lines = diff.splitlines()[:10]
-        count = len(diff.splitlines())
-        changes = "\n".join(
+        log_lines = diff.splitlines()[:8]
+        count     = len(diff.splitlines())
+        changes   = "\n".join(
             f"• <b>{line.split()[0]}</b>: {' '.join(line.split()[1:])}"
             for line in log_lines if line.strip()
         ) or "—"
-        if count > 10:
-            changes += f"\n<i>...и ещё {count - 10} коммитов</i>"
+        if count > 8:
+            changes += f"\n<i>...и ещё {count - 8} коммитов</i>"
 
         from kitsune.version import __version_str__
         try:
@@ -98,31 +109,161 @@ class UpdateChecker:
 
         await self.notify_update(current=__version_str__, new=new_ver, changes=changes)
 
-    async def notify_update(self, current: str, new: str, changes: str = "") -> None:
-        token = self._db.get(_DB_KEY, "bot_token", None)
+    # ------------------------------------------------------------------
+    # notify_update — ищет группу Kitsune и шлёт туда через бот
+    # ------------------------------------------------------------------
+
+    async def notify_update(self, current: str, new: str, changes: str = "") -> str | None:
+        """
+        Отправляет уведомление об обновлении через inline-бот в группу Kitsune.
+        Возвращает название группы куда отправили, или None если не удалось.
+        """
+        token    = self._db.get(_DB_KEY, "bot_token", None)
         owner_id = self._db.get(_DB_KEY, "owner_id", None)
         if not token or not owner_id:
-            return
+            logger.debug("UpdateChecker: no bot token/owner_id")
+            return None
+
+        text = (
+            "🦊 <b>Kitsune Userbot</b>\n\n"
+            "🆕 <b>Доступно обновление!</b>\n"
+            f"📌 Версия: <code>{current}</code> → <code>{new}</code>\n\n"
+            f"📋 <b>Изменения:</b>\n{changes}\n\n"
+            "Нажми кнопку для обновления:"
+        )
+
         try:
             from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
             from kitsune.modules.notifier.bot_runner import _make_bot
-            bot = _make_bot(str(token))
+
             kb = InlineKeyboardMarkup(inline_keyboard=[[
-                InlineKeyboardButton(text="⬆️ Обновить / Update", callback_data="do_update"),
+                InlineKeyboardButton(text="⬆️ Обновиться", callback_data="do_update"),
+                InlineKeyboardButton(text="❌ Отмена",      callback_data="update_no"),
             ]])
-            await bot.send_message(
-                chat_id=int(owner_id),
-                text=(
-                    "🦊 <b>Kitsune Userbot</b>\n\n"
-                    "🆕 <b>Доступно обновление!</b>\n"
-                    f"📌 Версия: <code>{current}</code> → <code>{new}</code>\n\n"
-                    f"📋 <b>Изменения:</b>\n{changes}"
-                ),
-                reply_markup=kb,
-            )
-            await bot.session.close()
+
+            bot = _make_bot(str(token))
+
+            # ── Пробуем найти и использовать группу Kitsune ──────────
+            group_id, group_name = await self._find_kitsune_group()
+
+            if group_id:
+                # Убеждаемся, что бот в группе
+                await self._ensure_bot_in_group(group_id, token)
+                try:
+                    await bot.send_message(chat_id=group_id, text=text, reply_markup=kb)
+                    await bot.session.close()
+                    logger.info("UpdateChecker: notification sent to group '%s'", group_name)
+                    return group_name
+                except Exception as exc:
+                    logger.warning("UpdateChecker: failed to send to group — %s", exc)
+                    # Fallback: в личку бота
+                    await bot.send_message(chat_id=int(owner_id), text=text, reply_markup=kb)
+                    await bot.session.close()
+                    return "личные сообщения"
+            else:
+                # Группа не найдена — шлём в личку бота
+                await bot.send_message(chat_id=int(owner_id), text=text, reply_markup=kb)
+                await bot.session.close()
+                logger.info("UpdateChecker: notification sent to owner DM (no group found)")
+                return "личные сообщения"
+
         except Exception:
             logger.exception("UpdateChecker: failed to send update notification")
+            return None
+
+    # ------------------------------------------------------------------
+    # Helpers: поиск группы Kitsune и добавление бота
+    # ------------------------------------------------------------------
+
+    async def _find_kitsune_group(self) -> tuple[int | None, str | None]:
+        """
+        Ищет группу Kitsune среди диалогов.
+        Приоритет: KitsuneBackup > Kitsune「...」> любая группа с «Kitsune».
+        Возвращает (chat_id, title) или (None, None).
+        """
+        candidates: list[tuple[int, str, int]] = []  # (id, title, priority)
+        try:
+            async for dialog in self._client.iter_dialogs():
+                if not (dialog.is_group or (dialog.is_channel and dialog.is_group)):
+                    continue
+                t = dialog.title or ""
+                if "kitsune" not in t.lower():
+                    continue
+                entity = dialog.entity
+                cid    = getattr(entity, "id", None)
+                if cid is None:
+                    continue
+                # Telegram supergroup/channel ids need -100 prefix for bots
+                chat_id = int(f"-100{cid}") if getattr(entity, "megagroup", False) or getattr(entity, "broadcast", False) else -cid
+
+                if t == "KitsuneBackup":
+                    candidates.append((chat_id, t, 0))
+                elif t.startswith("Kitsune") and "「" in t:
+                    candidates.append((chat_id, t, 1))
+                else:
+                    candidates.append((chat_id, t, 2))
+        except Exception:
+            logger.exception("UpdateChecker: error while searching for Kitsune group")
+            return None, None
+
+        if not candidates:
+            return None, None
+
+        candidates.sort(key=lambda x: x[2])
+        best = candidates[0]
+        return best[0], best[1]
+
+    async def _ensure_bot_in_group(self, chat_id: int, token: str) -> None:
+        """Добавляет бота в группу через Telethon если его там нет."""
+        try:
+            import aiohttp
+            # Получаем username/id бота
+            async with aiohttp.ClientSession() as sess:
+                async with sess.get(
+                    f"https://api.telegram.org/bot{token}/getMe",
+                    timeout=aiohttp.ClientTimeout(total=8),
+                ) as resp:
+                    data = await resp.json()
+            if not data.get("ok"):
+                return
+            bot_username = data["result"]["username"]
+            bot_id       = data["result"]["id"]
+
+            # Проверяем что бот уже в группе
+            async with aiohttp.ClientSession() as sess:
+                async with sess.get(
+                    f"https://api.telegram.org/bot{token}/getChatMember",
+                    params={"chat_id": chat_id, "user_id": bot_id},
+                    timeout=aiohttp.ClientTimeout(total=8),
+                ) as resp:
+                    member_data = await resp.json()
+
+            status = member_data.get("result", {}).get("status", "")
+            if status in ("member", "administrator", "creator"):
+                return  # Бот уже в группе
+
+            # Добавляем бота через Telethon userbot
+            from telethon.tl.functions.channels import InviteToChannelRequest
+            from telethon.tl.functions.messages import AddChatUserRequest
+
+            bot_entity = await self._client.get_entity(bot_username)
+            entity     = await self._client.get_entity(chat_id)
+
+            try:
+                if getattr(entity, "megagroup", False) or getattr(entity, "broadcast", False):
+                    await self._client(InviteToChannelRequest(channel=entity, users=[bot_entity]))
+                else:
+                    await self._client(AddChatUserRequest(chat_id=entity.id, user_id=bot_entity, fwd_limit=0))
+                logger.info("UpdateChecker: bot @%s added to group", bot_username)
+            except Exception as exc:
+                logger.debug("UpdateChecker: could not add bot to group — %s", exc)
+
+        except Exception:
+            logger.debug("UpdateChecker: _ensure_bot_in_group failed", exc_info=True)
+
+    # ------------------------------------------------------------------
+    # do_update — вызывается из bot_runner при нажатии кнопки
+    # ------------------------------------------------------------------
 
     async def do_update(self, msg=None) -> None:
         async def edit(text: str) -> None:
@@ -134,7 +275,7 @@ class UpdateChecker:
 
         try:
             import git
-            repo = git.Repo(self._repo_path)
+            repo   = git.Repo(self._repo_path)
             origin = repo.remote("origin")
             for attempt in range(3):
                 try:
@@ -149,7 +290,7 @@ class UpdateChecker:
             except TypeError:
                 branch = "main"
 
-            config_path = os.path.join(self._repo_path, "config.toml")
+            config_path   = os.path.join(self._repo_path, "config.toml")
             config_backup = None
             if os.path.exists(config_path):
                 tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".toml")
@@ -166,11 +307,19 @@ class UpdateChecker:
         except Exception as exc:
             raise RuntimeError(f"Git update failed: {exc}") from exc
 
-        await edit("📦 <b>Устанавливаю обновление...</b>\nInstalling update...")
+        await edit("📦 <b>Устанавливаю зависимости...</b>\n████████░░░░  67%")
+
+        is_termux = "com.termux" in os.environ.get("PREFIX", "") or os.path.isdir("/data/data/com.termux")
+        req_file  = os.path.join(
+            self._repo_path,
+            "requirements-termux.txt" if is_termux else "requirements.txt",
+        )
+        if not os.path.exists(req_file):
+            req_file = os.path.join(self._repo_path, "requirements.txt")
 
         proc = await asyncio.create_subprocess_exec(
-            sys.executable, "-m", "pip", "install", "-r", "requirements.txt",
-            "--quiet", cwd=self._repo_path,
+            sys.executable, "-m", "pip", "install", "-r", req_file, "--quiet",
+            cwd=self._repo_path,
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -178,21 +327,26 @@ class UpdateChecker:
         if proc.returncode != 0:
             raise RuntimeError(stderr.decode()[:300])
 
-        await edit("🔄 <b>Перезапускаю бота...</b>\nRestarting bot...")
+        await edit("🔄 <b>Перезапускаю...</b>\n████████████  100%")
 
-        loader = getattr(self._client, "_kitsune_loader", None)
         restart_start = time.time()
-        await self._db.set(_DB_KEY, "update_msg_chat", msg.chat.id if msg else 0)
-        await self._db.set(_DB_KEY, "update_msg_id", msg.message_id if msg else 0)
+        chat_id = getattr(getattr(msg, "chat", None), "id", 0) if msg else 0
+        msg_id  = getattr(msg, "message_id", 0) if msg else 0
+        await self._db.set(_DB_KEY, "update_msg_chat",  chat_id)
+        await self._db.set(_DB_KEY, "update_msg_id",    msg_id)
         await self._db.set(_DB_KEY, "update_start_time", restart_start)
         await self._db.force_save()
 
         await asyncio.sleep(1)
         os.execl(sys.executable, sys.executable, "-m", "kitsune")
 
+    # ------------------------------------------------------------------
+    # Post-update report
+    # ------------------------------------------------------------------
+
     async def notify_update_done(self) -> None:
-        chat_id = self._db.get(_DB_KEY, "update_msg_chat", None)
-        msg_id = self._db.get(_DB_KEY, "update_msg_id", None)
+        chat_id    = self._db.get(_DB_KEY, "update_msg_chat",  None)
+        msg_id     = self._db.get(_DB_KEY, "update_msg_id",    None)
         start_time = self._db.get(_DB_KEY, "update_start_time", None)
         if not chat_id or not msg_id or not start_time:
             return
@@ -202,20 +356,14 @@ class UpdateChecker:
         await self._db.delete(_DB_KEY, "update_start_time")
 
         await asyncio.sleep(3)
-        elapsed = time.time() - float(start_time)
-        if elapsed < 1:
-            restart_time = f"{elapsed * 1000:.0f} мс"
-        elif elapsed < 60:
-            restart_time = f"{elapsed:.1f} с"
-        else:
-            m, s = divmod(int(elapsed), 60)
-            restart_time = f"{m}м {s}с"
+        elapsed      = time.time() - float(start_time)
+        restart_time = _fmt_time(elapsed)
 
-        loader = getattr(self._client, "_kitsune_loader", None)
+        loader    = getattr(self._client, "_kitsune_loader", None)
         mod_count = len(loader.modules) if loader else 0
 
-        token = self._db.get(_DB_KEY, "bot_token", None)
-        owner_id = self._db.get(_DB_KEY, "owner_id", None)
+        token    = self._db.get(_DB_KEY, "bot_token",  None)
+        owner_id = self._db.get(_DB_KEY, "owner_id",   None)
         if not token or not owner_id:
             return
 
@@ -227,8 +375,8 @@ class UpdateChecker:
                 message_id=int(msg_id),
                 text=(
                     "✅ <b>Обновление успешно установлено!</b>\n"
-                    f"⏱ Время перезапуска: <code>{restart_time}</code>\n"
-                    f"📦 Модули загружены: <code>{mod_count}</code>"
+                    f"⏱ Перезапуск: <code>{restart_time}</code>\n"
+                    f"📦 Модули: <code>{mod_count}</code>"
                 ),
                 parse_mode="HTML",
             )
@@ -237,8 +385,8 @@ class UpdateChecker:
             logger.exception("UpdateChecker: failed to send update_done message")
 
     async def send_restart_report(self, restart_time: str, total_time: str, mod_count: int) -> None:
-        token = self._db.get(_DB_KEY, "bot_token", None)
-        owner_id = self._db.get(_DB_KEY, "owner_id", None)
+        token    = self._db.get(_DB_KEY, "bot_token", None)
+        owner_id = self._db.get(_DB_KEY, "owner_id",  None)
         if not token or not owner_id:
             return
         try:
@@ -256,3 +404,13 @@ class UpdateChecker:
             await bot.session.close()
         except Exception:
             logger.exception("UpdateChecker: failed to send restart report")
+
+
+def _fmt_time(seconds: float) -> str:
+    if seconds < 1:
+        return f"{seconds * 1000:.0f} мс"
+    elif seconds < 60:
+        return f"{seconds:.1f} с"
+    else:
+        m, s = divmod(int(seconds), 60)
+        return f"{m}м {s}с"
