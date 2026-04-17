@@ -197,6 +197,7 @@ async def asset_channel(
     description: str,
     archive: bool = True,
     avatar: str | None = None,
+    megagroup: bool = False,
 ) -> tuple[int, bool]:
     import contextlib
     from telethon.tl.functions.channels import CreateChannelRequest
@@ -204,13 +205,14 @@ async def asset_channel(
     from telethon.tl.types import InputNotifyPeer, InputPeerNotifySettings
     from telethon.errors import ChannelsTooMuchError
 
+    # Сначала ищем существующую группу/канал с таким названием
     async for dialog in client.iter_dialogs():
-        if dialog.is_channel and dialog.title == title:
+        if (dialog.is_channel or dialog.is_group) and dialog.title == title:
             return dialog.id, False
 
     try:
         result = await client(
-            CreateChannelRequest(title=title, about=description, megagroup=False)
+            CreateChannelRequest(title=title, about=description, megagroup=megagroup)
         )
         channel = result.chats[0]
         channel_id = channel.id
@@ -245,6 +247,97 @@ async def asset_channel(
         raise
     except Exception as exc:
         raise RuntimeError(f"Could not create asset channel {title!r}: {exc}") from exc
+
+async def ensure_kitsune_folder(client: typing.Any, db: typing.Any) -> None:
+    """
+    Создаёт папку '🦊 Kitsune' в Telegram и добавляет туда
+    все служебные группы: KitsuneBackup, Kitsune-logs, kitsune-assets.
+    Если папка уже есть — только обновляет её состав.
+    """
+    import contextlib
+    try:
+        from telethon.tl.functions.messages import (
+            UpdateDialogFilterRequest,
+            GetDialogFiltersRequest,
+        )
+        from telethon.tl.types import DialogFilter, InputPeerChannel, InputPeerEmpty
+
+        _FOLDER_TITLE = "🦊 Kitsune"
+        _ASSET_TITLES = {"KitsuneBackup", "Kitsune-logs", "kitsune-assets"}
+
+        # Ищем ID нужных групп
+        peer_inputs = []
+        async for dialog in client.iter_dialogs():
+            if dialog.title in _ASSET_TITLES:
+                with contextlib.suppress(Exception):
+                    peer_inputs.append(
+                        await client.get_input_entity(dialog.id)
+                    )
+
+        if not peer_inputs:
+            logger.debug("ensure_kitsune_folder: no asset channels found yet")
+            return
+
+        # Получаем существующие папки
+        existing_filters = await client(GetDialogFiltersRequest())
+        existing: typing.Any = None
+        existing_id: int = 2  # 0 = All, 1 = Archived, 2+ — пользовательские
+
+        # Ищем нашу папку
+        for f in existing_filters.filters:
+            if getattr(f, "title", None) == _FOLDER_TITLE:
+                existing = f
+                existing_id = f.id
+                break
+            if hasattr(f, "id"):
+                existing_id = max(existing_id, f.id + 1)
+
+        if existing is not None:
+            # Добавляем недостающих
+            current_peers = list(getattr(existing, "include_peers", []))
+            existing_ids = {getattr(p, "channel_id", None) for p in current_peers}
+            for p in peer_inputs:
+                cid = getattr(p, "channel_id", None)
+                if cid and cid not in existing_ids:
+                    current_peers.append(p)
+            new_filter = DialogFilter(
+                id=existing_id,
+                title=_FOLDER_TITLE,
+                pinned_peers=[],
+                include_peers=current_peers,
+                exclude_peers=[],
+                contacts=False,
+                non_contacts=False,
+                groups=False,
+                broadcasts=False,
+                bots=False,
+                exclude_muted=False,
+                exclude_read=False,
+                exclude_archived=False,
+            )
+        else:
+            new_filter = DialogFilter(
+                id=existing_id,
+                title=_FOLDER_TITLE,
+                pinned_peers=[],
+                include_peers=peer_inputs,
+                exclude_peers=[],
+                contacts=False,
+                non_contacts=False,
+                groups=False,
+                broadcasts=False,
+                bots=False,
+                exclude_muted=False,
+                exclude_read=False,
+                exclude_archived=False,
+            )
+
+        await client(UpdateDialogFilterRequest(id=existing_id, filter=new_filter))
+        logger.info("ensure_kitsune_folder: folder '%s' updated (%d peers)", _FOLDER_TITLE, len(peer_inputs))
+
+    except Exception as exc:
+        logger.debug("ensure_kitsune_folder: failed — %s", exc)
+
 
 def find_caller(stack: list[inspect.FrameInfo]) -> typing.Callable | None:
     for frame_info in stack:

@@ -5,6 +5,7 @@
 <br/>
 
 [![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
+[![Version](https://img.shields.io/badge/Версия-1.2.9-blueviolet?style=flat-square)](https://github.com/KitsuneX-dev/Kitsune/releases/tag/v1.2.9)
 [![License](https://img.shields.io/badge/License-AGPLv3-blue?style=flat-square)](LICENSE)
 [![Telegram](https://img.shields.io/badge/Автор-@Mikasu32-2CA5E0?style=flat-square&logo=telegram)](https://t.me/Mikasu32)
 
@@ -20,6 +21,16 @@ Kitsune запускается локально на твоём устройст
 
 ---
 
+## ⚠️ О совместимости с Hikka и Heroku
+
+**Модули Hikka и Heroku в данный момент не поддерживаются.**
+
+Попытка загрузить модули, написанные под Hikka/Heroku, приведёт к ошибкам — у них другой API (`from hikka.modules import ...` и т.д.), несовместимый с архитектурой Kitsune.
+
+> **Не переживайте!** В ближайшее время будет создана отдельная библиотека модулей, написанных нативно под Kitsune. Следите за обновлениями в [@Mikasu32](https://t.me/Mikasu32).
+
+---
+
 ## Возможности
 
 | | Функция | Описание |
@@ -32,7 +43,8 @@ Kitsune запускается локально на твоём устройст
 | 📦 | Авто-бэкап | Зашифрованные резервные копии БД по расписанию |
 | ⚙️ | Конфигуратор | Интерактивная настройка модулей через кнопки |
 | 📋 | TOML конфиг | Читаемый конфиг с поддержкой MTProto прокси |
-| 📱 | Termux + Ubuntu | Один установщик для обоих окружений |
+| 📱 | Termux + Ubuntu + UserLand | Один установщик для всех окружений |
+| 📁 | Папка Kitsune | Все служебные группы собраны в одну папку Telegram |
 
 ---
 
@@ -62,10 +74,12 @@ Kitsune запускается локально на твоём устройст
 curl -s https://raw.githubusercontent.com/KitsuneX-dev/Kitsune/main/termux.sh | bash
 ```
 
-### Ubuntu / Debian
+### Ubuntu / Debian / UserLand
 ```bash
 curl -s https://raw.githubusercontent.com/KitsuneX-dev/Kitsune/main/install.sh | bash
 ```
+
+> Установщик автоматически определяет среду: обычный Ubuntu, Termux или UserLand — и настраивает всё под неё.
 
 ### Вручную
 ```bash
@@ -87,11 +101,6 @@ python -m kitsune
 python -m kitsune
 ```
 
-### Ubuntu / Debian — без виртуального окружения
-```bash
-python3 -m kitsune
-```
-
 ### Ubuntu / Debian — через виртуальное окружение *(рекомендуется)*
 ```bash
 # Вариант 1 — активировать и запустить
@@ -100,6 +109,11 @@ python -m kitsune
 
 # Вариант 2 — напрямую без активации
 venv/bin/python -m kitsune
+```
+
+### UserLand (Ubuntu на Android)
+```bash
+bash ~/start_kitsune.sh
 ```
 
 > **Порт 8080 занят?**
@@ -112,7 +126,7 @@ venv/bin/python -m kitsune
 Если после запуска в консоли **тишина** (нет ошибок, но бот не загружается) — соединение с Telegram блокируется провайдером.
 
 **Вариант 1 — VPN**
-Включи любой VPN перед запуском.
+Включи любой VPN перед запуском. При смене локации бот автоматически переподключится.
 
 **Вариант 2 — MTProto прокси** *(без VPN)*
 
@@ -126,7 +140,6 @@ secret = "СЕКРЕТ_ПРОКСИ"
 ```
 
 Рабочие MTProto прокси: [@MTProxyT](https://t.me/MTProxyT), [@proxyme](https://t.me/proxyme).
-Из ссылки `tg://proxy?server=...&port=...&secret=...` берёшь `server` → `host`, остальное по названию.
 
 ---
 
@@ -172,8 +185,24 @@ secret = "00000000000000000000000000000000"
 ## Бэкапы
 
 При первом запуске бот предложит выбрать интервал авто-бэкапа: **2ч / 4ч / 6ч / 12ч / 24ч**.
-Бэкапы отправляются в группу **KitsuneBackup**.
+Бэкапы отправляются в группу **KitsuneBackup**, сообщения пишет встроенный бот (не ты).
 Восстановление — ответь на файл бэкапа командой `.restore`.
+
+> Группа **KitsuneBackup** и все служебные группы автоматически собираются в папку **🦊 Kitsune** у тебя в Telegram.
+
+---
+
+## Служебные группы Telegram
+
+После старта Kitsune автоматически создаёт и организует:
+
+| Группа | Назначение |
+|---|---|
+| `KitsuneBackup` | Зашифрованные бэкапы базы данных |
+| `Kitsune-logs` | Системные логи и стартовый баннер |
+| `kitsune-assets` | Служебные файлы |
+
+Все группы собираются в папку **🦊 Kitsune** и уходят в архив Telegram (не засоряют список чатов). Сообщения в них отправляет встроенный бот — не твой аккаунт.
 
 ---
 

@@ -390,9 +390,13 @@ class _NetworkNoiseFilter(logging.Filter):
         "ssl:True",
         "ssl:default",
         "ConnectionError",
+        "Cannot send requests while disconnected",
         "Cannot connect to host api.telegram.org",
         "Timeout ctx manager",
         "TimeoutError",
+        "Error executing high-level request after reconnect",
+        "Attempt",
+        "Reconnecting",
     )
 
     def filter(self, record: logging.LogRecord) -> bool:
@@ -414,36 +418,83 @@ rotating_handler.setFormatter(_main_formatter)
 
 _tg_channel_handler: TelegramChannelHandler | None = None
 
+async def _get_aiogram_bot(client: typing.Any) -> typing.Any:
+    """Ждёт запуска aiogram-бота и возвращает его (или None)."""
+    for _ in range(30):  # ждём до 15 секунд
+        try:
+            loader = getattr(client, "_kitsune_loader", None)
+            if loader:
+                notifier = loader.modules.get("notifier")
+                if notifier and notifier._runner and notifier._runner.bot:
+                    return notifier._runner.bot
+        except Exception:
+            pass
+        await asyncio.sleep(0.5)
+    return None
+
+
+async def _ensure_bot_in_group(client: typing.Any, group_id: int) -> None:
+    """Добавляет бота в группу Kitsune-logs, если его там нет."""
+    import contextlib
+    try:
+        db = getattr(client, "_kitsune_db", None)
+        if not db:
+            return
+        bot_username = db.get("kitsune.notifier", "bot_username", None)
+        if not bot_username:
+            return
+
+        from telethon.tl.functions.channels import InviteToChannelRequest
+        from telethon.errors import UserAlreadyParticipantError
+
+        bot_entity = await client.get_entity(f"@{bot_username}")
+        with contextlib.suppress(UserAlreadyParticipantError, Exception):
+            await client(InviteToChannelRequest(channel=group_id, users=[bot_entity]))
+            logging.getLogger(__name__).info("log: bot @%s added to Kitsune-logs", bot_username)
+    except Exception as exc:
+        logging.getLogger(__name__).debug("log: could not add bot to group — %s", exc)
+
+
 async def setup_tg_logging(client: typing.Any) -> None:
     global _tg_channel_handler
 
     try:
         from .utils import asset_channel
 
-        channel_id, created = await asset_channel(
+        # Ищем существующую группу, иначе создаём (megagroup=True, чтобы можно было добавить бота)
+        group_id, created = await asset_channel(
             client,
             title="Kitsune-logs",
-            description="Kitsune Userbot — system logs",
+            description="Kitsune Userbot — системные логи",
             archive=True,
+            megagroup=True,
         )
 
-        handler = TelegramChannelHandler(client, channel_id, level=logging.WARNING)
+        # Добавляем бота в группу (он будет отправлять баннер и логи)
+        await _ensure_bot_in_group(client, group_id)
+
+        handler = TelegramChannelHandler(client, group_id, level=logging.WARNING)
         handler.setFormatter(_tg_formatter)
         handler.start()
 
         logging.getLogger().addHandler(handler)
         _tg_channel_handler = handler
 
-        await _send_startup_banner(client, channel_id)
+        # Баннер отправляем через бота (не от имени пользователя)
+        asyncio.ensure_future(_send_startup_banner_via_bot(client, group_id))
 
-        logging.getLogger(__name__).info("log: TG channel logging active (channel_id=%d)", channel_id)
+        logging.getLogger(__name__).info("log: TG logging active (group_id=%d)", group_id)
 
     except Exception:
         logging.getLogger(__name__).exception("log: failed to set up TG channel logging")
 
-async def _send_startup_banner(client: typing.Any, channel_id: int) -> None:
+async def _send_startup_banner_via_bot(client: typing.Any, group_id: int) -> None:
+    """Отправляет стартовый баннер через бота (не от имени пользователя)."""
     import contextlib
     import os
+
+    # Ждём запуска бота
+    bot = await _get_aiogram_bot(client)
 
     try:
         from .version import __version_str__, branch
@@ -457,7 +508,7 @@ async def _send_startup_banner(client: typing.Any, channel_id: int) -> None:
             commit_sha = repo.head.commit.hexsha[:7]
             commit_url = f"https://github.com/KitsuneX-dev/Kitsune/commit/{repo.head.commit.hexsha}"
 
-        update_status = "✅ Up-to-date"
+        update_status = "✅ Актуальная версия"
         with contextlib.suppress(Exception):
             import git
             repo_path = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -465,7 +516,7 @@ async def _send_startup_banner(client: typing.Any, channel_id: int) -> None:
             repo.remotes.origin.fetch()
             behind = list(repo.iter_commits(f"HEAD..origin/{branch}"))
             if behind:
-                update_status = f"🆕 Update available ({len(behind)} commits)"
+                update_status = f"🆕 Доступно обновление ({len(behind)} коммитов)"
 
         cfg_web_port = 8080
         with contextlib.suppress(Exception):
@@ -478,28 +529,42 @@ async def _send_startup_banner(client: typing.Any, channel_id: int) -> None:
             else f"<code>{commit_sha}</code>"
         )
 
+        me = await client.get_me()
         text = (
-            f"🌘 <b>Kitsune {__version_str__} started!</b>\n\n"
-            f"🌳 GitHub commit SHA: {sha_line}\n"
-            f"✊ Update status: {update_status}\n"
-            f"🌐 Web url: <code>http://127.0.0.1:{cfg_web_port}</code>"
+            f"🌘 <b>Kitsune {__version_str__} запущен!</b>\n\n"
+            f"👤 Аккаунт: <b>{me.first_name}</b> (id: <code>{me.id}</code>)\n"
+            f"🌳 Commit: {sha_line}\n"
+            f"✊ Обновление: {update_status}\n"
+            f"🌐 Web: <code>http://127.0.0.1:{cfg_web_port}</code>"
         )
 
         gif_path = os.path.join(os.path.dirname(__file__), "..", "banner.gif")
-        if os.path.exists(gif_path):
+
+        if bot:
+            # Отправляем через бота (не от лица пользователя)
+            if os.path.exists(gif_path):
+                with contextlib.suppress(Exception):
+                    from aiogram.types import FSInputFile
+                    await bot.send_animation(group_id, FSInputFile(gif_path), caption=text)
+                    return
             with contextlib.suppress(Exception):
-                await client.send_file(
-                    channel_id,
-                    gif_path,
-                    caption=text,
-                    parse_mode="html",
-                )
+                await bot.send_message(group_id, text, disable_web_page_preview=True)
                 return
 
-        await client.send_message(channel_id, text, parse_mode="html", link_preview=False)
+        # Фолбэк — отправляем через клиент пользователя
+        if os.path.exists(gif_path):
+            with contextlib.suppress(Exception):
+                await client.send_file(group_id, gif_path, caption=text, parse_mode="html")
+                return
+        await client.send_message(group_id, text, parse_mode="html", link_preview=False)
 
     except Exception:
         logging.getLogger(__name__).exception("log: failed to send startup banner")
+
+
+async def _send_startup_banner(client: typing.Any, channel_id: int) -> None:
+    """Устаревший метод — перенаправляет на новый."""
+    await _send_startup_banner_via_bot(client, channel_id)
 
 def init() -> None:
     import sys
@@ -516,8 +581,15 @@ def init() -> None:
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
     _network_noise_filter = _NetworkNoiseFilter()
-    logging.getLogger("aiogram.dispatcher").addFilter(_network_noise_filter)
-    logging.getLogger("telethon.network.connection.connection").addFilter(_network_noise_filter)
-    logging.getLogger("telethon.network.mtprotosender").addFilter(_network_noise_filter)
+    # Глушим сетевой шум (особенно при переключении VPN/локации)
+    for _noisy_logger in (
+        "aiogram.dispatcher",
+        "telethon.network.connection.connection",
+        "telethon.network.mtprotosender",
+        "telethon.client.updates",
+        "telethon.client.users",
+        "telethon.extensions.messagepacker",
+    ):
+        logging.getLogger(_noisy_logger).addFilter(_network_noise_filter)
 
     logging.captureWarnings(True)
