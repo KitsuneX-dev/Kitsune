@@ -2,9 +2,9 @@
 # ============================================================
 #  Kitsune Userbot — Universal Installer
 #  Developer: Yushi (@Mikasu32)
-#  Supports: Ubuntu / Debian / Termux (Android)
+#  Supports: Ubuntu / Debian / Termux / UserLand (Android)
 # ============================================================
-set -euo pipefail
+set -uo pipefail
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
 CYAN='\033[0;36m'; MAGENTA='\033[1;35m'; RESET='\033[0m'
@@ -15,6 +15,8 @@ info() { echo -e "${CYAN}ℹ️  $*${RESET}"; }
 warn() { echo -e "${YELLOW}⚠️  $*${RESET}"; }
 err()  { echo -e "${RED}❌ $*${RESET}"; exit 1; }
 step() { echo -e "\n${MAGENTA}${BOLD}── $* ──${RESET}"; }
+
+trap 'echo -e "${RED}❌ Ошибка на строке $LINENO — установка прервана${RESET}" >&2' ERR
 
 clear 2>/dev/null || true
 echo -e "${MAGENTA}${BOLD}"
@@ -37,32 +39,54 @@ SUDO="sudo"
 if [[ -n "${PREFIX:-}" && "$PREFIX" == *"com.termux"* ]]; then
     IS_TERMUX=true
     info "Обнаружена среда: Termux"
-elif [[ -d "/data/user/0/tech.ula" || -n "${USERLAND_VERSION:-}" || -f "/etc/userland-release" ]]; then
+elif [[ -d "/data/user/0/tech.ula" \
+     || -n "${USERLAND_VERSION:-}" \
+     || -f "/etc/userland-release" \
+     || "$(cat /proc/version 2>/dev/null)" == *"android"* \
+     || "$(uname -r 2>/dev/null)" == *"android"* ]]; then
     IS_USERLAND=true
     IS_UBUNTU=true
-    info "Обнаружена среда: UserLand (Ubuntu)"
+    info "Обнаружена среда: UserLand (Ubuntu on Android)"
 elif command -v apt-get &>/dev/null; then
     IS_UBUNTU=true
     info "Обнаружена среда: Ubuntu / Debian"
 else
-    warn "Неизвестная среда. Попытка продолжить..."
+    warn "Неизвестная среда — попытка продолжить..."
 fi
 
-# В UserLand и в контейнерах пользователь часто уже root — $SUDO не нужен
-if [[ "$(id -u)" == "0" ]] || $IS_USERLAND; then
+# Выбираем sudo
+if [[ "$(id -u)" == "0" ]]; then
     SUDO=""
-    info "Режим без $SUDO (root или UserLand)"
-elif ! command -v $SUDO &>/dev/null; then
+    info "Запуск от root — sudo не нужен"
+elif $IS_USERLAND; then
+    # В UserLand sudo обычно отсутствует — пробуем без него
+    if command -v sudo &>/dev/null; then
+        SUDO="sudo"
+    else
+        SUDO=""
+        warn "sudo не найден в UserLand — продолжаю без него"
+    fi
+elif ! command -v sudo &>/dev/null; then
     SUDO=""
-    warn "$SUDO не найден — пробуем без него"
+    warn "sudo не найден — пробуем без него"
 fi
+
+# Хелпер: apt-get с подавлением fatal-ошибок прав
+apt_install() {
+    if [[ -z "$SUDO" && "$(id -u)" != "0" ]]; then
+        warn "Нет прав для apt-get — пропускаю системные пакеты (установи вручную при необходимости)"
+        return 0
+    fi
+    $SUDO apt-get update -qq 2>/dev/null || true
+    $SUDO apt-get install -y --no-install-recommends "$@" 2>/dev/null || warn "Не удалось установить: $*"
+}
 
 step "Проверка Python"
 PYTHON=""
 for cmd in python3.12 python3.11 python3.10 python3; do
     if command -v "$cmd" &>/dev/null; then
-        VER=$($cmd -c "import sys; print(sys.version_info[:2])")
         if $cmd -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)" 2>/dev/null; then
+            VER=$($cmd -c "import sys; print('.'.join(map(str,sys.version_info[:2])))")
             PYTHON="$cmd"
             ok "Python найден: $cmd ($VER)"
             break
@@ -76,8 +100,7 @@ if [[ -z "$PYTHON" ]]; then
         pkg install python -y
         PYTHON="python3"
     elif $IS_UBUNTU; then
-        $SUDO apt-get update -qq
-        $SUDO apt-get install -y python3.11 python3.11-venv python3-pip
+        apt_install python3.11 python3.11-venv python3-pip
         PYTHON="python3.11"
     else
         err "Установи Python 3.10+ вручную: https://python.org"
@@ -88,7 +111,6 @@ fi
 step "Системные зависимости"
 if $IS_TERMUX; then
     pkg install -y git libjpeg-turbo openssl libffi 2>/dev/null || true
-    # Pillow flags for Termux
     ARCH=$(uname -m)
     if [[ "$ARCH" == "aarch64" ]]; then
         export LDFLAGS="-L/system/lib64/"
@@ -98,11 +120,9 @@ if $IS_TERMUX; then
     export CFLAGS="-I${PREFIX}/include/"
     ok "Termux-пакеты установлены"
 elif $IS_UBUNTU; then
-    $SUDO apt-get update -qq
-    $SUDO apt-get install -y --no-install-recommends \
-        git curl build-essential libssl-dev libffi-dev \
-        libjpeg-dev zlib1g-dev libpq-dev 2>/dev/null || true
-    ok "Системные пакеты установлены"
+    apt_install git curl build-essential libssl-dev libffi-dev \
+        libjpeg-dev zlib1g-dev libpq-dev
+    ok "Системные пакеты — готово"
 fi
 
 step "Исходный код"
@@ -139,18 +159,18 @@ step "Python зависимости"
     --quiet
 ok "Зависимости установлены"
 
-"$PIP" install --no-cache-dir hydrogram tgcrypto --quiet 2>/dev/null && ok "Hydrogram установлен" || warn "Hydrogram не удалось установить, продолжаю без него"
+"$PIP" install --no-cache-dir hydrogram tgcrypto --quiet 2>/dev/null \
+    && ok "Hydrogram установлен" \
+    || warn "Hydrogram не удалось установить, продолжаю без него"
 
 step "Директория данных и права"
 mkdir -p "$HOME/.kitsune/modules" "$HOME/.kitsune/logs"
-chmod 755 "$HOME/.kitsune"
-chmod 755 "$HOME/.kitsune/modules"
-chmod 755 "$HOME/.kitsune/logs"
+chmod 755 "$HOME/.kitsune" "$HOME/.kitsune/modules" "$HOME/.kitsune/logs"
 [[ -f "$HOME/.kitsune/kitsune.session" ]]     && chmod 644 "$HOME/.kitsune/kitsune.session"     || true
 [[ -f "$HOME/.kitsune/kitsune.session.enc" ]] && chmod 600 "$HOME/.kitsune/kitsune.session.enc" || true
-ok "Директории созданы, права выставлены: ~/.kitsune/"
+ok "Директории созданы: ~/.kitsune/"
 
-step "Автозапуск"
+step "Скрипт запуска"
 if $IS_TERMUX; then
     if [[ -z "${NO_AUTOSTART:-}" ]]; then
         cat > "$HOME/.bash_profile" << PROFILE
@@ -159,12 +179,20 @@ clear
 echo -e "\033[1;35mKitsune Userbot\033[0m"
 cd "$INSTALL_DIR" && "$PYTHON_VENV" -m kitsune
 PROFILE
-        ok "Автозапуск настроен (Termux)"
+        ok "Автозапуск настроен (Termux ~/.bash_profile)"
     fi
-elif $IS_UBUNTU; then
-    if [[ -z "${NO_AUTOSTART:-}" && -d "/etc/systemd/system" ]]; then
-        SERVICE_FILE="/etc/systemd/system/kitsune.service"
-        $SUDO tee "$SERVICE_FILE" > /dev/null << SERVICE
+elif $IS_USERLAND; then
+    # UserLand не имеет systemd — создаём скрипт запуска
+    cat > "$HOME/start_kitsune.sh" << ULSCRIPT
+#!/usr/bin/env bash
+cd "$INSTALL_DIR"
+exec "$PYTHON_VENV" -m kitsune
+ULSCRIPT
+    chmod +x "$HOME/start_kitsune.sh"
+    ok "Скрипт запуска создан: ~/start_kitsune.sh"
+elif $IS_UBUNTU && [[ -z "${NO_AUTOSTART:-}" ]] && [[ -d "/etc/systemd/system" ]]; then
+    SERVICE_FILE="/etc/systemd/system/kitsune.service"
+    $SUDO tee "$SERVICE_FILE" > /dev/null << SERVICE
 [Unit]
 Description=Kitsune Userbot
 After=network.target
@@ -180,20 +208,9 @@ RestartSec=5
 [Install]
 WantedBy=multi-user.target
 SERVICE
-        $SUDO systemctl daemon-reload
-        $SUDO systemctl enable kitsune
-        ok "systemd сервис создан: $SUDO systemctl start kitsune"
-    elif $IS_USERLAND; then
-        # В UserLand systemd недоступен — создаём скрипт запуска
-        cat > "$HOME/start_kitsune.sh" << ULSCRIPT
-#!/usr/bin/env bash
-cd "$INSTALL_DIR"
-"$PYTHON_VENV" -m kitsune
-ULSCRIPT
-        chmod +x "$HOME/start_kitsune.sh"
-        ok "Скрипт запуска создан: ~/start_kitsune.sh"
-        info "Запуск: bash ~/start_kitsune.sh"
-    fi
+    $SUDO systemctl daemon-reload 2>/dev/null || true
+    $SUDO systemctl enable kitsune 2>/dev/null || true
+    ok "systemd сервис создан"
 fi
 
 echo ""
@@ -201,8 +218,11 @@ echo -e "${MAGENTA}${BOLD}━━━━━━━━━━━━━━━━━━
 echo -e "  ${GREEN}${BOLD}🦊 Kitsune установлен!${RESET}"
 echo -e "  ${CYAN}Директория:${RESET} $INSTALL_DIR"
 echo -e "  ${CYAN}Запуск:${RESET}"
-echo -e "    cd $INSTALL_DIR"
-echo -e "    $PYTHON_VENV -m kitsune"
+if $IS_USERLAND; then
+    echo -e "    bash ~/start_kitsune.sh"
+else
+    echo -e "    cd $INSTALL_DIR && $PYTHON_VENV -m kitsune"
+fi
 echo -e ""
 echo -e "  ${YELLOW}Перед запуском добавь в config.toml:${RESET}"
 echo -e "    api_id   = <твой api_id>"
