@@ -85,16 +85,30 @@ class QuickstartModule(KitsuneModule):
         3. Ищет папку «Kitsune»: если есть — добавляет недостающие, если нет — создаёт.
         4. Добавляет самого себя в папку.
         """
+        import asyncio as _asyncio
         from telethon.tl.functions.messages import (
             GetDialogFiltersRequest,
             UpdateDialogFilterRequest,
         )
         from telethon.tl.types import DialogFilter, InputPeerSelf
+        from telethon.errors import FloodWaitError
 
         # ── Шаг 1: загружаем все диалоги один раз ────────────────────
         all_dialogs = []
-        async for d in self.client.iter_dialogs():
-            all_dialogs.append(d)
+        for _attempt in range(3):
+            try:
+                async for d in self.client.iter_dialogs():
+                    all_dialogs.append(d)
+                break
+            except FloodWaitError as _e:
+                logger.warning(
+                    "Quickstart: FloodWait при загрузке диалогов — ждём %ds (попытка %d/3)",
+                    _e.seconds, _attempt + 1,
+                )
+                await _asyncio.sleep(_e.seconds + 1)
+                all_dialogs.clear()
+        else:
+            logger.error("Quickstart: не удалось загрузить диалоги после 3 попыток")
 
         # ── Шаг 2: находим / создаём каждый чат ─────────────────────
         result_entities: dict = {}
@@ -197,16 +211,30 @@ class QuickstartModule(KitsuneModule):
         return None
 
     async def _create_chat(self, cfg: dict):
-        """Создаёт канал или мегагруппу по описанию из _KITSUNE_CHATS."""
+        """Создаёт канал или мегагруппу по описанию из _KITSUNE_CHATS."""        import asyncio as _asyncio
         from telethon.tl.functions.channels import CreateChannelRequest
-        result = await self.client(CreateChannelRequest(
-            title=cfg["title"],
-            about=cfg["about"],
-            broadcast=(cfg["type"] == "channel"),
-            megagroup=(cfg["type"] == "group"),
-        ))
-        logger.info("Quickstart: создан «%s» (%s)", cfg["title"], cfg["type"])
-        return result.chats[0]
+        from telethon.errors import FloodWaitError
+
+        for attempt in range(3):
+            try:
+                result = await self.client(CreateChannelRequest(
+                    title=cfg["title"],
+                    about=cfg["about"],
+                    broadcast=(cfg["type"] == "channel"),
+                    megagroup=(cfg["type"] == "group"),
+                ))
+                logger.info("Quickstart: создан «%s» (%s)", cfg["title"], cfg["type"])
+                return result.chats[0]
+            except FloodWaitError as e:
+                logger.warning(
+                    "Quickstart: FloodWait при создании «%s» — ждём %ds (попытка %d/3)",
+                    cfg["title"], e.seconds, attempt + 1,
+                )
+                await _asyncio.sleep(e.seconds + 1)
+
+        raise RuntimeError(
+            f"Не удалось создать «{cfg['title']}» после 3 попыток (FloodWait)"
+        )
 
     # ------------------------------------------------------------------
     # Welcome flow
