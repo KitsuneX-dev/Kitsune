@@ -20,12 +20,11 @@ _HTML = """<!DOCTYPE html>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 :root{
-  --bg:
+  --bg:#0d0d0f;--s1:#141418;--s2:#1c1c22;
   --bd:rgba(255,255,255,0.07);--bd2:rgba(255,255,255,0.13);
-  --tx:
-  --fox:
-  --green:
-  --red:
+  --tx:#e8e8ec;--mu:rgba(255,255,255,0.35);--mu2:rgba(255,255,255,0.58);
+  --fox:#ff6b35;--fox2:#ff8c5a;
+  --green:#3dffaa;--red:#ff4a6b;
   --mono:'Space Mono',monospace;--body:'DM Sans',sans-serif;
   --r:16px;--ease:.18s cubic-bezier(.4,0,.2,1);
 }
@@ -70,9 +69,9 @@ input::placeholder{color:var(--mu)}
 .hint a:hover{text-decoration:underline}
 button{
   width:100%;margin-top:22px;padding:13px;
-  background:linear-gradient(135deg,
+  background:linear-gradient(135deg,#ff6b35,#ff4a6b);
   border:none;border-radius:11px;
-  color:
+  color:#fff;font-family:var(--body);font-size:.9rem;font-weight:700;
   cursor:pointer;letter-spacing:.2px;
   transition:filter var(--ease),transform .1s,box-shadow var(--ease);
   box-shadow:0 4px 20px rgba(255,107,53,0.35);

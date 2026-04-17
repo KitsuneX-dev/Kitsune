@@ -59,8 +59,11 @@ if [[ "$(id -u)" == "0" ]]; then
     SUDO=""
     info "Запуск от root — sudo не нужен"
 elif $IS_USERLAND; then
-    # В UserLand sudo обычно отсутствует — пробуем без него
-    if command -v sudo &>/dev/null; then
+    # В UserLand есть кастомный /usr/local/bin/sudo — используем его напрямую
+    if [[ -x "/usr/local/bin/sudo" ]]; then
+        SUDO="/usr/local/bin/sudo"
+        info "UserLand: используем /usr/local/bin/sudo"
+    elif command -v sudo &>/dev/null; then
         SUDO="sudo"
     else
         SUDO=""
@@ -73,13 +76,32 @@ fi
 
 # Хелпер: apt-get с подавлением fatal-ошибок прав
 apt_install() {
+    # В UserLand кастомный sudo работает без пароля — не пропускаем пакеты
     if [[ -z "$SUDO" && "$(id -u)" != "0" ]]; then
         warn "Нет прав для apt-get — пропускаю системные пакеты (установи вручную при необходимости)"
         return 0
     fi
     $SUDO apt-get update -qq 2>/dev/null || true
-    $SUDO apt-get install -y --no-install-recommends "$@" 2>/dev/null || warn "Не удалось установить: $*"
+    $SUDO apt-get install -y --no-install-recommends "$@" 2>/dev/null \
+        || warn "Не удалось установить: $* — попробуй вручную: apt install $*"
 }
+
+# Проверяем git отдельно — без него установка невозможна
+if ! command -v git &>/dev/null; then
+    warn "git не найден — устанавливаю..."
+    if $IS_TERMUX; then
+        pkg install -y git || err "Не удалось установить git. Запусти: pkg install git"
+    elif $IS_UBUNTU; then
+        if [[ -n "$SUDO" || "$(id -u)" == "0" ]]; then
+            $SUDO apt-get update -qq 2>/dev/null || true
+            $SUDO apt-get install -y --no-install-recommends git 2>/dev/null \
+                || err "Не удалось установить git. Запусти вручную: apt install git"
+        else
+            err "git не найден и нет прав для установки. Запусти: apt install git"
+        fi
+    fi
+    command -v git &>/dev/null && ok "git установлен" || err "git всё ещё не найден — установи вручную"
+fi
 
 step "Проверка Python"
 PYTHON=""
