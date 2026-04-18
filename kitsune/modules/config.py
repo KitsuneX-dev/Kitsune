@@ -114,7 +114,7 @@ class ConfigModule(KitsuneModule):
         for name, mod in loader.modules.items():
             if not isinstance(getattr(mod, "config", None), ModuleConfig):
                 continue
-            is_builtin = getattr(mod, "_builtin", False)
+            is_builtin = getattr(mod, "_is_builtin", False) or getattr(mod, "_builtin", False)
             if builtin is None:
                 result[name] = mod
             elif builtin and is_builtin:
