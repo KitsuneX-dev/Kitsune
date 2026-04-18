@@ -238,12 +238,21 @@ class InfoModule(KitsuneModule):
         banner = self.config["banner_url"]
         inline = getattr(self.client, "_kitsune_inline", None)
 
-        if banner and "/blob/" in banner and "github.com" in banner:
-            banner = banner.replace("/blob/", "/raw/")
-            logger.warning(
-                "info_cmd: banner_url содержит /blob/ — автоматически исправлено на /raw/. "
-                "Обнови ссылку в конфиге на: %s", banner
+        if banner and "github.com" in banner:
+            # /blob/ → jsDelivr CDN
+            # https://github.com/USER/REPO/blob/BRANCH/FILE
+            # → https://cdn.jsdelivr.net/gh/USER/REPO@BRANCH/FILE
+            cdn_match = re.match(
+                r"https://github\.com/([^/]+)/([^/]+)/(?:blob|raw)/([^/]+)/(.*)",
+                banner,
             )
+            if cdn_match:
+                user, repo, branch, filepath = cdn_match.groups()
+                banner = f"https://cdn.jsdelivr.net/gh/{user}/{repo}@{branch}/{filepath}"
+                logger.debug("info_cmd: banner_url → jsDelivr CDN: %s", banner)
+            elif "/blob/" in banner:
+                banner = banner.replace("/blob/", "/raw/")
+                logger.debug("info_cmd: banner_url /blob/ → /raw/: %s", banner)
 
         if self.config["custom_message"]:
             from telethon.tl.types import ReplyInlineMarkup, KeyboardButtonUrl, KeyboardButtonRow

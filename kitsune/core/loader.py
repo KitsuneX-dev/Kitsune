@@ -134,6 +134,19 @@ class KitsuneModule:
         strings = getattr(self, strings_key, None) or getattr(self, "strings_ru", None) or getattr(self, "strings", {})
 
         text = strings.get(key, key) if isinstance(strings, dict) else key
+
+        # Подставляем реальный префикс вместо хардкода "."
+        dispatcher = getattr(getattr(self, "client", None), "_kitsune_dispatcher", None)
+        prefix = dispatcher._prefix if dispatcher else "."
+        if prefix != ".":
+            # Заменяем точку только внутри <code>...</code> тегов
+            import re as _re
+            text = _re.sub(
+                r'(<code>)\.([\w])',
+                lambda m: m.group(1) + prefix + m.group(2),
+                text,
+            )
+
         return text.format(**kwargs) if kwargs else text
 
     def _load_config_from_db(self) -> None:

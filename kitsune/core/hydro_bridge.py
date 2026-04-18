@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 import typing
+from collections import defaultdict
 
 logger = logging.getLogger(__name__)
 
@@ -109,12 +111,34 @@ class HydrogramBridge:
         self._dispatcher = dispatcher
         self._db = db
 
+    # ── Rate limiter ──────────────────────────────────────────────────────────
+    # Не более 20 исходящих запросов в 60 секунд (глобально через Hydrogram)
+    _RL_MAX     = 20
+    _RL_WINDOW  = 60.0
+    _rl_times: list = []
+
+    def _rate_limit_ok(self) -> bool:
+        """Возвращает True если запрос разрешён, False если надо притормозить."""
+        now = time.monotonic()
+        # Убираем старые записи за пределами окна
+        self._rl_times = [t for t in self._rl_times if now - t < self._RL_WINDOW]
+        if len(self._rl_times) >= self._RL_MAX:
+            logger.warning(
+                "HydrogramBridge: rate limit reached (%d/%d in %.0fs) — dropping event",
+                len(self._rl_times), self._RL_MAX, self._RL_WINDOW,
+            )
+            return False
+        self._rl_times.append(now)
+        return True
+
     def attach(self) -> None:
         try:
             from hydrogram import filters
             from hydrogram.handlers import MessageHandler
 
             async def _on_message(client, message) -> None:
+                if not self._rate_limit_ok():
+                    return
                 await self._handle(message)
 
             self._hydro.add_handler(MessageHandler(_on_message, filters.all))

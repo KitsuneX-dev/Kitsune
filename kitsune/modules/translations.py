@@ -15,6 +15,10 @@ SUPPORTED_LANGUAGES = {
     "ru": "🇷🇺 Русский",
     "en": "🇬🇧 English",
     "de": "🇩🇪 Deutsch",
+    "ua": "🇺🇦 Українська",
+    "jp": "🇯🇵 日本語",
+    "uwu": "🐾 UwU",
+    "leet": "👾 1337",
 }
 
 class TranslationsModule(KitsuneModule):
