@@ -198,28 +198,13 @@ async def _startup(args: argparse.Namespace) -> None:
     proxy      = None
     connection = ConnectionTcpFull
 
-    proxy_url = cfg.get("proxy_url") or cfg.get("proxy") if isinstance(cfg.get("proxy"), str) else None
-    if proxy_url:
-        import re as _re
-        m = _re.match(r"(socks5|socks4|http)://([^:]+):(\d+)", str(proxy_url))
-        if m:
-            _ptype, _host, _port = m.group(1).upper(), m.group(2), int(m.group(3))
-            import socks as _socks
-            _socks_type = {"SOCKS5": _socks.SOCKS5, "SOCKS4": _socks.SOCKS4, "HTTP": _socks.HTTP}.get(_ptype, _socks.SOCKS5)
-            proxy = (_socks_type, _host, _port)
-            logger.info("main: SOCKS proxy → %s://%s:%d", _ptype.lower(), _host, _port)
-    elif isinstance(proxy_cfg, dict) and proxy_cfg.get("host") and proxy_cfg.get("port"):
+    if isinstance(proxy_cfg, dict) and proxy_cfg.get("host") and proxy_cfg.get("port"):
         ptype = str(proxy_cfg.get("type", "MTPROTO")).upper()
         if ptype == "MTPROTO":
             secret     = proxy_cfg.get("secret", "00000000000000000000000000000000")
             proxy      = (str(proxy_cfg["host"]), int(proxy_cfg["port"]), secret)
             connection = ConnectionTcpMTProxyRandomizedIntermediate
             logger.info("main: MTProto proxy → %s:%s", proxy_cfg["host"], proxy_cfg["port"])
-        elif ptype in ("SOCKS5", "SOCKS4", "HTTP"):
-            import socks as _socks
-            _socks_type = {"SOCKS5": _socks.SOCKS5, "SOCKS4": _socks.SOCKS4, "HTTP": _socks.HTTP}[ptype]
-            proxy = (_socks_type, str(proxy_cfg["host"]), int(proxy_cfg["port"]))
-            logger.info("main: %s proxy → %s:%s", ptype, proxy_cfg["host"], proxy_cfg["port"])
 
     from .session_enc import (
         decrypt_session_file, _fix_session_permissions,
