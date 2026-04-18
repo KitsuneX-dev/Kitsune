@@ -211,7 +211,8 @@ class QuickstartModule(KitsuneModule):
         return None
 
     async def _create_chat(self, cfg: dict):
-        """Создаёт канал или мегагруппу по описанию из _KITSUNE_CHATS."""        import asyncio as _asyncio
+        """Создаёт канал или мегагруппу по описанию из _KITSUNE_CHATS."""
+        import asyncio as _asyncio
         from telethon.tl.functions.channels import CreateChannelRequest
         from telethon.errors import FloodWaitError
 
