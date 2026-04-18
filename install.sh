@@ -264,12 +264,16 @@ _SITE_PACKAGES=$("$PYTHON_VENV" -c "import site; print(site.getsitepackages()[0]
 cp -r "$_GRAPHEME_TMP/grapheme-0.6.0/grapheme" "$_SITE_PACKAGES/"
 rm -rf "$_GRAPHEME_TMP"
 ok "grapheme установлен"
+# --no-build-isolation: pip использует setuptools из venv (уже пропатчен выше)
+# вместо создания изолированных pip-build-env-*/pip-modern-metadata-* окружений
+# с чистым setuptools — именно там возникал EPERM на .egg-info.__bkp__ в UserLand
 "$PIP" install --no-cache-dir -r requirements.txt \
     --no-warn-script-location --disable-pip-version-check --quiet \
+    --no-build-isolation \
     || err "Не удалось установить зависимости. Проверь requirements.txt"
 ok "Зависимости установлены"
 
-"$PIP" install --no-cache-dir hydrogram tgcrypto --quiet 2>/dev/null \
+"$PIP" install --no-cache-dir hydrogram tgcrypto --quiet --no-build-isolation 2>/dev/null \
     && ok "Hydrogram установлен" \
     || warn "Hydrogram не установлен — продолжаю без него"
 
