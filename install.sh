@@ -213,12 +213,19 @@ if $IS_USERLAND || [[ ! -w /tmp ]]; then
     export TMPDIR="$HOME/tmp"
     info "TMPDIR → $HOME/tmp (обход ограничений /tmp)"
 fi
-"$PIP" install --upgrade pip wheel "setuptools<69" --quiet
-# grapheme: баг в setuptools>=69 — rename() egg-info.__bkp__ заблокирован в UserLand/proot
-# решение: setuptools<69 + --no-build-isolation
-"$PIP" install --no-build-isolation --no-cache-dir grapheme --quiet \
-    && ok "grapheme установлен" \
-    || err "Не удалось установить grapheme"
+"$PIP" install --upgrade pip wheel --quiet
+
+# grapheme: setuptools делает rename() → egg-info.__bkp__, что блокируется ядром Android в UserLand/proot
+# обходим полностью — скачиваем исходник и копируем пакет напрямую в site-packages
+_GRAPHEME_TMP="$HOME/tmp/grapheme_install"
+mkdir -p "$_GRAPHEME_TMP"
+"$PIP" download --no-deps "grapheme==0.6.0" -d "$_GRAPHEME_TMP" --quiet \
+    || err "Не удалось скачать grapheme"
+(cd "$_GRAPHEME_TMP" && tar xzf grapheme-0.6.0.tar.gz)
+_SITE_PACKAGES=$("$PYTHON_VENV" -c "import site; print(site.getsitepackages()[0])")
+cp -r "$_GRAPHEME_TMP/grapheme-0.6.0/grapheme" "$_SITE_PACKAGES/"
+rm -rf "$_GRAPHEME_TMP"
+ok "grapheme установлен"
 "$PIP" install --no-cache-dir -r requirements.txt \
     --no-warn-script-location --disable-pip-version-check --quiet \
     || err "Не удалось установить зависимости. Проверь requirements.txt"
