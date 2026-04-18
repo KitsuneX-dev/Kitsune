@@ -264,6 +264,31 @@ _SITE_PACKAGES=$("$PYTHON_VENV" -c "import site; print(site.getsitepackages()[0]
 cp -r "$_GRAPHEME_TMP/grapheme-0.6.0/grapheme" "$_SITE_PACKAGES/"
 rm -rf "$_GRAPHEME_TMP"
 ok "grapheme установлен"
+
+# pyaes: транзитивная зависимость telethon. Падает на proot/UserLand:
+# pip при сборке метадаты переименовывает pyaes.egg-info -> pyaes-X.dist-info
+# через shutil.move — это код самого pip, патч setuptools не помогает.
+# Решение: ставим вручную + создаём dist-info, чтобы pip считал пакет уже установленным.
+_PYAES_VER="1.6.1"
+_PYAES_TMP="$HOME/tmp/pyaes_install"
+mkdir -p "$_PYAES_TMP"
+if ! "$PYTHON_VENV" -c "import pyaes" 2>/dev/null; then
+    curl -sSL "https://files.pythonhosted.org/packages/source/p/pyaes/pyaes-${_PYAES_VER}.tar.gz" \
+        -o "$_PYAES_TMP/pyaes-${_PYAES_VER}.tar.gz" \
+        || warn "Не удалось скачать pyaes — pip попробует сам"
+    (cd "$_PYAES_TMP" && tar xzf "pyaes-${_PYAES_VER}.tar.gz" 2>/dev/null)
+    cp -r "$_PYAES_TMP/pyaes-${_PYAES_VER}/pyaes" "$_SITE_PACKAGES/"
+    _PYAES_DIST="$_SITE_PACKAGES/pyaes-${_PYAES_VER}.dist-info"
+    mkdir -p "$_PYAES_DIST"
+    printf "Metadata-Version: 2.1\nName: pyaes\nVersion: %s\n" "$_PYAES_VER" > "$_PYAES_DIST/METADATA"
+    echo "pip"   > "$_PYAES_DIST/INSTALLER"
+    echo "pyaes" > "$_PYAES_DIST/top_level.txt"
+    touch "$_PYAES_DIST/RECORD"
+    ok "pyaes ${_PYAES_VER} установлен вручную"
+else
+    ok "pyaes уже установлен — пропускаю"
+fi
+rm -rf "$_PYAES_TMP"
 # --no-build-isolation: pip использует setuptools из venv (уже пропатчен выше)
 # вместо создания изолированных pip-build-env-*/pip-modern-metadata-* окружений
 # с чистым setuptools — именно там возникал EPERM на .egg-info.__bkp__ в UserLand
