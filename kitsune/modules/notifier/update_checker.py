@@ -25,7 +25,7 @@ class UpdateChecker:
         self._db         = db
         self._check_task: asyncio.Task | None = None
         self._repo_path  = os.path.abspath(
-            os.path.join(os.path.dirname(__file__), "..", "..", "..", "..")
+            os.path.join(os.path.dirname(__file__), "..", "..", "..")
         )
 
     def start(self) -> None:
