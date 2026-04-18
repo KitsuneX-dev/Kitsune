@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+from ..hydro_media import send_file as _hydro_send_file
 import logging
 from pathlib import Path
 
@@ -253,8 +254,8 @@ class LoaderModule(KitsuneModule):
                 buf = io.BytesIO(content)
                 buf.name = f"{mod.name}.py"
                 buf.seek(0)
-                await self.client.send_file(
-                    event.message.peer_id, buf, reply_to=event.message.id
+                await _hydro_send_file(
+                    self.client, event.message.peer_id, buf, reply_to=event.message.id
                 )
             except Exception:
                 pass
@@ -263,10 +264,9 @@ class LoaderModule(KitsuneModule):
                 buf = io.BytesIO(Path(path).read_bytes())
                 buf.name = f"{mod.name}.py"
                 buf.seek(0)
-                await self.client.send_file(
-                    event.message.peer_id, buf,
+                await _hydro_send_file(
+                    self.client, event.message.peer_id, buf,
                     caption=self.strings("ml_file").format(name=mod.name),
-                    parse_mode="html",
                     reply_to=event.message.id,
                 )
                 await event.message.delete()

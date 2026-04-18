@@ -4,6 +4,7 @@ import asyncio
 import os
 import sys
 import time
+import typing
 
 from ..core.loader import KitsuneModule, command
 from ..core.security import OWNER
@@ -47,9 +48,15 @@ class UpdaterModule(KitsuneModule):
         "timeout":    "⏱ Время вышло. Запусти <code>.update</code> снова.",
         "boot_done": (
             "✅ <b>Kitsune перезапущен</b>\n\n"
-            "⏱ Время перезапуска: <code>{restart_time}</code>\n"
-            "📦 Модули загружены: <code>{mod_count}</code>\n"
-            "⚡ Полная загрузка заняла: <code>{total_time}</code>"
+            "⏱ Перезапуск: <code>{restart_time}</code>\n"
+            "📦 Модули: <code>{mod_count}</code>\n"
+            "⚡ Полная загрузка: <code>{total_time}</code>"
+        ),
+        "update_done": (
+            "✅ <b>Обновление успешно установлено!</b>\n\n"
+            "⏱ Перезапуск: <code>{restart_time}</code>\n"
+            "📦 Модули: <code>{mod_count}</code>\n"
+            "⚡ Полная загрузка: <code>{total_time}</code>"
         ),
     }
 
@@ -60,18 +67,18 @@ class UpdaterModule(KitsuneModule):
 
         await self.db.delete(_DB_OWNER, "pending_restart")
 
-        restart_start  = restart_data.get("start_time", 0)
-        now            = time.time()
-        total_elapsed  = now - restart_start
-        restart_elapsed = total_elapsed * 0.4
-
-        restart_time = _fmt_time(restart_elapsed)
-        total_time   = _fmt_time(total_elapsed)
+        restart_start = restart_data.get("start_time", 0)
+        now           = time.time()
+        total_elapsed = now - restart_start
+        restart_time  = _fmt_time(total_elapsed * 0.4)
+        total_time    = _fmt_time(total_elapsed)
 
         loader    = getattr(self.client, "_kitsune_loader", None)
         mod_count = len(loader.modules) if loader else 0
 
-        report = self.strings("boot_done").format(
+        is_update  = restart_data.get("is_update", False)
+        string_key = "update_done" if is_update else "boot_done"
+        report = self.strings(string_key).format(
             restart_time=restart_time,
             mod_count=mod_count,
             total_time=total_time,
@@ -80,18 +87,40 @@ class UpdaterModule(KitsuneModule):
         chat_id = restart_data.get("chat_id", 0)
         msg_id  = restart_data.get("msg_id", 0)
         if chat_id and msg_id:
+            # on_load срабатывает до полного подключения — откладываем на 3с
+            asyncio.ensure_future(
+                self._post_restart_edit(chat_id, msg_id, report, loader, total_time, restart_time, mod_count)
+            )
+
+    async def _post_restart_edit(
+        self,
+        chat_id: int,
+        msg_id: int,
+        report: str,
+        loader: typing.Any,
+        total_time: str,
+        restart_time: str,
+        mod_count: int,
+    ) -> None:
+        await asyncio.sleep(3)
+        try:
+            await self.client.edit_message(chat_id, msg_id, report, parse_mode="html")
+        except Exception:
             try:
-                await self.client.edit_message(chat_id, msg_id, report, parse_mode="html")
-            except Exception:
                 await self.client.send_message(chat_id, report, parse_mode="html")
+            except Exception:
+                pass
 
         notifier = loader.modules.get("notifier") if loader else None
         if notifier:
-            await notifier.send_restart_report(
-                restart_time=restart_time,
-                total_time=total_time,
-                mod_count=mod_count,
-            )
+            try:
+                await notifier.send_restart_report(
+                    restart_time=restart_time,
+                    total_time=total_time,
+                    mod_count=mod_count,
+                )
+            except Exception:
+                pass
 
                                                                         
                      
@@ -385,7 +414,7 @@ class UpdaterModule(KitsuneModule):
             await self.db.force_save()
 
         await edit("🔄 <b>Перезапускаю...</b>\n████████████  100%")
-        await self._save_restart_start(chat_id=chat_id, msg_id=msg_id)
+        await self._save_restart_start(chat_id=chat_id, msg_id=msg_id, is_update=True)
         await asyncio.sleep(1)
         os.execl(sys.executable, sys.executable, "-m", "kitsune")
 
@@ -396,12 +425,13 @@ class UpdaterModule(KitsuneModule):
         await asyncio.sleep(1)
         os.execl(sys.executable, sys.executable, "-m", "kitsune")
 
-    async def _save_restart_start(self, chat_id: int = 0, msg_id: int = 0) -> None:
+    async def _save_restart_start(self, chat_id: int = 0, msg_id: int = 0, is_update: bool = False) -> None:
         now = time.time()
         await self.db.set(_DB_OWNER, "pending_restart", {
             "start_time": now,
             "chat_id":    chat_id,
             "msg_id":     msg_id,
+            "is_update":  is_update,
         })
         await self.db.force_save()
 

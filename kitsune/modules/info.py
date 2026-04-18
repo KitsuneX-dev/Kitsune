@@ -261,12 +261,11 @@ class InfoModule(KitsuneModule):
             if banner:
                 try:
 
-                    await self.client.send_file(
+                    await _hydro_send_file(
+                        self.client,
                         event.peer_id,
                         banner,
                         caption=parsed_text,
-                        formatting_entities=entities,
-                        buttons=markup,
                     )
                     await event.message.delete()
                     return
