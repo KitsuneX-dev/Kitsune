@@ -213,8 +213,9 @@ if $IS_USERLAND || [[ ! -w /tmp ]]; then
     export TMPDIR="$HOME/tmp"
     info "TMPDIR → $HOME/tmp (обход ограничений /tmp)"
 fi
-"$PIP" install --upgrade pip wheel setuptools --quiet
-# grapheme требует --no-build-isolation из-за бага setuptools с egg-info.__bkp__ в UserLand
+"$PIP" install --upgrade pip wheel "setuptools<69" --quiet
+# grapheme: баг в setuptools>=69 — rename() egg-info.__bkp__ заблокирован в UserLand/proot
+# решение: setuptools<69 + --no-build-isolation
 "$PIP" install --no-build-isolation --no-cache-dir grapheme --quiet \
     && ok "grapheme установлен" \
     || err "Не удалось установить grapheme"
