@@ -280,6 +280,9 @@ class UpdateChecker:
                 except Exception:
                     pass
 
+        # Шаг 1 — сразу показываем прогресс
+        await edit("⬇️ <b>Скачиваю обновление...</b>\n████░░░░░░░░  33%")
+
         try:
             import git
             repo   = git.Repo(self._repo_path)
@@ -334,8 +337,6 @@ class UpdateChecker:
         if proc.returncode != 0:
             raise RuntimeError(stderr.decode()[:300])
 
-        await edit("🔄 <b>Перезапускаю...</b>\n████████████  100%")
-
         restart_start = time.time()
         chat_id = getattr(getattr(msg, "chat", None), "id", 0) if msg else 0
         msg_id  = getattr(msg, "message_id", 0) if msg else 0
@@ -344,6 +345,7 @@ class UpdateChecker:
         await self._db.set(_DB_KEY, "update_start_time", restart_start)
         await self._db.force_save()
 
+        await edit("🔄 <b>Перезапускаю...</b>\n████████████  100%")
         await asyncio.sleep(1)
         os.execl(sys.executable, sys.executable, "-m", "kitsune")
 

@@ -249,16 +249,17 @@ class UpdaterModule(KitsuneModule):
                     pass
             return
         await self.db.delete(_DB_OWNER, "pending_update")
-        chat_id = pending.get("chat_id", 0)
-        msg_id  = pending.get("msg_id", 0)
 
-        if inline:
-            try:
-                await inline.edit(call, "⬇️ <b>Скачиваю обновление...</b>\n████░░░░░░░░  33%", [])
-            except Exception:
-                pass
-
-        await self._do_update(repo_path=repo_path, chat_id=chat_id, msg_id=msg_id)
+        # Передаём aiogram-сообщение в do_update — оно само отследит прогресс
+        # и сохранит chat_id/msg_id для редактирования после перезапуска
+        notifier = self._get_notifier()
+        if notifier and notifier._updater:
+            asyncio.ensure_future(notifier._updater.do_update(msg=call.message))
+        else:
+            # Fallback: обновляем через Telethon
+            chat_id = pending.get("chat_id", 0)
+            msg_id  = pending.get("msg_id", 0)
+            await self._do_update(repo_path=repo_path, chat_id=chat_id, msg_id=msg_id)
 
     async def _cb_cancel_update(self, call) -> None:
         """Колбэк кнопки «Отмена»."""
