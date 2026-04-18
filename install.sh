@@ -215,11 +215,12 @@ if $IS_USERLAND || [[ ! -w /tmp ]]; then
 fi
 "$PIP" install --upgrade pip wheel --quiet
 
-# grapheme: setuptools делает rename() → egg-info.__bkp__, что блокируется ядром Android в UserLand/proot
-# обходим полностью — скачиваем исходник и копируем пакет напрямую в site-packages
+# grapheme: rename() → egg-info.__bkp__ заблокирован ядром Android в UserLand/proot
+# pip download тоже затрагивает metadata — качаем tarball напрямую через curl
 _GRAPHEME_TMP="$HOME/tmp/grapheme_install"
 mkdir -p "$_GRAPHEME_TMP"
-"$PIP" download --no-deps "grapheme==0.6.0" -d "$_GRAPHEME_TMP" --quiet \
+curl -sSL "https://files.pythonhosted.org/packages/source/g/grapheme/grapheme-0.6.0.tar.gz" \
+    -o "$_GRAPHEME_TMP/grapheme-0.6.0.tar.gz" \
     || err "Не удалось скачать grapheme"
 (cd "$_GRAPHEME_TMP" && tar xzf grapheme-0.6.0.tar.gz)
 _SITE_PACKAGES=$("$PYTHON_VENV" -c "import site; print(site.getsitepackages()[0])")
