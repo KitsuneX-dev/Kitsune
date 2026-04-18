@@ -391,19 +391,36 @@ class UpdateChecker:
         if not token or not owner_id:
             return
 
+        done_text = (
+            "✅ <b>Обновление успешно установлено!</b>\n"
+            f"⏱ Перезапуск: <code>{restart_time}</code>\n"
+            f"📦 Модули: <code>{mod_count}</code>"
+        )
+
         try:
             from kitsune.modules.notifier.bot_runner import _make_bot
             bot = _make_bot(str(token))
-            await bot.edit_message_text(
-                chat_id=int(chat_id),
-                message_id=int(msg_id),
-                text=(
-                    "✅ <b>Обновление успешно установлено!</b>\n"
-                    f"⏱ Перезапуск: <code>{restart_time}</code>\n"
-                    f"📦 Модули: <code>{mod_count}</code>"
-                ),
-                parse_mode="HTML",
-            )
+
+            edited = False
+            if chat_id and msg_id:
+                try:
+                    await bot.edit_message_text(
+                        chat_id=int(chat_id),
+                        message_id=int(msg_id),
+                        text=done_text,
+                        parse_mode="HTML",
+                    )
+                    edited = True
+                except Exception:
+                    pass
+
+            if not edited:
+                await bot.send_message(
+                    chat_id=int(owner_id),
+                    text=done_text,
+                    parse_mode="HTML",
+                )
+
             await bot.session.close()
         except Exception:
             logger.exception("UpdateChecker: failed to send update_done message")
