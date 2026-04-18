@@ -272,6 +272,24 @@ class UpdateChecker:
                                                              
                                                                         
 
+    async def do_update_inline(self, chat_id: int = 0, msg_id: int = 0, edit_fn=None) -> None:
+        import inspect as _inspect
+
+        async def edit(text: str) -> None:
+            if edit_fn:
+                try:
+                    r = edit_fn(text)
+                    if _inspect.isawaitable(r):
+                        await r
+                except Exception:
+                    pass
+
+        await self._db.set(_DB_KEY, "update_msg_chat",   chat_id)
+        await self._db.set(_DB_KEY, "update_msg_id",     msg_id)
+        await self._db.set(_DB_KEY, "update_start_time", time.time())
+        await self._db.force_save()
+        await self._run_update(edit)
+
     async def do_update(self, msg=None) -> None:
         async def edit(text: str) -> None:
             if msg:
@@ -280,7 +298,15 @@ class UpdateChecker:
                 except Exception:
                     pass
 
-                                           
+        chat_id = getattr(getattr(msg, "chat", None), "id", 0) if msg else 0
+        msg_id  = getattr(msg, "message_id", 0) if msg else 0
+        await self._db.set(_DB_KEY, "update_msg_chat",   chat_id)
+        await self._db.set(_DB_KEY, "update_msg_id",     msg_id)
+        await self._db.set(_DB_KEY, "update_start_time", time.time())
+        await self._db.force_save()
+        await self._run_update(edit)
+
+    async def _run_update(self, edit) -> None:
         await edit("⬇️ <b>Скачиваю обновление...</b>\n████░░░░░░░░  33%")
 
         try:
@@ -337,21 +363,10 @@ class UpdateChecker:
         if proc.returncode != 0:
             raise RuntimeError(stderr.decode()[:300])
 
-        restart_start = time.time()
-        chat_id = getattr(getattr(msg, "chat", None), "id", 0) if msg else 0
-        msg_id  = getattr(msg, "message_id", 0) if msg else 0
-        await self._db.set(_DB_KEY, "update_msg_chat",  chat_id)
-        await self._db.set(_DB_KEY, "update_msg_id",    msg_id)
-        await self._db.set(_DB_KEY, "update_start_time", restart_start)
-        await self._db.force_save()
-
         await edit("🔄 <b>Перезапускаю...</b>\n████████████  100%")
         await asyncio.sleep(1)
         os.execl(sys.executable, sys.executable, "-m", "kitsune")
 
-                                                                        
-                        
-                                                                        
 
     async def notify_update_done(self) -> None:
         chat_id    = self._db.get(_DB_KEY, "update_msg_chat",  None)
