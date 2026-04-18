@@ -139,15 +139,7 @@ if [[ -z "$PYTHON" ]]; then
     ok "Python: $PYTHON"
 fi
 
-# ── Проверяем python3-venv отдельно (частая проблема в UserLand) ──────────────
-if $IS_UBUNTU && ! $PYTHON -m venv --help &>/dev/null 2>&1; then
-    warn "python3-venv не найден — устанавливаю..."
-    PYVER=$($PYTHON -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
-    apt_install "python${PYVER}-venv" python3-venv \
-        || warn "Не удалось установить venv — попробуй: sudo apt install python3-venv"
-fi
-
-# ── Системные зависимости ─────────────────────────────────────────────────────
+# ── Системные зависимости (включая python3-venv — всегда явно) ───────────────
 step "Системные зависимости"
 if $IS_TERMUX; then
     pkg install -y git libjpeg-turbo openssl libffi 2>/dev/null || true
@@ -156,8 +148,27 @@ if $IS_TERMUX; then
     export CFLAGS="-I${PREFIX}/include/"
     ok "Termux-пакеты готовы"
 elif $IS_UBUNTU; then
+    # Определяем точную версию Python чтобы поставить правильный пакет venv
+    PYVER=$($PYTHON -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
     apt_install git curl build-essential libssl-dev libffi-dev \
-        libjpeg-dev zlib1g-dev libpq-dev && ok "Системные пакеты — готово" || true
+        libjpeg-dev zlib1g-dev libpq-dev \
+        "python${PYVER}-venv" python3-venv \
+        && ok "Системные пакеты — готово" || true
+fi
+
+# ── Финальная проверка venv (защитная сетка) ──────────────────────────────────
+if $IS_UBUNTU; then
+    # Проверяем реальным созданием тестового venv, а не --help (--help врёт)
+    _VENV_TEST=$(mktemp -d)
+    if ! $PYTHON -m venv "$_VENV_TEST" --without-pip &>/dev/null 2>&1; then
+        warn "python${PYVER}-venv всё ещё недоступен — пробую ещё раз..."
+        apt_install "python${PYVER}-venv" python3-venv \
+            || err "Не удалось установить python${PYVER}-venv. Запусти вручную: sudo apt install python${PYVER}-venv"
+        $PYTHON -m venv "$_VENV_TEST" --without-pip &>/dev/null \
+            || err "venv недоступен даже после установки. Попробуй перезайти в UserLand и запустить скрипт снова."
+    fi
+    rm -rf "$_VENV_TEST"
+    ok "python${PYVER}-venv: готов"
 fi
 
 # ── Исходный код ──────────────────────────────────────────────────────────────
@@ -181,8 +192,12 @@ fi
 step "Виртуальное окружение"
 VENV_DIR="$INSTALL_DIR/venv"
 if [[ ! -d "$VENV_DIR" ]]; then
-    $PYTHON -m venv "$VENV_DIR" \
-        || err "Не удалось создать venv. Проверь: sudo apt install python3-venv"
+    if ! $PYTHON -m venv "$VENV_DIR"; then
+        warn "venv не создался — пробую доустановить python${PYVER:-3.10}-venv..."
+        ${SUDO:-} apt-get install -y "python${PYVER:-3.10}-venv" python3-venv 2>/dev/null || true
+        $PYTHON -m venv "$VENV_DIR" \
+            || err "Не удалось создать venv. Запусти вручную: sudo apt install python3.10-venv"
+    fi
     ok "venv создан: $VENV_DIR"
 else
     ok "venv существует, пропускаю"
