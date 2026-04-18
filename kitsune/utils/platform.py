@@ -13,10 +13,13 @@ def is_docker() -> bool:
     )
 
 def is_termux() -> bool:
-    return (
-        "com.termux" in os.environ.get("PREFIX", "")
-        or Path("/data/data/com.termux").exists()
-    )
+    if "com.termux" in os.environ.get("PREFIX", ""):
+        return True
+    try:
+        return Path("/data/data/com.termux").exists()
+    except PermissionError:
+        # UserLand/proot: путь существует, но нет прав — значит это не Termux
+        return False
 
 def is_heroku() -> bool:
     return "DYNO" in os.environ
