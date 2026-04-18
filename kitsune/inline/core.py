@@ -158,10 +158,13 @@ class InlineManager:
             **({media_type: media_url} if media_url and media_type else {}),
         }
         sent = await self._invoke_unit(unit_id, message)
+        # Сохраняем Telethon-сообщение как fallback для edit() на PC-клиентах
+        if sent is not None and unit_id in self._units:
+            self._units[unit_id]["telethon_msg"] = sent
         try:
-            await asyncio.wait_for(asyncio.shield(future), timeout=10)
+            await asyncio.wait_for(asyncio.shield(future), timeout=30)
         except asyncio.TimeoutError:
-            logger.warning("form: timeout waiting for inline_message_id for unit %s", unit_id)
+            logger.warning("form: timeout waiting for inline_message_id for unit %s (PC fallback active)", unit_id)
         if "future" in self._units.get(unit_id, {}):
             del self._units[unit_id]["future"]
         return sent
@@ -205,6 +208,28 @@ class InlineManager:
                     reply_markup=markup,
                     parse_mode="HTML",
                 )
+            else:
+                # PC-fallback: ищем сохранённый Telethon-объект в units
+                telethon_msg = getattr(call_or_msg, "_telethon_msg", None)
+                if telethon_msg is None:
+                    # попробуем найти в units по callback unit_id
+                    for unit in self._units.values():
+                        if unit.get("telethon_msg") is not None:
+                            chk = unit["telethon_msg"]
+                            if getattr(chk, "id", None) and getattr(chk, "chat_id", None):
+                                telethon_msg = chk
+                                break
+                if telethon_msg is not None:
+                    try:
+                        await self._client.edit_message(
+                            getattr(telethon_msg, "chat_id", None) or getattr(telethon_msg, "peer_id", None),
+                            telethon_msg.id,
+                            text,
+                            parse_mode="html",
+                            buttons=None,
+                        )
+                    except Exception:
+                        logger.debug("InlineManager.edit: Telethon fallback also failed", exc_info=True)
         except Exception:
             logger.exception("InlineManager.edit: failed")
 
