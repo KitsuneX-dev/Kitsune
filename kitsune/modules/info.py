@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 
 from ..core.loader import KitsuneModule, command, ModuleConfig, ConfigValue
@@ -41,7 +42,7 @@ class InfoModule(KitsuneModule):
             ConfigValue(
                 "banner_url",
                 default="https://github.com/hikariatama/assets/raw/master/hikka_banner.mp4",
-                doc="Ссылка на баннер (видео/гифка). Используй прямую ссылку (raw). Для GitHub: замени /blob/ на /raw/ в URL.",
+                doc="Ссылка на баннер (видео/гифка). Используй прямую ссылку. Для GitHub: используй команду .cdn чтобы конвертировать ссылку в CDN.",
             ),
         )
 
@@ -238,22 +239,6 @@ class InfoModule(KitsuneModule):
         banner = self.config["banner_url"]
         inline = getattr(self.client, "_kitsune_inline", None)
 
-        if banner and "github.com" in banner:
-            # /blob/ → jsDelivr CDN
-            # https://github.com/USER/REPO/blob/BRANCH/FILE
-            # → https://cdn.jsdelivr.net/gh/USER/REPO@BRANCH/FILE
-            cdn_match = re.match(
-                r"https://github\.com/([^/]+)/([^/]+)/(?:blob|raw)/([^/]+)/(.*)",
-                banner,
-            )
-            if cdn_match:
-                user, repo, branch, filepath = cdn_match.groups()
-                banner = f"https://cdn.jsdelivr.net/gh/{user}/{repo}@{branch}/{filepath}"
-                logger.debug("info_cmd: banner_url → jsDelivr CDN: %s", banner)
-            elif "/blob/" in banner:
-                banner = banner.replace("/blob/", "/raw/")
-                logger.debug("info_cmd: banner_url /blob/ → /raw/: %s", banner)
-
         if self.config["custom_message"]:
             from telethon.tl.types import ReplyInlineMarkup, KeyboardButtonUrl, KeyboardButtonRow
 
@@ -296,6 +281,41 @@ class InfoModule(KitsuneModule):
             )
         else:
             await event.edit(text, parse_mode="html")
+
+    @command("cdn", required=OWNER)
+    async def cdn_cmd(self, event) -> None:
+        """Конвертирует GitHub ссылку в jsDelivr CDN.
+        Использование: .cdn https://github.com/user/repo/blob/main/file.mp4"""
+        args = self.get_args(event).strip()
+        if not args:
+            await event.message.edit(
+                "❌ Укажи GitHub ссылку:\n"
+                "<code>.cdn https://github.com/user/repo/blob/main/file.mp4</code>\n\n"
+                "Результат:\n"
+                "<code>https://cdn.jsdelivr.net/gh/user/repo@main/file.mp4</code>",
+                parse_mode="html",
+            )
+            return
+
+        m = re.match(
+            r"https://github\.com/([^/]+)/([^/]+)/(?:blob|raw)/([^/]+)/(.*)",
+            args,
+        )
+        if not m:
+            await event.message.edit(
+                "❌ Некорректная ссылка. Ожидается:\n"
+                "<code>https://github.com/user/repo/blob/branch/path/to/file</code>",
+                parse_mode="html",
+            )
+            return
+
+        user, repo, branch, filepath = m.groups()
+        cdn_url = f"https://cdn.jsdelivr.net/gh/{user}/{repo}@{branch}/{filepath}"
+
+        await event.message.edit(
+            f"✅ CDN ссылка:\n<code>{cdn_url}</code>",
+            parse_mode="html",
+        )
 
     @command("setinfo", required=OWNER)
     async def setinfo_cmd(self, event) -> None:
