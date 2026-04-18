@@ -213,10 +213,47 @@ if $IS_USERLAND || [[ ! -w /tmp ]]; then
     export TMPDIR="$HOME/tmp"
     info "TMPDIR → $HOME/tmp (обход ограничений /tmp)"
 fi
-"$PIP" install --upgrade pip wheel --quiet
+"$PIP" install --upgrade pip wheel setuptools --quiet
 
-# grapheme: rename() → egg-info.__bkp__ заблокирован ядром Android в UserLand/proot
-# pip download тоже затрагивает metadata — качаем tarball напрямую через curl
+# UserLand/proot: патчим setuptools — отключаем backup egg-info.__bkp__
+# (shutil.move/copytree на proot-fs возвращает EPERM для любого source-пакета)
+_DIST_INFO_PY=$("$PYTHON_VENV" -c "
+import setuptools, os
+print(os.path.join(os.path.dirname(setuptools.__file__), 'command', 'dist_info.py'))
+" 2>/dev/null || true)
+if [[ -f "$_DIST_INFO_PY" ]]; then
+    "$PYTHON_VENV" - "$_DIST_INFO_PY" << 'PYEOF'
+import sys
+path = sys.argv[1]
+with open(path) as f:
+    src = f.read()
+old = '''    @contextmanager
+    def _maybe_bkp_dir(self, dir_path: str, requires_bkp: bool):
+        if requires_bkp:
+            bkp_name = f"{dir_path}.__bkp__"
+            _rm(bkp_name, ignore_errors=True)
+            shutil.copytree(dir_path, bkp_name, dirs_exist_ok=True, symlinks=True)
+            try:
+                yield
+            finally:
+                _rm(dir_path, ignore_errors=True)
+                shutil.move(bkp_name, dir_path)
+        else:
+            yield'''
+new = '''    @contextmanager
+    def _maybe_bkp_dir(self, dir_path: str, requires_bkp: bool):
+        # patched: backup disabled (rename/proot EPERM on Android/UserLand)
+        yield'''
+if old in src:
+    with open(path, 'w') as f:
+        f.write(src.replace(old, new))
+PYEOF
+    ok "setuptools пропатчен (обход egg-info.__bkp__)"
+else
+    warn "setuptools dist_info.py не найден — пропускаю патч"
+fi
+
+# grapheme устанавливается вручную (на случай если setuptools патч не поможет первой итерации)
 _GRAPHEME_TMP="$HOME/tmp/grapheme_install"
 mkdir -p "$_GRAPHEME_TMP"
 curl -sSL "https://files.pythonhosted.org/packages/source/g/grapheme/grapheme-0.6.0.tar.gz" \
