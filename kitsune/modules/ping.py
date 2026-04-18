@@ -106,7 +106,7 @@ class PingModule(KitsuneModule):
 
         start = time.perf_counter()
         msg = await event.reply("⏳", parse_mode="html")
-        ms = (time.perf_counter() - start) * 1000
+        ms = round((time.perf_counter() - start) * 1000, 2)
 
         stored_start = self.db.get("kitsune.ping", "start_time", None)
         uptime_sec   = time.time() - (float(stored_start) if stored_start else self._start_time)
