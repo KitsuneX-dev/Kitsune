@@ -298,9 +298,11 @@ rm -rf "$_PYAES_TMP"
     || err "Не удалось установить зависимости. Проверь requirements.txt"
 ok "Зависимости установлены"
 
-"$PIP" install --no-cache-dir hydrogram tgcrypto --quiet --no-build-isolation 2>/dev/null \
+# tgcrypto уже покрыт TgCrypto-pyrofork из requirements.txt — устанавливаем только hydrogram
+"$PIP" install --no-cache-dir hydrogram --no-build-isolation \
+    --no-warn-script-location --disable-pip-version-check --quiet \
     && ok "Hydrogram установлен" \
-    || warn "Hydrogram не установлен — продолжаю без него"
+    || warn "Hydrogram не установлен (необязательный пакет)"
 
 # ── Директории ────────────────────────────────────────────────────────────────
 step "Директории и права"
@@ -367,8 +369,7 @@ else
     echo -e "  ${GREEN}cd $INSTALL_DIR && $PYTHON_VENV -m kitsune${RESET}"
 fi
 echo ""
-echo -e "  ${YELLOW}Перед запуском добавь в config.toml:${RESET}"
-echo -e "    api_id   = <твой api_id>"
-echo -e "    api_hash = \"<твой api_hash>\""
+echo -e "  ${CYAN}После запуска открой в браузере:${RESET}  ${GREEN}${BOLD}http://127.0.0.1:8080/${RESET}"
+echo -e "  ${CYAN}Там введи api_id, api_hash и авторизуйся.${RESET}"
 echo -e "${MAGENTA}${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
 echo ""
