@@ -355,21 +355,19 @@ SERVICE
     ok "systemd сервис создан"
 fi
 
-# ── Итог ─────────────────────────────────────────────────────────────────────
+# ── Итог и автозапуск ────────────────────────────────────────────────────────
 echo ""
 echo -e "${MAGENTA}${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
 echo -e "  ${GREEN}${BOLD}🦊 Kitsune успешно установлен!${RESET}"
 echo -e "  ${CYAN}Директория:${RESET} $INSTALL_DIR"
 echo ""
-if $IS_USERLAND; then
-    echo -e "  ${YELLOW}${BOLD}▶ ЗАПУСК (вставь в терминал):${RESET}"
-    echo -e "  ${GREEN}bash ~/start_kitsune.sh${RESET}"
-else
-    echo -e "  ${YELLOW}${BOLD}▶ ЗАПУСК:${RESET}"
-    echo -e "  ${GREEN}cd $INSTALL_DIR && $PYTHON_VENV -m kitsune${RESET}"
-fi
-echo ""
-echo -e "  ${CYAN}После запуска открой в браузере:${RESET}  ${GREEN}${BOLD}http://127.0.0.1:8080/${RESET}"
-echo -e "  ${CYAN}Там введи api_id, api_hash и авторизуйся.${RESET}"
+echo -e "  ${YELLOW}${BOLD}▶ Открой в браузере:${RESET}"
+echo -e "  ${GREEN}${BOLD}http://127.0.0.1:8080/${RESET}"
+echo -e "  ${CYAN}Войди, введи api_id и api_hash — бот заработает.${RESET}"
+echo -e "  ${CYAN}Для остановки нажми Ctrl+C в этом терминале.${RESET}"
 echo -e "${MAGENTA}${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
 echo ""
+
+# Запускаем Kitsune сразу — пользователь идёт на 127.0.0.1:8080 и настраивает
+cd "$INSTALL_DIR"
+exec "$PYTHON_VENV" -m kitsune
