@@ -284,9 +284,10 @@ class UpdateChecker:
                 except Exception:
                     pass
 
-        await self._db.set(_DB_KEY, "update_msg_chat",   chat_id)
-        await self._db.set(_DB_KEY, "update_msg_id",     msg_id)
-        await self._db.set(_DB_KEY, "update_start_time", time.time())
+        await self._db.set(_DB_KEY, "update_msg_chat",      chat_id)
+        await self._db.set(_DB_KEY, "update_msg_id",        msg_id)
+        await self._db.set(_DB_KEY, "update_msg_via_telethon", True)
+        await self._db.set(_DB_KEY, "update_start_time",    time.time())
         await self._db.force_save()
         await self._run_update(edit)
 
@@ -386,44 +387,45 @@ class UpdateChecker:
         loader    = getattr(self._client, "_kitsune_loader", None)
         mod_count = len(loader.modules) if loader else 0
 
-        token    = self._db.get(_DB_KEY, "bot_token",  None)
-        owner_id = self._db.get(_DB_KEY, "owner_id",   None)
-        if not token or not owner_id:
-            return
-
         done_text = (
             "✅ <b>Обновление успешно установлено!</b>\n"
             f"⏱ Перезапуск: <code>{restart_time}</code>\n"
             f"📦 Модули: <code>{mod_count}</code>"
         )
 
-        try:
-            from kitsune.modules.notifier.bot_runner import _make_bot
-            bot = _make_bot(str(token))
+        edited = False
 
-            edited = False
-            if chat_id and msg_id:
+        via_telethon = self._db.get(_DB_KEY, "update_msg_via_telethon", False)
+        await self._db.delete(_DB_KEY, "update_msg_via_telethon")
+
+        if via_telethon:
+            try:
+                await self._client.edit_message(
+                    int(chat_id),
+                    int(msg_id),
+                    done_text,
+                    parse_mode="html",
+                )
+                edited = True
+            except Exception:
+                pass
+
+        if not edited:
+            # Fallback: отправляем через бота в DM
+            token    = self._db.get(_DB_KEY, "bot_token", None)
+            owner_id = self._db.get(_DB_KEY, "owner_id",  None)
+            if token and owner_id:
                 try:
-                    await bot.edit_message_text(
-                        chat_id=int(chat_id),
-                        message_id=int(msg_id),
+                    from kitsune.modules.notifier.bot_runner import _make_bot
+                    bot = _make_bot(str(token))
+                    await bot.send_message(
+                        chat_id=int(owner_id),
                         text=done_text,
                         parse_mode="HTML",
                     )
-                    edited = True
+                    await bot.session.close()
                 except Exception:
-                    pass
-
-            if not edited:
-                await bot.send_message(
-                    chat_id=int(owner_id),
-                    text=done_text,
-                    parse_mode="HTML",
-                )
-
-            await bot.session.close()
-        except Exception:
-            logger.exception("UpdateChecker: failed to send update_done message")
+                    logger.exception("UpdateChecker: failed to send update_done message")
 
     async def send_restart_report(self, restart_time: str, total_time: str, mod_count: int) -> None:
         token    = self._db.get(_DB_KEY, "bot_token", None)
