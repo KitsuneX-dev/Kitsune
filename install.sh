@@ -213,7 +213,7 @@ if $IS_USERLAND || [[ ! -w /tmp ]]; then
     export TMPDIR="$HOME/tmp"
     info "TMPDIR → $HOME/tmp (обход ограничений /tmp)"
 fi
-"$PIP" install --upgrade pip --quiet
+"$PIP" install --upgrade pip wheel --quiet
 "$PIP" install --no-cache-dir -r requirements.txt \
     --no-warn-script-location --disable-pip-version-check --quiet \
     || err "Не удалось установить зависимости. Проверь requirements.txt"
