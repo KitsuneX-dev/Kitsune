@@ -186,6 +186,6 @@ class WarpModule(KitsuneModule):
         )
         rc, _, err = await self._run("bash", "-c", script, timeout=180)
         if rc == 0:
-            await self._run("warp-cli", "--accept-tos", "register", timeout=30)
+            await self._run("warp-cli", "--accept-tos", "registration", "new", timeout=30)
             return None
         return err[:500]
