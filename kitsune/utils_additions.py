@@ -194,12 +194,13 @@ async def answer_file(
         file = io.BytesIO(file)
 
     try:
-        result = await client.send_file(
+        from .hydro_media import send_file as _hydro_send
+        result = await _hydro_send(
+            client,
             peer,
             file,
-            caption=caption,
-            force_document=force_document,
-            **kwargs,
+            caption=caption or "",
+            reply_to=kwargs.get("reply_to"),
         )
     except Exception:
         if caption:
