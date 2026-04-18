@@ -244,10 +244,10 @@ def smart_split(
 
 __all__ += ["smart_split"]
 
-# ---------------------------------------------------------------------------
-# Functions ported from kitsune/utils.py (flat module) that are required by
-# hikka/heroku compat shims and user modules.
-# ---------------------------------------------------------------------------
+                                                                             
+                                                                           
+                                             
+                                                                             
 
 import io as _io
 import typing as _typing

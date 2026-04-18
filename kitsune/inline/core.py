@@ -158,7 +158,7 @@ class InlineManager:
             **({media_type: media_url} if media_url and media_type else {}),
         }
         sent = await self._invoke_unit(unit_id, message)
-        # Сохраняем Telethon-сообщение как fallback для edit() на PC-клиентах
+                                                                             
         if sent is not None and unit_id in self._units:
             self._units[unit_id]["telethon_msg"] = sent
         try:
@@ -209,10 +209,10 @@ class InlineManager:
                     parse_mode="HTML",
                 )
             else:
-                # PC-fallback: ищем сохранённый Telethon-объект в units
+                                                                       
                 telethon_msg = getattr(call_or_msg, "_telethon_msg", None)
                 if telethon_msg is None:
-                    # попробуем найти в units по callback unit_id
+                                                                 
                     for unit in self._units.values():
                         if unit.get("telethon_msg") is not None:
                             chk = unit["telethon_msg"]

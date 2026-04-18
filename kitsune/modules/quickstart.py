@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 _LS_OWNER = "kitsune.quickstart"
 _LS_KEY   = "shown"
 
-# Описание всех служебных чатов которые должны быть в папке
+                                                           
 _KITSUNE_CHATS = [
     {"key": "logs",   "title": "Kitsune-logs",  "type": "channel", "about": "Логи Kitsune Userbot"},
     {"key": "backup", "title": "KitsuneBackup",  "type": "group",   "about": "Резервные копии Kitsune Userbot"},
@@ -74,9 +74,9 @@ class QuickstartModule(KitsuneModule):
     async def on_load(self) -> None:
         await self._maybe_show_welcome()
 
-    # ------------------------------------------------------------------
-    # Core: sync folder
-    # ------------------------------------------------------------------
+                                                                        
+                       
+                                                                        
 
     async def _sync_kitsune_folder(self) -> dict:
         """
@@ -93,7 +93,7 @@ class QuickstartModule(KitsuneModule):
         from telethon.tl.types import DialogFilter, InputPeerSelf
         from telethon.errors import FloodWaitError
 
-        # ── Шаг 1: загружаем все диалоги один раз ────────────────────
+                                                                       
         all_dialogs = []
         for _attempt in range(3):
             try:
@@ -110,7 +110,7 @@ class QuickstartModule(KitsuneModule):
         else:
             logger.error("Quickstart: не удалось загрузить диалоги после 3 попыток")
 
-        # ── Шаг 2: находим / создаём каждый чат ─────────────────────
+                                                                      
         result_entities: dict = {}
         for cfg in _KITSUNE_CHATS:
             entity = self._find_in_dialogs(all_dialogs, cfg["title"], cfg["type"])
@@ -121,7 +121,7 @@ class QuickstartModule(KitsuneModule):
                 logger.info("Quickstart: «%s» уже существует", cfg["title"])
             result_entities[cfg["key"]] = entity
 
-        # ── Шаг 3: собираем InputPeer для всех чатов + себя ──────────
+                                                                       
         all_input_peers = []
         for entity in result_entities.values():
             if entity is None:
@@ -134,7 +134,7 @@ class QuickstartModule(KitsuneModule):
 
         all_input_peers.append(InputPeerSelf())
 
-        # ── Шаг 4: ищем / создаём папку «Kitsune» ───────────────────
+                                                                      
         try:
             filters_result = await self.client(GetDialogFiltersRequest())
             all_filters = getattr(filters_result, "filters", filters_result)
@@ -180,7 +180,7 @@ class QuickstartModule(KitsuneModule):
                         already.add(cid)
                         added += 1
 
-                # Убеждаемся что title — правильный тип (могла быть str из кеша)
+                                                                                
                 folder.title = _make_filter_title("Kitsune")
                 logger.info("Quickstart: добавлено %d новых чатов в папку", added)
                 verb = "обновлена"
@@ -193,9 +193,9 @@ class QuickstartModule(KitsuneModule):
 
         return result_entities
 
-    # ------------------------------------------------------------------
-    # Helpers
-    # ------------------------------------------------------------------
+                                                                        
+             
+                                                                        
 
     @staticmethod
     def _find_in_dialogs(dialogs, title: str, chat_type: str):
@@ -206,7 +206,7 @@ class QuickstartModule(KitsuneModule):
             if chat_type == "channel" and d.is_channel and not d.is_group:
                 return d.entity
             if chat_type == "group" and (d.is_group or d.is_channel):
-                # megagroup помечается is_channel=True is_group=True
+                                                                    
                 return d.entity
         return None
 
@@ -237,9 +237,9 @@ class QuickstartModule(KitsuneModule):
             f"Не удалось создать «{cfg['title']}» после 3 попыток (FloodWait)"
         )
 
-    # ------------------------------------------------------------------
-    # Welcome flow
-    # ------------------------------------------------------------------
+                                                                        
+                  
+                                                                        
 
     async def _maybe_show_welcome(self) -> None:
         try:
@@ -274,9 +274,9 @@ class QuickstartModule(KitsuneModule):
         except Exception:
             logger.exception("Quickstart: ошибка отправки приветствия")
 
-    # ------------------------------------------------------------------
-    # Command
-    # ------------------------------------------------------------------
+                                                                        
+             
+                                                                        
 
     @command("quickstart", required=OWNER)
     async def quickstart_cmd(self, event) -> None:
@@ -309,7 +309,7 @@ class QuickstartModule(KitsuneModule):
                 await msg.edit(f"❌ Ошибка: <code>{exc}</code>", parse_mode="html")
             return
 
-        # .quickstart — показать онбординг снова
+                                                
         try:
             from .._local_storage import get_storage
             ls = get_storage()
@@ -339,14 +339,14 @@ class QuickstartModule(KitsuneModule):
             await event.reply(f"❌ Ошибка: <code>{exc}</code>", parse_mode="html")
 
 
-# ------------------------------------------------------------------
-# Module-level utils
-# ------------------------------------------------------------------
+                                                                    
+                    
+                                                                    
 
 def _filter_title_str(f) -> str:
     """Достаёт строку из title вне зависимости от того str это или TextWithEntities."""
     t = getattr(f, "title", "")
     if isinstance(t, str):
         return t
-    # TextWithEntities или любой другой TLObject с полем .text
+                                                              
     return getattr(t, "text", str(t))

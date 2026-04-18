@@ -12,9 +12,9 @@ logger = logging.getLogger(__name__)
 
 _DB_KEY = "kitsune.notifier"
 
-# Проверять обновления каждые 60 минут
+                                      
 _CHECK_INTERVAL = 3600
-# Первая проверка через 5 минут после старта
+                                            
 _FIRST_CHECK_DELAY = 300
 
 
@@ -35,9 +35,9 @@ class UpdateChecker:
         if self._check_task and not self._check_task.done():
             self._check_task.cancel()
 
-    # ------------------------------------------------------------------
-    # Background loop
-    # ------------------------------------------------------------------
+                                                                        
+                     
+                                                                        
 
     async def _loop(self) -> None:
         await asyncio.sleep(_FIRST_CHECK_DELAY)
@@ -83,7 +83,7 @@ class UpdateChecker:
         except Exception:
             return
 
-        # Уже уведомляли про этот коммит — пропускаем
+                                                     
         if remote_sha == self._db.get(_DB_KEY, "last_notified_commit", None):
             return
 
@@ -109,9 +109,9 @@ class UpdateChecker:
 
         await self.notify_update(current=__version_str__, new=new_ver, changes=changes)
 
-    # ------------------------------------------------------------------
-    # notify_update — ищет группу Kitsune и шлёт туда через бот
-    # ------------------------------------------------------------------
+                                                                        
+                                                               
+                                                                        
 
     async def notify_update(self, current: str, new: str, changes: str = "") -> str | None:
         """
@@ -143,13 +143,13 @@ class UpdateChecker:
 
             bot = _make_bot(str(token))
 
-            # ── Пробуем найти и использовать группу Kitsune ──────────
+                                                                       
             group_id, group_name = await self._find_kitsune_group()
 
-            # Всегда шлём в личку бота (owner DM)
+                                                 
             await bot.send_message(chat_id=int(owner_id), text=text, reply_markup=kb)
 
-            # Если нашли группу Kitsune — дублируем туда тоже
+                                                             
             if group_id:
                 await self._ensure_bot_in_group(group_id, token)
                 try:
@@ -166,9 +166,9 @@ class UpdateChecker:
             logger.exception("UpdateChecker: failed to send update notification")
             return None
 
-    # ------------------------------------------------------------------
-    # Helpers: поиск группы Kitsune и добавление бота
-    # ------------------------------------------------------------------
+                                                                        
+                                                     
+                                                                        
 
     async def _find_kitsune_group(self) -> tuple[int | None, str | None]:
         """
@@ -176,7 +176,7 @@ class UpdateChecker:
         Приоритет: Kitsune <ник> > любая группа с «Kitsune» (НЕ KitsuneBackup).
         Возвращает (chat_id, title) или (None, None).
         """
-        # Получаем имя пользователя для точного совпадения
+                                                          
         owner_name: str | None = None
         try:
             me = await self._client.get_me()
@@ -186,7 +186,7 @@ class UpdateChecker:
         except Exception:
             pass
 
-        candidates: list[tuple[int, str, int]] = []  # (id, title, priority)
+        candidates: list[tuple[int, str, int]] = []                         
         try:
             async for dialog in self._client.iter_dialogs():
                 if not (dialog.is_group or (dialog.is_channel and dialog.is_group)):
@@ -194,7 +194,7 @@ class UpdateChecker:
                 t = dialog.title or ""
                 if "kitsune" not in t.lower():
                     continue
-                # Пропускаем KitsuneBackup — это не нужная нам группа
+                                                                     
                 if t == "KitsuneBackup":
                     continue
                 entity = dialog.entity
@@ -203,7 +203,7 @@ class UpdateChecker:
                     continue
                 chat_id = int(f"-100{cid}") if getattr(entity, "megagroup", False) or getattr(entity, "broadcast", False) else -cid
 
-                # Приоритет 0 — точное совпадение "Kitsune <ник>"
+                                                                 
                 if owner_name and t == f"Kitsune {owner_name}":
                     candidates.append((chat_id, t, 0))
                 elif t.startswith("Kitsune"):
@@ -224,7 +224,7 @@ class UpdateChecker:
         """Добавляет бота в группу через Telethon если его там нет."""
         try:
             import aiohttp
-            # Получаем username/id бота
+                                       
             async with aiohttp.ClientSession() as sess:
                 async with sess.get(
                     f"https://api.telegram.org/bot{token}/getMe",
@@ -236,7 +236,7 @@ class UpdateChecker:
             bot_username = data["result"]["username"]
             bot_id       = data["result"]["id"]
 
-            # Проверяем что бот уже в группе
+                                            
             async with aiohttp.ClientSession() as sess:
                 async with sess.get(
                     f"https://api.telegram.org/bot{token}/getChatMember",
@@ -247,9 +247,9 @@ class UpdateChecker:
 
             status = member_data.get("result", {}).get("status", "")
             if status in ("member", "administrator", "creator"):
-                return  # Бот уже в группе
+                return                    
 
-            # Добавляем бота через Telethon userbot
+                                                   
             from telethon.tl.functions.channels import InviteToChannelRequest
             from telethon.tl.functions.messages import AddChatUserRequest
 
@@ -268,9 +268,9 @@ class UpdateChecker:
         except Exception:
             logger.debug("UpdateChecker: _ensure_bot_in_group failed", exc_info=True)
 
-    # ------------------------------------------------------------------
-    # do_update — вызывается из bot_runner при нажатии кнопки
-    # ------------------------------------------------------------------
+                                                                        
+                                                             
+                                                                        
 
     async def do_update(self, msg=None) -> None:
         async def edit(text: str) -> None:
@@ -280,7 +280,7 @@ class UpdateChecker:
                 except Exception:
                     pass
 
-        # Шаг 1 — сразу показываем прогресс
+                                           
         await edit("⬇️ <b>Скачиваю обновление...</b>\n████░░░░░░░░  33%")
 
         try:
@@ -349,9 +349,9 @@ class UpdateChecker:
         await asyncio.sleep(1)
         os.execl(sys.executable, sys.executable, "-m", "kitsune")
 
-    # ------------------------------------------------------------------
-    # Post-update report
-    # ------------------------------------------------------------------
+                                                                        
+                        
+                                                                        
 
     async def notify_update_done(self) -> None:
         chat_id    = self._db.get(_DB_KEY, "update_msg_chat",  None)

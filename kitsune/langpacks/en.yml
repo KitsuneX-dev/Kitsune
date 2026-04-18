@@ -1,28 +1,16 @@
-# Kitsune Userbot — English langpack
-# © Yushi (@Mikasu32)
-
-# Core
 started: "🦊 Kitsune started"
 stopped: "🦊 Kitsune stopped"
 restarting: "🔄 Restarting..."
-
-# Errors
 unknown_error: "❌ Unknown error"
 flood_wait: "⏳ Wait {seconds} sec."
 not_authorized: "❌ Not authorized"
 no_permission: "🚫 Access denied"
-
-# Modules
 module_loaded: "✅ Module {name} loaded"
 module_unloaded: "✅ Module {name} unloaded"
 module_not_found: "❌ Module {name} not found"
 module_error: "❌ Error in module {name}"
-
-# Database
 db_saved: "💾 Database saved"
 db_error: "❌ Database error"
-
-# Updates
 update_checking: "🔍 Checking for updates..."
 update_available: "⬆️ Update available"
 update_done: "✅ Update installed"
