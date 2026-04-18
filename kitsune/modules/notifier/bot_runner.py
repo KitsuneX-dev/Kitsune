@@ -175,14 +175,14 @@ class BotRunner:
 
     async def _on_update_cb(self, call) -> None:
         owner_id = self._db.get(_DB_KEY, "owner_id", None)
-        # Молча игнорируем просроченные callback-запросы (> 60с после нажатия)
+                                                                              
         try:
             if call.from_user.id != owner_id:
                 await call.answer("🔒 Нет доступа.", show_alert=True)
                 return
             await call.answer()
         except Exception:
-            return  # query is too old — просто пропускаем
+            return                                        
         if call.data == "update_no":
             await self._db.delete("kitsune.updater", "pending_update")
             try:

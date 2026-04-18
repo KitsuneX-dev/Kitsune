@@ -93,15 +93,15 @@ class UpdaterModule(KitsuneModule):
                 mod_count=mod_count,
             )
 
-    # ------------------------------------------------------------------
-    # .update command
-    # ------------------------------------------------------------------
+                                                                        
+                     
+                                                                        
 
     @command("update", required=OWNER)
     async def update_cmd(self, event) -> None:
         args = self.get_args(event).strip().lower()
 
-        # .update confirm — прямое обновление без кнопок (fallback)
+                                                                   
         if args == "confirm":
             pending = self.db.get(_DB_OWNER, "pending_update", None)
             if not pending:
@@ -157,7 +157,7 @@ class UpdaterModule(KitsuneModule):
             if len(behind) > 5:
                 changes += f"\n<i>...и ещё {len(behind) - 5} коммитов</i>"
 
-            # Получаем новую версию из удалённого repo
+                                                      
             try:
                 remote_version = repo.git.show(f"origin/{branch}:kitsune/version.py")
                 import re as _re
@@ -166,21 +166,21 @@ class UpdaterModule(KitsuneModule):
             except Exception:
                 new_ver = f"{__version_str__}+{len(behind)}"
 
-            # Сохраняем pending для подтверждения через кнопку или .update confirm
+                                                                                  
             await self.db.set(_DB_OWNER, "pending_update", {
                 "repo_path": repo_path,
                 "chat_id":   event.chat_id,
                 "msg_id":    m.id,
             })
 
-            # Сохраняем pending для подтверждения
+                                                 
             await self.db.set(_DB_OWNER, "pending_update", {
                 "repo_path": repo_path,
                 "chat_id":   event.chat_id,
                 "msg_id":    m.id,
             })
 
-            # Пробуем показать inline-кнопку прямо в чате
+                                                         
             inline = getattr(self.client, "_kitsune_inline", None)
             shown_inline = False
             if inline:
@@ -203,7 +203,7 @@ class UpdaterModule(KitsuneModule):
                     shown_inline = False
 
             if not shown_inline:
-                # Fallback: отправляем уведомление в DM бота
+                                                            
                 notifier = self._get_notifier()
                 sent_to = None
                 if notifier and notifier._runner and notifier._runner.bot:
@@ -231,7 +231,7 @@ class UpdaterModule(KitsuneModule):
                         parse_mode="html",
                     )
 
-            # Таймаут сброса pending
+                                    
             asyncio.ensure_future(self._update_timeout(event.chat_id, m.id))
 
         except Exception as exc:
@@ -250,13 +250,13 @@ class UpdaterModule(KitsuneModule):
             return
         await self.db.delete(_DB_OWNER, "pending_update")
 
-        # Передаём aiogram-сообщение в do_update — оно само отследит прогресс
-        # и сохранит chat_id/msg_id для редактирования после перезапуска
+                                                                             
+                                                                        
         notifier = self._get_notifier()
         if notifier and notifier._updater:
             asyncio.ensure_future(notifier._updater.do_update(msg=call.message))
         else:
-            # Fallback: обновляем через Telethon
+                                                
             chat_id = pending.get("chat_id", 0)
             msg_id  = pending.get("msg_id", 0)
             await self._do_update(repo_path=repo_path, chat_id=chat_id, msg_id=msg_id)

@@ -1,28 +1,16 @@
-# Kitsune Userbot — Russian langpack
-# © Yushi (@Mikasu32)
-
-# Core
 started: "🦊 Kitsune запущен"
 stopped: "🦊 Kitsune остановлен"
 restarting: "🔄 Перезапуск..."
-
-# Errors
 unknown_error: "❌ Неизвестная ошибка"
 flood_wait: "⏳ Подожди {seconds} сек."
 not_authorized: "❌ Не авторизован"
 no_permission: "🚫 Нет доступа"
-
-# Modules
 module_loaded: "✅ Модуль {name} загружен"
 module_unloaded: "✅ Модуль {name} выгружен"
 module_not_found: "❌ Модуль {name} не найден"
 module_error: "❌ Ошибка в модуле {name}"
-
-# Database
 db_saved: "💾 База сохранена"
 db_error: "❌ Ошибка базы данных"
-
-# Updates
 update_checking: "🔍 Проверяю обновления..."
 update_available: "⬆️ Доступно обновление"
 update_done: "✅ Обновление установлено"

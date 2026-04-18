@@ -461,7 +461,7 @@ async def _ensure_bot_in_group(client: typing.Any, group_id: int) -> bool:
     """Ждёт bot_username до 90 секунд, затем добавляет бота в группу/канал Kitsune-logs."""
     log = logging.getLogger(__name__)
 
-    # Ждём пока notifier запишет bot_username в БД
+                                                  
     bot_username: str | None = None
     for _ in range(90):
         try:
@@ -481,7 +481,7 @@ async def _ensure_bot_in_group(client: typing.Any, group_id: int) -> bool:
     try:
         bot_entity = await client.get_entity(f"@{bot_username}")
 
-        # Сначала пробуем добавить как участника (работает для супергрупп)
+                                                                          
         try:
             from telethon.tl.functions.channels import InviteToChannelRequest
             from telethon.errors import UserAlreadyParticipantError
@@ -493,7 +493,7 @@ async def _ensure_bot_in_group(client: typing.Any, group_id: int) -> bool:
                 log.info("log: бот @%s уже в Kitsune-logs", bot_username)
                 return True
         except Exception as invite_exc:
-            # Если чат — канал (не супергруппа), бота можно добавить только как админа
+                                                                                      
             if "admin" in str(invite_exc).lower() or "channel" in str(invite_exc).lower():
                 log.info("log: чат является каналом — добавляем бота как админа")
                 try:
@@ -520,7 +520,7 @@ async def _ensure_bot_in_group(client: typing.Any, group_id: int) -> bool:
 def _to_bot_api_id(telethon_id: int) -> int:
     """Конвертирует Telethon channel/megagroup ID в Bot API формат (-100xxxxxxx)."""
     peer_id = abs(telethon_id)
-    # Если уже в bot-api формате (>= 10^12) — возвращаем как есть с минусом
+                                                                           
     if peer_id >= 1_000_000_000_000:
         return -peer_id
     return int(f"-100{peer_id}")
@@ -532,7 +532,7 @@ async def setup_tg_logging(client: typing.Any) -> None:
     try:
         from .utils import asset_channel
 
-        # Создаём мегагруппу (или находим существующую)
+                                                       
         group_id, created = await asset_channel(
             client,
             title="Kitsune-logs",
@@ -545,7 +545,7 @@ async def setup_tg_logging(client: typing.Any) -> None:
             logging.getLogger(__name__).error("log: не удалось создать/найти группу Kitsune-logs")
             return
 
-        # Настраиваем хендлер логов (через клиент пользователя — всегда работает)
+                                                                                 
         handler = TelegramChannelHandler(client, group_id, level=logging.WARNING)
         handler.setFormatter(_tg_formatter)
         handler.start()
@@ -554,7 +554,7 @@ async def setup_tg_logging(client: typing.Any) -> None:
 
         logging.getLogger(__name__).info("log: TG logging active (group_id=%d)", group_id)
 
-        # Добавляем бота и отправляем баннер в фоне
+                                                   
         asyncio.ensure_future(_setup_bot_and_banner(client, group_id))
 
     except Exception:
@@ -563,13 +563,13 @@ async def setup_tg_logging(client: typing.Any) -> None:
 
 async def _setup_bot_and_banner(client: typing.Any, group_id: int) -> None:
     """Добавляет бота в группу и отправляет стартовый баннер от его имени."""
-    # Шаг 1: ждём bot_username и добавляем бота в группу
+                                                        
     bot_added = await _ensure_bot_in_group(client, group_id)
 
-    # Шаг 2: ждём пока aiogram бот поднимется
+                                             
     bot = await _get_aiogram_bot(client)
 
-    # Шаг 3: отправляем баннер
+                              
     await _send_startup_banner_via_bot(client, group_id, bot=bot, bot_added=bot_added)
 
 async def _send_startup_banner_via_bot(
@@ -634,10 +634,10 @@ async def _send_startup_banner_via_bot(
             os.path.join(os.path.dirname(__file__), "..", "banner.gif")
         )
 
-        # Bot API требует ID вида -100xxxxxxxxxx для супергрупп/каналов
+                                                                       
         bot_api_id = _to_bot_api_id(group_id)
 
-        # Отправляем через бота (от его имени)
+                                              
         if bot and bot_added:
             if os.path.exists(gif_path):
                 with contextlib.suppress(Exception):
@@ -660,7 +660,7 @@ async def _send_startup_banner_via_bot(
                 log.info("log: баннер отправлен ботом (text) в Kitsune-logs")
                 return
 
-        # Фолбэк — отправляем через клиент пользователя
+                                                       
         log.info("log: бот недоступен/не добавлен, баннер отправляется от пользователя")
         if os.path.exists(gif_path):
             with contextlib.suppress(Exception):
@@ -692,7 +692,7 @@ def init() -> None:
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
     _network_noise_filter = _NetworkNoiseFilter()
-    # Глушим сетевой шум (особенно при переключении VPN/локации)
+                                                                
     for _noisy_logger in (
         "aiogram.dispatcher",
         "telethon.network.connection.connection",

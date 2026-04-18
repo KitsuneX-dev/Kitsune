@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import time
 
 from ..core.loader import KitsuneModule, command, ModuleConfig, ConfigValue
@@ -15,6 +16,16 @@ _DEFAULT_PONG = (
     " \n"
     "━━━━━━━━━━━━━━"
 )
+
+_EMOJI_TAG  = re.compile(r'<emoji\s+id=["\']?(\d+)["\']?>(.*?)</emoji>', re.DOTALL)
+_EMOJI_BRACE = re.compile(r'\{emoji:(\d+):([^}]*)\}')
+
+def _resolve_custom_emoji(text: str) -> str:
+    def _to_tg(eid: str, fallback: str) -> str:
+        return '<tg-emoji emoji-id="' + eid + '">' + fallback + '</tg-emoji>'
+    text = _EMOJI_TAG.sub(lambda m: _to_tg(m.group(1), m.group(2)), text)
+    text = _EMOJI_BRACE.sub(lambda m: _to_tg(m.group(1), m.group(2)), text)
+    return text
 
 def _fmt_uptime(seconds: float) -> str:
     seconds = int(seconds)
@@ -41,21 +52,16 @@ class PingModule(KitsuneModule):
                 default=None,
                 doc=(
                     "Кастомный текст сообщения ping. "
-                    "Может содержать ключевые слова: "
-                    "{ms} — задержка в мс, "
-                    "{uptime} — аптайм бота, "
-                    "{version} — версия Kitsune, "
-                    "{prefix} — префикс команд, "
-                    "{platform} — платформа (Termux/Linux/...), "
-                    "{cpu} — загрузка CPU, "
-                    "{ram} — использование RAM. "
+                    "Ключевые слова: {ms}, {uptime}, {version}, {prefix}, {platform}, {cpu}, {ram}. "
+                    "Поддерживает premium-эмодзи: <emoji id=XXXXXXXXX>⭐</emoji> "
+                    "или {emoji:XXXXXXXXX:⭐}. "
                     "Оставь пустым для стандартного вида."
                 ),
             ),
         )
 
     strings_ru = {
-        "me":      (
+        "me": (
             "👤 <b>Профиль</b>\n\n"
             "  ID: <code>{id}</code>\n"
             "  Имя: {name}\n"
@@ -63,7 +69,7 @@ class PingModule(KitsuneModule):
             "  Phone: <code>{phone}</code>\n"
             "  Premium: {premium}"
         ),
-        "id_msg":  "🆔 ID сообщения: <code>{mid}</code>\n👤 ID чата: <code>{cid}</code>",
+        "id_msg":   "🆔 ID сообщения: <code>{mid}</code>\n👤 ID чата: <code>{cid}</code>",
         "id_reply": (
             "🆔 ID сообщения: <code>{mid}</code>\n"
             "↩️ ID ответа: <code>{rid}</code>\n"
@@ -123,14 +129,11 @@ class PingModule(KitsuneModule):
                     ram=ram,
                 )
             except KeyError:
-                text = custom  
+                text = custom
         else:
-            text = _DEFAULT_PONG.format(
-                ms=ms,
-                uptime=uptime_str,
-                version=__version_str__,
-            )
+            text = _DEFAULT_PONG.format(ms=ms, uptime=uptime_str, version=__version_str__)
 
+        text = _resolve_custom_emoji(text)
         await msg.edit(text, parse_mode="html")
 
     @command("me", required=OWNER)
@@ -163,9 +166,6 @@ class PingModule(KitsuneModule):
             )
         else:
             await event.reply(
-                self.strings("id_msg").format(
-                    mid=event.message.id,
-                    cid=event.chat_id,
-                ),
+                self.strings("id_msg").format(mid=event.message.id, cid=event.chat_id),
                 parse_mode="html",
             )
