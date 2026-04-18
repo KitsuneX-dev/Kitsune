@@ -131,13 +131,16 @@ class HydrogramBridge:
             me_id = self._tl.tg_id
             is_own = sender_id == me_id
 
-            if not is_own:
+            # Собственные исходящие сообщения уже обрабатывает Telethon через
+            # _on_out_message — пропускаем их здесь, чтобы не было дублей.
+            if is_own:
+                return
 
-                co_owners = self._db.get("kitsune.security", "co_owners", [])
-                sec = getattr(self._tl, "_kitsune_security", None)
-                sudo_users = sec.get_sudo_users() if sec else []
-                if sender_id not in co_owners and sender_id not in sudo_users:
-                    return
+            co_owners = self._db.get("kitsune.security", "co_owners", [])
+            sec = getattr(self._tl, "_kitsune_security", None)
+            sudo_users = sec.get_sudo_users() if sec else []
+            if sender_id not in co_owners and sender_id not in sudo_users:
+                return
 
             is_co_owner = (not is_own) and (sender_id in self._db.get("kitsune.security", "co_owners", []))
 
