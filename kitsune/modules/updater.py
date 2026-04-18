@@ -238,7 +238,6 @@ class UpdaterModule(KitsuneModule):
             await m.edit(self.strings("git_err").format(err=escape_html(str(exc))), parse_mode="html")
 
     async def _cb_do_update(self, call, repo_path: str) -> None:
-        """Колбэк кнопки «Обновить» в inline-форме."""
         inline = getattr(self.client, "_kitsune_inline", None)
         pending = self.db.get(_DB_OWNER, "pending_update", None)
         if not pending:
@@ -250,15 +249,26 @@ class UpdaterModule(KitsuneModule):
             return
         await self.db.delete(_DB_OWNER, "pending_update")
 
-                                                                             
-                                                                        
+        chat_id = getattr(call, "chat_id", 0) or pending.get("chat_id", 0)
+        msg_id  = getattr(call, "message_id", 0) or pending.get("msg_id", 0)
+
+        async def _edit(text: str) -> None:
+            if inline:
+                try:
+                    await inline.edit(call, text, [])
+                except Exception:
+                    pass
+
         notifier = self._get_notifier()
         if notifier and notifier._updater:
-            asyncio.ensure_future(notifier._updater.do_update(msg=call.message))
+            asyncio.ensure_future(
+                notifier._updater.do_update_inline(
+                    chat_id=chat_id,
+                    msg_id=msg_id,
+                    edit_fn=_edit,
+                )
+            )
         else:
-                                                
-            chat_id = pending.get("chat_id", 0)
-            msg_id  = pending.get("msg_id", 0)
             await self._do_update(repo_path=repo_path, chat_id=chat_id, msg_id=msg_id)
 
     async def _cb_cancel_update(self, call) -> None:
