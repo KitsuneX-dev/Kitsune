@@ -661,10 +661,11 @@ async def _send_startup_banner_via_bot(
                 return
 
                                                        
-        log.info("log: бот недоступен/не добавлен, баннер отправляется от пользователя")
+        log.info("log: бот недоступен/не добавлен, баннер отправляется через Hydrogram")
         if os.path.exists(gif_path):
             with contextlib.suppress(Exception):
-                await client.send_file(group_id, gif_path, caption=text, parse_mode="html")
+                from .hydro_media import send_file as _hydro_send
+                await _hydro_send(client, group_id, gif_path, caption=text)
                 return
         await client.send_message(group_id, text, parse_mode="html", link_preview=False)
 
