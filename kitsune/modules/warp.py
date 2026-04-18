@@ -84,7 +84,7 @@ class WarpModule(KitsuneModule):
         bin_ = self._warp_bin()
         if not bin_:
             return "not_installed"
-        rc, out, _ = await self._run(bin_, "status")
+        rc, out, _ = await self._run(bin_, "--accept-tos", "status")
         return out.lower() if rc == 0 else "error"
 
     @command("warp", required=OWNER)
@@ -111,7 +111,7 @@ class WarpModule(KitsuneModule):
             return
 
         if arg == "status":
-            rc, out, err = await self._run(bin_, "status")
+            rc, out, err = await self._run(bin_, "--accept-tos", "status")
             text = out or err or "нет данных"
             await m.edit(self.strings("status_header").format(output=text), parse_mode="html")
             return
@@ -127,7 +127,7 @@ class WarpModule(KitsuneModule):
                 await m.edit(self.strings("already_on"), parse_mode="html")
                 return
             await m.edit(self.strings("connecting"), parse_mode="html")
-            rc, out, err = await self._run(bin_, "connect")
+            rc, out, err = await self._run(bin_, "--accept-tos", "connect")
             if rc != 0:
                 await m.edit(self.strings("error").format(err=err or out), parse_mode="html")
                 return
@@ -146,7 +146,7 @@ class WarpModule(KitsuneModule):
                 await m.edit(self.strings("already_off"), parse_mode="html")
                 return
             await m.edit(self.strings("disconnecting"), parse_mode="html")
-            rc, out, err = await self._run(bin_, "disconnect")
+            rc, out, err = await self._run(bin_, "--accept-tos", "disconnect")
             if rc != 0:
                 await m.edit(self.strings("error").format(err=err or out), parse_mode="html")
                 return
@@ -186,6 +186,6 @@ class WarpModule(KitsuneModule):
         )
         rc, _, err = await self._run("bash", "-c", script, timeout=180)
         if rc == 0:
-            await self._run("warp-cli", "register", timeout=30)
+            await self._run("warp-cli", "--accept-tos", "register", timeout=30)
             return None
         return err[:500]
