@@ -207,6 +207,12 @@ PIP="$VENV_DIR/bin/pip"
 PYTHON_VENV="$VENV_DIR/bin/python"
 
 step "Python зависимости"
+# UserLand/aarch64: /tmp имеет ограниченные права при сборке wheel из исходников
+if $IS_USERLAND || [[ ! -w /tmp ]]; then
+    mkdir -p "$HOME/tmp"
+    export TMPDIR="$HOME/tmp"
+    info "TMPDIR → $HOME/tmp (обход ограничений /tmp)"
+fi
 "$PIP" install --upgrade pip --quiet
 "$PIP" install --no-cache-dir -r requirements.txt \
     --no-warn-script-location --disable-pip-version-check --quiet \
