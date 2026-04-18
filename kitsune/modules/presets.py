@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+from ..hydro_media import send_file as _hydro_send_file
 import json
 import logging
 from pathlib import Path
@@ -352,11 +353,11 @@ class PresetsModule(KitsuneModule):
         buf.name = f"{folder_name}.json"
         buf.seek(0)
 
-        await self.client.send_file(
+        await _hydro_send_file(
+            self.client,
             event.message.peer_id,
             buf,
             caption=self.strings("fl_done").format(folder=folder_name),
-            parse_mode="html",
             reply_to=event.message.id,
         )
         await event.message.delete()
@@ -377,11 +378,11 @@ class PresetsModule(KitsuneModule):
         buf.name = "aliases.json"
         buf.seek(0)
 
-        await self.client.send_file(
+        await _hydro_send_file(
+            self.client,
             event.message.peer_id,
             buf,
             caption=self.strings("aliases_file"),
-            parse_mode="html",
             reply_to=event.message.id,
         )
         await event.message.delete()
