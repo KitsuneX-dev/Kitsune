@@ -116,7 +116,7 @@ class HelpModule(KitsuneModule):
             is_core = getattr(mod, "_is_builtin", False)
             icon    = self.config["core_emoji"] if is_core else self.config["plain_emoji"]
             display = mod.name or name.capitalize()
-            line = f"\n{icon} <code>{display}</code>: ( {' | '.join(cmds)} )"
+            line = f"\n{icon} <code>{display}</code>: ( {' | '.join(prefix + c for c in cmds)} )"
             if is_core:
                 core_lines.append(line)
             else:
