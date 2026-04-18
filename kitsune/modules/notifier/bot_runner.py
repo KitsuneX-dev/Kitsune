@@ -175,15 +175,25 @@ class BotRunner:
 
     async def _on_update_cb(self, call) -> None:
         owner_id = self._db.get(_DB_KEY, "owner_id", None)
-        if call.from_user.id != owner_id:
-            await call.answer("🔒 Нет доступа.", show_alert=True)
-            return
-        await call.answer()
+        # Молча игнорируем просроченные callback-запросы (> 60с после нажатия)
+        try:
+            if call.from_user.id != owner_id:
+                await call.answer("🔒 Нет доступа.", show_alert=True)
+                return
+            await call.answer()
+        except Exception:
+            return  # query is too old — просто пропускаем
         if call.data == "update_no":
             await self._db.delete("kitsune.updater", "pending_update")
-            await call.message.edit_text("❌ Обновление отменено.")
+            try:
+                await call.message.edit_text("❌ Обновление отменено.")
+            except Exception:
+                pass
             return
-        await call.message.edit_text("⬇️ <b>Скачиваю обновление...</b>\nDownloading update...", parse_mode="HTML")
+        try:
+            await call.message.edit_text("⬇️ <b>Скачиваю обновление...</b>", parse_mode="HTML")
+        except Exception:
+            pass
         asyncio.ensure_future(self._safe_update_run(call.message))
 
     async def _safe_update_run(self, msg) -> None:
@@ -213,8 +223,11 @@ class BotRunner:
 
     async def _on_backup_interval(self, call) -> None:
         owner_id = self._db.get(_DB_KEY, "owner_id", None)
-        if call.from_user.id != owner_id:
-            await call.answer("🔒 Нет доступа.", show_alert=True)
+        try:
+            if call.from_user.id != owner_id:
+                await call.answer("🔒 Нет доступа.", show_alert=True)
+                return
+        except Exception:
             return
         loader = getattr(self._client, "_kitsune_loader", None)
         backup = loader.modules.get("backup") if loader else None
@@ -225,10 +238,13 @@ class BotRunner:
 
     async def _on_config_cb(self, call) -> None:
         owner_id = self._db.get(_DB_KEY, "owner_id", None)
-        if call.from_user.id != owner_id:
-            await call.answer("🔒 Нет доступа.", show_alert=True)
+        try:
+            if call.from_user.id != owner_id:
+                await call.answer("🔒 Нет доступа.", show_alert=True)
+                return
+            await call.answer()
+        except Exception:
             return
-        await call.answer()
 
         from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
         from ..config import _get_configurable, _mod_text, _list_text
