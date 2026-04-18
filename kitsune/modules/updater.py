@@ -173,43 +173,102 @@ class UpdaterModule(KitsuneModule):
                 "msg_id":    m.id,
             })
 
-            # Пробуем отправить через бот (notifier) с inline-кнопкой
-            notifier = self._get_notifier()
-            group_name = None
-            if notifier and notifier._runner and notifier._runner.bot:
-                group_name = await notifier._updater.notify_update(
-                    current=__version_str__,
-                    new=new_ver,
-                    changes=changes,
-                )
+            # Сохраняем pending для подтверждения
+            await self.db.set(_DB_OWNER, "pending_update", {
+                "repo_path": repo_path,
+                "chat_id":   event.chat_id,
+                "msg_id":    m.id,
+            })
 
-            if group_name:
-                # Кнопка отправлена через бот — сообщаем пользователю
-                await m.edit(
-                    self.strings("notify_sent").format(
+            # Пробуем показать inline-кнопку прямо в чате
+            inline = getattr(self.client, "_kitsune_inline", None)
+            shown_inline = False
+            if inline:
+                try:
+                    preview_text = (
+                        f"🆕 <b>Обнаружена новая версия!</b>\n\n"
+                        f"Текущая: <code>{__version_str__}</code> → <code>{new_ver}</code>\n"
+                        f"Коммитов: <code>{len(behind)}</code>\n\n"
+                        f"<b>Изменения:</b>\n{changes}"
+                    )
+                    markup = [
+                        [
+                            {"text": "⬆️ Обновить",  "callback": self._cb_do_update,     "args": (repo_path,)},
+                            {"text": "❌ Отмена",     "callback": self._cb_cancel_update},
+                        ]
+                    ]
+                    await inline.form(preview_text, m, markup)
+                    shown_inline = True
+                except Exception:
+                    shown_inline = False
+
+            if not shown_inline:
+                # Fallback: отправляем уведомление в DM бота
+                notifier = self._get_notifier()
+                sent_to = None
+                if notifier and notifier._runner and notifier._runner.bot:
+                    sent_to = await notifier._updater.notify_update(
                         current=__version_str__,
                         new=new_ver,
-                        count=len(behind),
-                        group=escape_html(group_name),
-                    ),
-                    parse_mode="html",
-                )
-            else:
-                # Fallback: нет бота — показываем текстовое сообщение
-                await m.edit(
-                    self.strings("no_notifier").format(
-                        current=__version_str__,
-                        count=len(behind),
                         changes=changes,
-                    ),
-                    parse_mode="html",
-                )
+                    )
+                if sent_to:
+                    await m.edit(
+                        f"🆕 <b>Обнаружена новая версия!</b>\n\n"
+                        f"Текущая: <code>{__version_str__}</code>\n"
+                        f"Новая: <code>{new_ver}</code>\n"
+                        f"Коммитов впереди: <code>{len(behind)}</code>\n\n"
+                        f"📬 Уведомление с кнопкой отправлено в бота",
+                        parse_mode="html",
+                    )
+                else:
+                    await m.edit(
+                        self.strings("no_notifier").format(
+                            current=__version_str__,
+                            count=len(behind),
+                            changes=changes,
+                        ),
+                        parse_mode="html",
+                    )
 
             # Таймаут сброса pending
             asyncio.ensure_future(self._update_timeout(event.chat_id, m.id))
 
         except Exception as exc:
             await m.edit(self.strings("git_err").format(err=escape_html(str(exc))), parse_mode="html")
+
+    async def _cb_do_update(self, call, repo_path: str) -> None:
+        """Колбэк кнопки «Обновить» в inline-форме."""
+        inline = getattr(self.client, "_kitsune_inline", None)
+        pending = self.db.get(_DB_OWNER, "pending_update", None)
+        if not pending:
+            if inline:
+                try:
+                    await inline.edit(call, "❌ Нет ожидающего обновления. Запусти <code>.update</code> снова.", [])
+                except Exception:
+                    pass
+            return
+        await self.db.delete(_DB_OWNER, "pending_update")
+        chat_id = pending.get("chat_id", 0)
+        msg_id  = pending.get("msg_id", 0)
+
+        if inline:
+            try:
+                await inline.edit(call, "⬇️ <b>Скачиваю обновление...</b>\n████░░░░░░░░  33%", [])
+            except Exception:
+                pass
+
+        await self._do_update(repo_path=repo_path, chat_id=chat_id, msg_id=msg_id)
+
+    async def _cb_cancel_update(self, call) -> None:
+        """Колбэк кнопки «Отмена»."""
+        await self.db.delete(_DB_OWNER, "pending_update")
+        inline = getattr(self.client, "_kitsune_inline", None)
+        if inline:
+            try:
+                await inline.edit(call, self.strings("cancelled"), [])
+            except Exception:
+                pass
 
     def _get_notifier(self):
         loader = getattr(self.client, "_kitsune_loader", None)

@@ -146,26 +146,21 @@ class UpdateChecker:
             # ── Пробуем найти и использовать группу Kitsune ──────────
             group_id, group_name = await self._find_kitsune_group()
 
+            # Всегда шлём в личку бота (owner DM)
+            await bot.send_message(chat_id=int(owner_id), text=text, reply_markup=kb)
+
+            # Если нашли группу Kitsune — дублируем туда тоже
             if group_id:
-                # Убеждаемся, что бот в группе
                 await self._ensure_bot_in_group(group_id, token)
                 try:
                     await bot.send_message(chat_id=group_id, text=text, reply_markup=kb)
-                    await bot.session.close()
-                    logger.info("UpdateChecker: notification sent to group '%s'", group_name)
-                    return group_name
+                    logger.info("UpdateChecker: notification also sent to group '%s'", group_name)
                 except Exception as exc:
-                    logger.warning("UpdateChecker: failed to send to group — %s", exc)
-                    # Fallback: в личку бота
-                    await bot.send_message(chat_id=int(owner_id), text=text, reply_markup=kb)
-                    await bot.session.close()
-                    return "личные сообщения"
-            else:
-                # Группа не найдена — шлём в личку бота
-                await bot.send_message(chat_id=int(owner_id), text=text, reply_markup=kb)
-                await bot.session.close()
-                logger.info("UpdateChecker: notification sent to owner DM (no group found)")
-                return "личные сообщения"
+                    logger.warning("UpdateChecker: could not send to group — %s", exc)
+
+            await bot.session.close()
+            logger.info("UpdateChecker: notification sent to owner DM (owner_id=%s)", owner_id)
+            return "бота"
 
         except Exception:
             logger.exception("UpdateChecker: failed to send update notification")
@@ -177,10 +172,20 @@ class UpdateChecker:
 
     async def _find_kitsune_group(self) -> tuple[int | None, str | None]:
         """
-        Ищет группу Kitsune среди диалогов.
-        Приоритет: KitsuneBackup > Kitsune「...」> любая группа с «Kitsune».
+        Ищет группу Kitsune «Kitsune <имя_пользователя>» среди диалогов.
+        Приоритет: Kitsune <ник> > любая группа с «Kitsune» (НЕ KitsuneBackup).
         Возвращает (chat_id, title) или (None, None).
         """
+        # Получаем имя пользователя для точного совпадения
+        owner_name: str | None = None
+        try:
+            me = await self._client.get_me()
+            owner_name = me.first_name or ""
+            if me.last_name:
+                owner_name = f"{owner_name} {me.last_name}".strip()
+        except Exception:
+            pass
+
         candidates: list[tuple[int, str, int]] = []  # (id, title, priority)
         try:
             async for dialog in self._client.iter_dialogs():
@@ -189,16 +194,19 @@ class UpdateChecker:
                 t = dialog.title or ""
                 if "kitsune" not in t.lower():
                     continue
+                # Пропускаем KitsuneBackup — это не нужная нам группа
+                if t == "KitsuneBackup":
+                    continue
                 entity = dialog.entity
                 cid    = getattr(entity, "id", None)
                 if cid is None:
                     continue
-                # Telegram supergroup/channel ids need -100 prefix for bots
                 chat_id = int(f"-100{cid}") if getattr(entity, "megagroup", False) or getattr(entity, "broadcast", False) else -cid
 
-                if t == "KitsuneBackup":
+                # Приоритет 0 — точное совпадение "Kitsune <ник>"
+                if owner_name and t == f"Kitsune {owner_name}":
                     candidates.append((chat_id, t, 0))
-                elif t.startswith("Kitsune") and "「" in t:
+                elif t.startswith("Kitsune"):
                     candidates.append((chat_id, t, 1))
                 else:
                     candidates.append((chat_id, t, 2))
@@ -210,8 +218,7 @@ class UpdateChecker:
             return None, None
 
         candidates.sort(key=lambda x: x[2])
-        best = candidates[0]
-        return best[0], best[1]
+        return candidates[0][0], candidates[0][1]
 
     async def _ensure_bot_in_group(self, chat_id: int, token: str) -> None:
         """Добавляет бота в группу через Telethon если его там нет."""
