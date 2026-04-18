@@ -247,7 +247,7 @@ class SetupServer:
             print(f"      \033[1;36m{lan_url}\033[0m")
             print(f"  💡  Или на ПК в локальной сети: {lan_url}")
         else:
-            print(f"  🌐  Открой в браузере: \033[1;36m{url}\033[0m")
+            print(f"  🌐  Открой в браузере: \033[1;36m{url}\033[0m для регистрации")
         print(f"{'━' * 42}\n")
 
         if not is_termux:
