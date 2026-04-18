@@ -197,15 +197,29 @@ async def _startup(args: argparse.Namespace) -> None:
     proxy_cfg  = cfg.get("proxy") or {}
     proxy      = None
     connection = ConnectionTcpFull
-    if proxy_cfg.get("host") and proxy_cfg.get("port"):
+
+    proxy_url = cfg.get("proxy_url") or cfg.get("proxy") if isinstance(cfg.get("proxy"), str) else None
+    if proxy_url:
+        import re as _re
+        m = _re.match(r"(socks5|socks4|http)://([^:]+):(\d+)", str(proxy_url))
+        if m:
+            _ptype, _host, _port = m.group(1).upper(), m.group(2), int(m.group(3))
+            import socks as _socks
+            _socks_type = {"SOCKS5": _socks.SOCKS5, "SOCKS4": _socks.SOCKS4, "HTTP": _socks.HTTP}.get(_ptype, _socks.SOCKS5)
+            proxy = (_socks_type, _host, _port)
+            logger.info("main: SOCKS proxy → %s://%s:%d", _ptype.lower(), _host, _port)
+    elif isinstance(proxy_cfg, dict) and proxy_cfg.get("host") and proxy_cfg.get("port"):
         ptype = str(proxy_cfg.get("type", "MTPROTO")).upper()
         if ptype == "MTPROTO":
             secret     = proxy_cfg.get("secret", "00000000000000000000000000000000")
             proxy      = (str(proxy_cfg["host"]), int(proxy_cfg["port"]), secret)
             connection = ConnectionTcpMTProxyRandomizedIntermediate
             logger.info("main: MTProto proxy → %s:%s", proxy_cfg["host"], proxy_cfg["port"])
-        else:
-            logger.warning("main: non-MTProto proxy in config — ignored (use MTProto)")
+        elif ptype in ("SOCKS5", "SOCKS4", "HTTP"):
+            import socks as _socks
+            _socks_type = {"SOCKS5": _socks.SOCKS5, "SOCKS4": _socks.SOCKS4, "HTTP": _socks.HTTP}[ptype]
+            proxy = (_socks_type, str(proxy_cfg["host"]), int(proxy_cfg["port"]))
+            logger.info("main: %s proxy → %s:%s", ptype, proxy_cfg["host"], proxy_cfg["port"])
 
     from .session_enc import (
         decrypt_session_file, _fix_session_permissions,
@@ -407,12 +421,12 @@ async def _keepalive(client: Any) -> None:
             if not client.is_connected():
                 raise ConnectionError("client disconnected")
             await asyncio.wait_for(client.get_me(), timeout=15)
-            _fail_count = 0  # успешный пинг — сбрасываем счётчик
+            _fail_count = 0                                      
         except asyncio.CancelledError:
             break
         except Exception as exc:
             _fail_count += 1
-            # Экспоненциальная задержка: 5, 10, 20, 40, 60 сек (макс)
+                                                                     
             backoff = min(5 * (2 ** (_fail_count - 1)), 60)
             logger.debug(
                 "keepalive: attempt %d failed (%s) — retry in %ds",
@@ -430,12 +444,12 @@ async def _keepalive(client: Any) -> None:
 
 async def _setup_kitsune_folder(client: Any, db: Any) -> None:
     """Создаёт папку Kitsune в Telegram после старта."""
-    await asyncio.sleep(8)  # ждём пока группы будут созданы
+    await asyncio.sleep(8)                                  
     try:
         from .utils import ensure_kitsune_folder
         await ensure_kitsune_folder(client, db)
     except Exception:
-        pass  # не критично
+        pass               
 
 
 def _print_banner(me: Any) -> None:
