@@ -233,12 +233,29 @@ class BackupModule(KitsuneModule):
                 callback_data="backup_interval:0",
             )])
             kb = InlineKeyboardMarkup(inline_keyboard=buttons)
-            await bot.send_message(
-                chat_id=owner_id,
-                text=self.strings("setup_interval"),
-                reply_markup=kb,
-                parse_mode="HTML",
-            )
+
+            # Retry до 5 раз с экспоненциальной задержкой — бот только стартовал,
+            # Telegram может ещё не принять соединение
+            last_exc: Exception | None = None
+            for attempt in range(5):
+                try:
+                    await bot.send_message(
+                        chat_id=owner_id,
+                        text=self.strings("setup_interval"),
+                        reply_markup=kb,
+                        parse_mode="HTML",
+                    )
+                    return
+                except Exception as exc:
+                    last_exc = exc
+                    wait = 5 * (2 ** attempt)   # 5, 10, 20, 40, 80 сек
+                    logger.warning(
+                        "Backup: show_interval_setup attempt %d/5 failed (%s), retry in %ds",
+                        attempt + 1, exc, wait,
+                    )
+                    await asyncio.sleep(wait)
+
+            logger.error("Backup: show_interval_setup gave up after 5 attempts: %s", last_exc)
         except Exception:
             logger.exception("Backup: failed to send interval setup")
 

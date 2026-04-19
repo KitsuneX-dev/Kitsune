@@ -26,10 +26,13 @@ def _make_bot(token: str) -> typing.Any:
             self._should_reset_connector = False
             return connector
 
+    # aiogram 3.x требует aiohttp.ClientTimeout, а не голый int
+    _timeout = aiohttp.ClientTimeout(total=60, connect=15, sock_read=30)
+
     return Bot(
         token=str(token),
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
-        session=_NoSSLSession(timeout=30),
+        session=_NoSSLSession(timeout=_timeout),
     )
 
 class BotRunner:
