@@ -188,7 +188,7 @@ class UpdateChecker:
 
         candidates: list[tuple[int, str, int]] = []                         
         try:
-            async for dialog in self._client.iter_dialogs():
+            async for dialog in self._client.iter_dialogs(limit=500):
                 if not (dialog.is_group or (dialog.is_channel and dialog.is_group)):
                     continue
                 t = dialog.title or ""
@@ -253,8 +253,8 @@ class UpdateChecker:
             from telethon.tl.functions.channels import InviteToChannelRequest
             from telethon.tl.functions.messages import AddChatUserRequest
 
-            bot_entity = await self._client.get_entity(bot_username)
-            entity     = await self._client.get_entity(chat_id)
+            bot_entity = await asyncio.wait_for(self._client.get_entity(bot_username), timeout=15)
+            entity     = await asyncio.wait_for(self._client.get_entity(chat_id), timeout=15)
 
             try:
                 if getattr(entity, "megagroup", False) or getattr(entity, "broadcast", False):

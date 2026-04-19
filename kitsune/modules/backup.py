@@ -233,29 +233,12 @@ class BackupModule(KitsuneModule):
                 callback_data="backup_interval:0",
             )])
             kb = InlineKeyboardMarkup(inline_keyboard=buttons)
-
-            # Retry до 5 раз с экспоненциальной задержкой — бот только стартовал,
-            # Telegram может ещё не принять соединение
-            last_exc: Exception | None = None
-            for attempt in range(5):
-                try:
-                    await bot.send_message(
-                        chat_id=owner_id,
-                        text=self.strings("setup_interval"),
-                        reply_markup=kb,
-                        parse_mode="HTML",
-                    )
-                    return
-                except Exception as exc:
-                    last_exc = exc
-                    wait = 5 * (2 ** attempt)   # 5, 10, 20, 40, 80 сек
-                    logger.warning(
-                        "Backup: show_interval_setup attempt %d/5 failed (%s), retry in %ds",
-                        attempt + 1, exc, wait,
-                    )
-                    await asyncio.sleep(wait)
-
-            logger.error("Backup: show_interval_setup gave up after 5 attempts: %s", last_exc)
+            await bot.send_message(
+                chat_id=owner_id,
+                text=self.strings("setup_interval"),
+                reply_markup=kb,
+                parse_mode="HTML",
+            )
         except Exception:
             logger.exception("Backup: failed to send interval setup")
 
@@ -286,7 +269,7 @@ class BackupModule(KitsuneModule):
         chat_id = self.db.get(_DB_OWNER, "group_id", None)
         if chat_id:
             try:
-                await self.client.get_entity(int(chat_id))
+                await asyncio.wait_for(self.client.get_entity(int(chat_id)), timeout=20)
                 return int(chat_id)
             except Exception:
                 logger.warning("Backup: saved group_id %s is invalid, recreating", chat_id)
@@ -300,7 +283,7 @@ class BackupModule(KitsuneModule):
             from telethon.errors import FloodWaitError as _FloodWait
             for _attempt in range(3):
                 try:
-                    async for dialog in self.client.iter_dialogs():
+                    async for dialog in self.client.iter_dialogs(limit=500):
                         if dialog.is_group and dialog.title == "KitsuneBackup":
                             gid = dialog.id
                             await self.db.set(_DB_OWNER, "group_id", gid)
@@ -327,7 +310,7 @@ class BackupModule(KitsuneModule):
         try:
             bot_username = self.db.get("kitsune.notifier", "bot_username", None)
             if bot_username:
-                bot_entity = await self.client.get_entity(f"@{bot_username}")
+                bot_entity = await asyncio.wait_for(self.client.get_entity(f"@{bot_username}"), timeout=15)
                 await self.client(InviteToChannelRequest(
                     channel=gid,
                     users=[bot_entity],

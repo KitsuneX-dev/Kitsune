@@ -73,25 +73,6 @@ class QuickstartModule(KitsuneModule):
 
     async def on_load(self) -> None:
         await self._maybe_show_welcome()
-        # Папку синхронизируем при каждом старте независимо от флага приветствия
-        import asyncio as _asyncio
-        _asyncio.ensure_future(self._ensure_folder_on_startup())
-
-    async def _ensure_folder_on_startup(self) -> None:
-        """Синхронизирует папку Kitsune при каждом запуске бота."""
-        import asyncio as _asyncio
-        try:
-            from .._local_storage import get_storage
-            ls = get_storage()
-            # Только если welcome уже показан (т.е. не первый запуск) —
-            # при первом запуске папку создаёт _maybe_show_welcome
-            if not ls.get(_LS_OWNER, _LS_KEY):
-                return
-            await _asyncio.sleep(10)  # ждём пока все каналы/группы поднимутся
-            await self._sync_kitsune_folder()
-            logger.info("Quickstart: папка Kitsune синхронизирована при старте")
-        except Exception:
-            logger.exception("Quickstart: ошибка авто-синхронизации папки")
 
                                                                         
                        
@@ -113,34 +94,61 @@ class QuickstartModule(KitsuneModule):
         from telethon.errors import FloodWaitError
 
                                                                        
-        all_dialogs = []
-        for _attempt in range(3):
-            try:
-                async for d in self.client.iter_dialogs():
-                    all_dialogs.append(d)
-                break
-            except FloodWaitError as _e:
-                logger.warning(
-                    "Quickstart: FloodWait при загрузке диалогов — ждём %ds (попытка %d/3)",
-                    _e.seconds, _attempt + 1,
-                )
-                await _asyncio.sleep(_e.seconds + 1)
-                all_dialogs.clear()
-        else:
-            logger.error("Quickstart: не удалось загрузить диалоги после 3 попыток")
+        # Кэш ID чатов в БД — избегаем iter_dialogs при каждом старте
+        _CACHE_KEY = "kitsune.quickstart"
+        cached_ids: dict = self.db.get(_CACHE_KEY, "chat_ids", {}) or {}
+
+        result_entities: dict = {}
+        stale_keys = []
+
+        for cfg in _KITSUNE_CHATS:
+            cached_id = cached_ids.get(cfg["key"])
+            entity = None
+            if cached_id:
+                try:
+                    entity = await asyncio.wait_for(
+                        self.client.get_entity(int(cached_id)), timeout=10
+                    )
+                    logger.info("Quickstart: «%s» найден по кэшу", cfg["title"])
+                except Exception:
+                    logger.info("Quickstart: кэш для «%s» устарел — ищу в диалогах", cfg["title"])
+                    stale_keys.append(cfg["key"])
+                    entity = None
+
+            if entity is None:
+                # Кэша нет или устарел — ищем в диалогах (только один раз)
+                if not hasattr(self, "_dialogs_cache"):
+                    self._dialogs_cache = []
+                    for _attempt in range(3):
+                        try:
+                            async for d in self.client.iter_dialogs():
+                                self._dialogs_cache.append(d)
+                            break
+                        except FloodWaitError as _e:
+                            logger.warning("Quickstart: FloodWait %ds (попытка %d/3)", _e.seconds, _attempt + 1)
+                            await _asyncio.sleep(_e.seconds + 1)
+                            self._dialogs_cache.clear()
+
+                entity = self._find_in_dialogs(self._dialogs_cache, cfg["title"], cfg["type"])
+                if entity is None:
+                    logger.info("Quickstart: «%s» не найден — создаю...", cfg["title"])
+                    entity = await self._create_chat(cfg)
+                else:
+                    logger.info("Quickstart: «%s» уже существует", cfg["title"])
+            result_entities[cfg["key"]] = entity
+            # Обновляем кэш
+            if entity is not None:
+                eid = getattr(entity, "id", None)
+                if eid:
+                    cached_ids[cfg["key"]] = eid
+
+         # Сохраняем обновлённый кэш в БД
+        await self.db.set(_CACHE_KEY, "chat_ids", cached_ids)
+        # Сбрасываем временный кэш диалогов
+        if hasattr(self, "_dialogs_cache"):
+            del self._dialogs_cache
 
                                                                       
-        result_entities: dict = {}
-        for cfg in _KITSUNE_CHATS:
-            entity = self._find_in_dialogs(all_dialogs, cfg["title"], cfg["type"])
-            if entity is None:
-                logger.info("Quickstart: «%s» не найден — создаю...", cfg["title"])
-                entity = await self._create_chat(cfg)
-            else:
-                logger.info("Quickstart: «%s» уже существует", cfg["title"])
-            result_entities[cfg["key"]] = entity
-
-                                                                       
         all_input_peers = []
         for entity in result_entities.values():
             if entity is None:
