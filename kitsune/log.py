@@ -562,13 +562,34 @@ async def setup_tg_logging(client: typing.Any) -> None:
 
 
 async def _setup_bot_and_banner(client: typing.Any, group_id: int) -> None:
-    """Добавляет бота в группу и отправляет стартовый баннер от его имени."""
-    # Запускаем параллельно — не ждём 90+90 секунд последовательно
-    bot_added, bot = await asyncio.gather(
-        _ensure_bot_in_group(client, group_id),
-        _get_aiogram_bot(client),
+    """Отправляет стартовый баннер.
+
+    Стратегия:
+    - Через 5 секунд после старта гарантированно отправляем баннер (через Hydrogram).
+    - Параллельно ждём бота до 10 секунд — если успел, отправим через него (с GIF).
+    - Кто первый — тот и отправляет, дубля нет.
+    """
+    _sent = [False]
+
+    async def _try_via_bot() -> None:
+        bot_added, bot = await asyncio.gather(
+            _ensure_bot_in_group(client, group_id),
+            _get_aiogram_bot(client),
+        )
+        if not _sent[0] and bot and bot_added:
+            _sent[0] = True
+            await _send_startup_banner_via_bot(client, group_id, bot=bot, bot_added=True)
+
+    async def _try_via_hydro() -> None:
+        await asyncio.sleep(5)          # гарантированная задержка 5 секунд
+        if not _sent[0]:
+            _sent[0] = True
+            await _send_startup_banner_via_bot(client, group_id, bot=None, bot_added=False)
+
+    await asyncio.gather(
+        _try_via_bot(),
+        _try_via_hydro(),
     )
-    await _send_startup_banner_via_bot(client, group_id, bot=bot, bot_added=bot_added)
 
 async def _send_startup_banner_via_bot(
     client: typing.Any,
