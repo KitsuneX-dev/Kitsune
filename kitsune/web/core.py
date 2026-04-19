@@ -37,6 +37,7 @@ class WebCore:
         app.router.add_get("/api/settings",                 self._handle_settings)
         app.router.add_post("/api/settings",                self._handle_settings)
         app.router.add_get("/api/logs",                     self._handle_logs)
+        app.router.add_get("/health",                        self._handle_health)
         self._runner = aiohttp.web.AppRunner(app)
         await self._runner.setup()
         self._site = aiohttp.web.TCPSite(self._runner, host, port)
@@ -95,6 +96,22 @@ class WebCore:
             "account": {"name": me.first_name if me else "—", "id": me.id if me else 0, "username": getattr(me, "username", "") or ""},
             "modules": len(loader.modules) if loader else 0,
             "system": system,
+        })
+
+    async def _handle_health(self, request):
+        """
+        Лёгкий health-check: отвечает 200 OK если бот жив.
+        Используется мониторингом / watchdog-скриптами.
+        GET /health → {"ok": true, "uptime_s": 123, "connected": true}
+        """
+        import time
+        start = self._db.get("kitsune.ping", "start_time", None)
+        uptime = int(time.time() - float(start)) if start else 0
+        connected = getattr(self._client, "is_connected", lambda: False)()
+        return self._json({
+            "ok": True,
+            "uptime_s": uptime,
+            "connected": connected,
         })
 
     async def _handle_modules(self, request):

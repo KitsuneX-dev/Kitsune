@@ -77,7 +77,29 @@ class SQLiteBackend:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, self._save_sync, data)
 
+    def upsert_sync(self, rows: list[tuple[str, str, str]], deleted: list[tuple[str, str]]) -> bool:
+        """Записывает только изменённые ключи, удаляет только удалённые — без полного DELETE."""
+        try:
+            conn = self._get_conn()
+            if rows:
+                conn.executemany(
+                    "INSERT INTO kitsune_db (owner, key, value) VALUES (?, ?, ?) "
+                    "ON CONFLICT(owner, key) DO UPDATE SET value=excluded.value",
+                    rows,
+                )
+            if deleted:
+                conn.executemany(
+                    "DELETE FROM kitsune_db WHERE owner=? AND key=?",
+                    deleted,
+                )
+            conn.commit()
+            return True
+        except Exception:
+            logger.exception("SQLite: upsert_sync failed")
+            return False
+
     def _save_sync(self, data: dict[str, dict[str, JSONValue]]) -> bool:
+        """Полный пересинк — используется только для force_save."""
         try:
             conn = self._get_conn()
             rows = [
@@ -85,22 +107,25 @@ class SQLiteBackend:
                 for owner, sub in data.items()
                 for key, value in sub.items()
             ]
-
             conn.executemany(
                 "INSERT INTO kitsune_db (owner, key, value) VALUES (?, ?, ?) "
                 "ON CONFLICT(owner, key) DO UPDATE SET value=excluded.value",
                 rows,
             )
-
-            if rows:
-                placeholders = ",".join("(?,?)" for _ in rows)
-                params = [v for owner, key, _ in rows for v in (owner, key)]
-                conn.execute(
-                    f"DELETE FROM kitsune_db WHERE (owner, key) NOT IN ({placeholders})",
-                    params,
-                )
-            else:
-                conn.execute("DELETE FROM kitsune_db")
+            # Удаляем только то чего нет в текущем снимке — через временную таблицу
+            # чтобы избежать огромного IN-списка
+            conn.execute(
+                "CREATE TEMP TABLE IF NOT EXISTS _ks_keep "
+                "(owner TEXT NOT NULL, key TEXT NOT NULL, PRIMARY KEY(owner, key))"
+            )
+            conn.execute("DELETE FROM _ks_keep")
+            conn.executemany("INSERT OR IGNORE INTO _ks_keep VALUES (?,?)",
+                             [(o, k) for o, k, _ in rows])
+            conn.execute(
+                "DELETE FROM kitsune_db WHERE NOT EXISTS "
+                "(SELECT 1 FROM _ks_keep WHERE _ks_keep.owner=kitsune_db.owner "
+                " AND _ks_keep.key=kitsune_db.key)"
+            )
             conn.commit()
             return True
         except Exception:
@@ -150,6 +175,9 @@ class DatabaseManager:
         self._next_revision_at: float = 0.0
         self._pending_save: asyncio.Task | None = None
         self._assets_channel: int | None = None
+        # Dirty tracking: только изменённые ключи идут в SQLite upsert
+        self._dirty: set[tuple[str, str]] = set()
+        self._deleted: list[tuple[str, str]] = []
 
     async def init(self) -> None:
         import os as _os
@@ -181,19 +209,6 @@ class DatabaseManager:
             self._backend = SQLiteBackend(db_path)
             self._data = await self._backend.load()
             logger.info("Database: SQLite backend active (%s)", db_path)
-            # Arch Linux: после веб-регистрации файл БД может быть создан
-            # от другого пользователя/root — явно выставляем права на запись
-            try:
-                import os as _os
-                if db_path.exists():
-                    _os.chmod(db_path, 0o644)
-                # WAL-режим создаёт вспомогательные файлы — чиним и их
-                for _suffix in ("-wal", "-shm"):
-                    _aux = db_path.with_name(db_path.name + _suffix)
-                    if _aux.exists():
-                        _os.chmod(_aux, 0o644)
-            except Exception as _chmod_exc:
-                logger.warning("Database: could not chmod db file (%s)", _chmod_exc)
 
         try:
             from .. import utils
@@ -260,6 +275,7 @@ class DatabaseManager:
 
         async with self._lock:
             self._data.setdefault(owner, {})[key] = value
+            self._dirty.add((owner, key))
             self._maybe_snapshot()
 
         self._kick_save()
@@ -269,6 +285,7 @@ class DatabaseManager:
         if not _is_serializable(value):
             raise ValueError(f"Value for {owner}.{key} is not JSON-serializable")
         self._data.setdefault(owner, {})[key] = value
+        self._dirty.add((owner, key))
         self._maybe_snapshot()
         self._kick_save()
         return True
@@ -279,6 +296,8 @@ class DatabaseManager:
                 del self._data[owner][key]
                 if not self._data[owner]:
                     del self._data[owner]
+            self._dirty.discard((owner, key))
+            self._deleted.append((owner, key))
         self._kick_save()
         return True
 
@@ -332,9 +351,32 @@ class DatabaseManager:
 
     async def _schedule_save(self) -> None:
         await asyncio.sleep(1)
-        if self._backend:
+        if not self._backend:
+            return
+        # Используем dirty-флаги: пишем только изменённые записи
+        if isinstance(self._backend, SQLiteBackend):
+            async with self._lock:
+                dirty = list(self._dirty)
+                deleted = list(self._deleted)
+                self._dirty.clear()
+                self._deleted.clear()
+            if not dirty and not deleted:
+                return
+            upsert_rows = []
+            for owner, key in dirty:
+                val = self._data.get(owner, {}).get(key)
+                if val is not None or (owner in self._data and key in self._data[owner]):
+                    upsert_rows.append((owner, key, json.dumps(val, ensure_ascii=False)))
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(
+                None, self._backend.upsert_sync, upsert_rows, deleted
+            )
+        else:
+            # Redis: полный снимок как раньше
             async with self._lock:
                 snapshot = {o: dict(s) for o, s in self._data.items()}
+                self._dirty.clear()
+                self._deleted.clear()
             await self._backend.save(snapshot)
 
     def __contains__(self, item: object) -> bool:

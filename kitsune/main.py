@@ -362,7 +362,7 @@ async def _startup(args: argparse.Namespace) -> None:
             logger.exception("main: web startup failed")
 
     asyncio.ensure_future(log.setup_tg_logging(client))
-    asyncio.ensure_future(_setup_kitsune_folder(client, db))
+    # Папка Kitsune синхронизируется через quickstart.on_load — дублирование убрано
 
     _print_banner(me)
 
@@ -427,16 +427,6 @@ async def _keepalive(client: Any) -> None:
             except Exception as exc2:
                 logger.debug("keepalive: reconnect failed (%s)", type(exc2).__name__)
 
-async def _setup_kitsune_folder(client: Any, db: Any) -> None:
-    """Создаёт папку Kitsune в Telegram после старта."""
-    await asyncio.sleep(8)                                  
-    try:
-        from .utils import ensure_kitsune_folder
-        await ensure_kitsune_folder(client, db)
-    except Exception:
-        pass               
-
-
 def _print_banner(me: Any) -> None:
     from .version import __version_str__
     from colorama import Fore, Style, init as colorama_init
@@ -465,4 +455,6 @@ def main() -> None:
     try:
         asyncio.run(_startup(args))
     except KeyboardInterrupt:
-        pass
+        # SIGINT до установки signal handler-а — force_save уже вызван в finally блоке
+        # _startup, но если _startup упал раньше — логируем
+        logging.getLogger(__name__).info("main: interrupted by keyboard")

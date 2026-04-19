@@ -240,7 +240,7 @@ class CommandDispatcher:
                             try:
                                 await self._db.force_save()
                             except Exception:
-                                pass
+                                logger.warning("Dispatcher: force_save after config update failed")
 
                             inline = getattr(self._client, "_kitsune_inline", None)
                             if inline and inline._bot:
@@ -255,15 +255,15 @@ class CommandDispatcher:
                                         ]]),
                                         parse_mode="HTML",
                                     )
-                                except Exception:
-                                    pass
+                                except Exception as _ie:
+                                    logger.debug("Dispatcher: inline edit after cfg update failed: %s", _ie)
                             try:
                                 await message.delete()
                             except Exception:
-                                pass
+                                pass  # удалить не вышло — не критично
                             return  
                 except Exception:
-                    pass  
+                    logger.warning("Dispatcher: config-edit handler failed", exc_info=True)
 
         sec = self._security
         sudo_users = sec.get_sudo_users() if sec else []
@@ -344,6 +344,7 @@ class CommandDispatcher:
                     if filter_func is not None and not filter_func(message):
                         continue
                 except Exception:
+                    logger.debug("Dispatcher: watcher filter raised, skipping: %s", handler.__name__, exc_info=True)
                     continue
 
                 if _should_skip_watcher(handler, message):
