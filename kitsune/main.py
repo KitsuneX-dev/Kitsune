@@ -383,16 +383,17 @@ async def _startup(args: argparse.Namespace) -> None:
     # Если loop молчит >45 сек — значит завис. Убиваем процесс → systemd перезапустит.
     import threading, time as _time
     _wdog_last_tick = [_time.monotonic()]
+    # Захватываем loop в основном потоке — до создания watchdog-треда
+    _wdog_loop = asyncio.get_event_loop()
 
     async def _wdog_tick() -> None:
         _wdog_last_tick[0] = _time.monotonic()
 
     def _watchdog_thread() -> None:
-        loop = asyncio.get_event_loop()
         while not stop_event.is_set():
             _time.sleep(10)
             try:
-                asyncio.run_coroutine_threadsafe(_wdog_tick(), loop)
+                asyncio.run_coroutine_threadsafe(_wdog_tick(), _wdog_loop)
             except Exception:
                 pass
             _time.sleep(5)
