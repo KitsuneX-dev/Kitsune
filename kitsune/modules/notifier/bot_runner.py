@@ -20,7 +20,6 @@ def _make_bot(token: str) -> typing.Any:
     ssl_ctx.check_hostname = False
     ssl_ctx.verify_mode = ssl.CERT_NONE
 
-    _BASE_TIMEOUT = aiohttp.ClientTimeout(total=60, connect=15, sock_read=45)
 
     class _NoSSLSession(AiohttpSession):
         async def create_connector(self, _bot=None):
@@ -28,18 +27,11 @@ def _make_bot(token: str) -> typing.Any:
             self._should_reset_connector = False
             return connector
 
-        async def make_request(self, bot, method, timeout=None):
-            # Нормализуем timeout: aiogram передаёт int для long-polling,
-            # что вызывает TypeError: ClientTimeout + int внутри aiohttp.
-            # Конвертируем int/float → ClientTimeout без лишних импортов.
-            if isinstance(timeout, (int, float)):
-                timeout = aiohttp.ClientTimeout(total=float(timeout) + 10)
-            return await super().make_request(bot, method, timeout=timeout)
 
     return Bot(
         token=str(token),
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
-        session=_NoSSLSession(timeout=_BASE_TIMEOUT),
+        session=_NoSSLSession(timeout=60),
     )
 
 class BotRunner:
