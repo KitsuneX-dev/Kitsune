@@ -443,8 +443,8 @@ rotating_handler.setFormatter(_main_formatter)
 _tg_channel_handler: TelegramChannelHandler | None = None
 
 async def _get_aiogram_bot(client: typing.Any) -> typing.Any:
-    """Ждёт запуска aiogram-бота и возвращает его (или None). Таймаут — 90 секунд."""
-    for _ in range(180):
+    """Ждёт запуска aiogram-бота и возвращает его (или None). Таймаут — 15 секунд."""
+    for _ in range(30):
         try:
             loader = getattr(client, "_kitsune_loader", None)
             if loader:
@@ -463,7 +463,7 @@ async def _ensure_bot_in_group(client: typing.Any, group_id: int) -> bool:
 
                                                   
     bot_username: str | None = None
-    for _ in range(90):
+    for _ in range(15):
         try:
             db = getattr(client, "_kitsune_db", None)
             if db:
@@ -475,7 +475,7 @@ async def _ensure_bot_in_group(client: typing.Any, group_id: int) -> bool:
         await asyncio.sleep(1)
 
     if not bot_username:
-        log.warning("log: bot_username не найден за 90с — бот не добавлен в Kitsune-logs")
+        log.debug("log: bot_username не найден за 15с — баннер пойдёт через Hydrogram")
         return False
 
     try:
