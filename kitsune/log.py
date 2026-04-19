@@ -443,8 +443,8 @@ rotating_handler.setFormatter(_main_formatter)
 _tg_channel_handler: TelegramChannelHandler | None = None
 
 async def _get_aiogram_bot(client: typing.Any) -> typing.Any:
-    """Ждёт запуска aiogram-бота и возвращает его (или None). Таймаут — 15 секунд."""
-    for _ in range(30):
+    """Ждёт запуска aiogram-бота и возвращает его (или None). Таймаут — 20 секунд."""
+    for _ in range(100):   # 100 × 0.2s = 20 секунд максимум, выходим сразу как нашли
         try:
             loader = getattr(client, "_kitsune_loader", None)
             if loader:
@@ -453,7 +453,7 @@ async def _get_aiogram_bot(client: typing.Any) -> typing.Any:
                     return notifier._runner.bot
         except Exception:
             pass
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(0.2)
     return None
 
 
@@ -463,7 +463,7 @@ async def _ensure_bot_in_group(client: typing.Any, group_id: int) -> bool:
 
                                                   
     bot_username: str | None = None
-    for _ in range(15):
+    for _ in range(100):   # 100 × 0.2s = 20 секунд максимум, выходим сразу как нашли
         try:
             db = getattr(client, "_kitsune_db", None)
             if db:
@@ -472,10 +472,10 @@ async def _ensure_bot_in_group(client: typing.Any, group_id: int) -> bool:
                     break
         except Exception:
             pass
-        await asyncio.sleep(1)
+        await asyncio.sleep(0.2)
 
     if not bot_username:
-        log.debug("log: bot_username не найден за 15с — баннер пойдёт через Hydrogram")
+        log.debug("log: bot_username не найден за 20с — баннер пойдёт через Hydrogram")
         return False
 
     try:
