@@ -362,7 +362,7 @@ async def _startup(args: argparse.Namespace) -> None:
             logger.exception("main: web startup failed")
 
     asyncio.ensure_future(log.setup_tg_logging(client))
-    # Папка Kitsune синхронизируется через quickstart.on_load — дублирование убрано
+    asyncio.ensure_future(_setup_kitsune_folder(client, db))
 
     _print_banner(me)
 
@@ -377,6 +377,34 @@ async def _startup(args: argparse.Namespace) -> None:
     for sig in (signal.SIGINT, signal.SIGTERM):
         with contextlib.suppress(OSError):
             asyncio.get_event_loop().add_signal_handler(sig, _shutdown)
+
+    # ── Event loop watchdog ────────────────────────────────────────────
+    # Отдельный поток пингует event loop каждые 10 сек.
+    # Если loop молчит >45 сек — значит завис. Убиваем процесс → systemd перезапустит.
+    import threading, time as _time
+    _wdog_last_tick = [_time.monotonic()]
+
+    async def _wdog_tick() -> None:
+        _wdog_last_tick[0] = _time.monotonic()
+
+    def _watchdog_thread() -> None:
+        loop = asyncio.get_event_loop()
+        while not stop_event.is_set():
+            _time.sleep(10)
+            try:
+                asyncio.run_coroutine_threadsafe(_wdog_tick(), loop)
+            except Exception:
+                pass
+            _time.sleep(5)
+            if _time.monotonic() - _wdog_last_tick[0] > 45:
+                logger.critical("main: event loop FROZEN >45s — завис, принудительный перезапуск процесса")
+                import os
+                os.kill(os.getpid(), signal.SIGTERM)
+
+    _wt = threading.Thread(target=_watchdog_thread, name="kitsune-watchdog", daemon=True)
+    _wt.start()
+    logger.info("main: watchdog started (threshold=45s)")
+    # ──────────────────────────────────────────────────────────────────
 
     try:
         await stop_event.wait()
@@ -427,6 +455,16 @@ async def _keepalive(client: Any) -> None:
             except Exception as exc2:
                 logger.debug("keepalive: reconnect failed (%s)", type(exc2).__name__)
 
+async def _setup_kitsune_folder(client: Any, db: Any) -> None:
+    """Создаёт папку Kitsune в Telegram после старта."""
+    await asyncio.sleep(8)                                  
+    try:
+        from .utils import ensure_kitsune_folder
+        await ensure_kitsune_folder(client, db)
+    except Exception:
+        pass               
+
+
 def _print_banner(me: Any) -> None:
     from .version import __version_str__
     from colorama import Fore, Style, init as colorama_init
@@ -455,6 +493,4 @@ def main() -> None:
     try:
         asyncio.run(_startup(args))
     except KeyboardInterrupt:
-        # SIGINT до установки signal handler-а — force_save уже вызван в finally блоке
-        # _startup, но если _startup упал раньше — логируем
-        logging.getLogger(__name__).info("main: interrupted by keyboard")
+        pass

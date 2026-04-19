@@ -20,19 +20,28 @@ def _make_bot(token: str) -> typing.Any:
     ssl_ctx.check_hostname = False
     ssl_ctx.verify_mode = ssl.CERT_NONE
 
+    _BASE_TIMEOUT = aiohttp.ClientTimeout(total=60, connect=15, sock_read=45)
+
     class _NoSSLSession(AiohttpSession):
         async def create_connector(self, _bot=None):
             connector = aiohttp.TCPConnector(ssl=ssl_ctx)
             self._should_reset_connector = False
             return connector
 
-    # aiogram 3.x требует aiohttp.ClientTimeout, а не голый int
-    _timeout = aiohttp.ClientTimeout(total=60, connect=15, sock_read=30)
+        async def make_request(self, bot, method, timeout=None):
+            # Нормализуем timeout: aiogram иногда передаёт int для long-polling,
+            # что вызывает TypeError: ClientTimeout + int внутри aiohttp.
+            # Всегда конвертируем в ClientTimeout перед вызовом родителя.
+            from aiogram.client.session.base import UNSET as _UNSET
+            if timeout is not None and timeout is not _UNSET:
+                if isinstance(timeout, (int, float)):
+                    timeout = aiohttp.ClientTimeout(total=float(timeout) + 10)
+            return await super().make_request(bot, method, timeout=timeout)
 
     return Bot(
         token=str(token),
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
-        session=_NoSSLSession(timeout=_timeout),
+        session=_NoSSLSession(timeout=_BASE_TIMEOUT),
     )
 
 class BotRunner:
