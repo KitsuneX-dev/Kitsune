@@ -73,6 +73,25 @@ class QuickstartModule(KitsuneModule):
 
     async def on_load(self) -> None:
         await self._maybe_show_welcome()
+        # Папку синхронизируем при каждом старте независимо от флага приветствия
+        import asyncio as _asyncio
+        _asyncio.ensure_future(self._ensure_folder_on_startup())
+
+    async def _ensure_folder_on_startup(self) -> None:
+        """Синхронизирует папку Kitsune при каждом запуске бота."""
+        import asyncio as _asyncio
+        try:
+            from .._local_storage import get_storage
+            ls = get_storage()
+            # Только если welcome уже показан (т.е. не первый запуск) —
+            # при первом запуске папку создаёт _maybe_show_welcome
+            if not ls.get(_LS_OWNER, _LS_KEY):
+                return
+            await _asyncio.sleep(10)  # ждём пока все каналы/группы поднимутся
+            await self._sync_kitsune_folder()
+            logger.info("Quickstart: папка Kitsune синхронизирована при старте")
+        except Exception:
+            logger.exception("Quickstart: ошибка авто-синхронизации папки")
 
                                                                         
                        
