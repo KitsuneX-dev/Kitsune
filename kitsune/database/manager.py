@@ -181,6 +181,19 @@ class DatabaseManager:
             self._backend = SQLiteBackend(db_path)
             self._data = await self._backend.load()
             logger.info("Database: SQLite backend active (%s)", db_path)
+            # Arch Linux: после веб-регистрации файл БД может быть создан
+            # от другого пользователя/root — явно выставляем права на запись
+            try:
+                import os as _os
+                if db_path.exists():
+                    _os.chmod(db_path, 0o644)
+                # WAL-режим создаёт вспомогательные файлы — чиним и их
+                for _suffix in ("-wal", "-shm"):
+                    _aux = db_path.with_name(db_path.name + _suffix)
+                    if _aux.exists():
+                        _os.chmod(_aux, 0o644)
+            except Exception as _chmod_exc:
+                logger.warning("Database: could not chmod db file (%s)", _chmod_exc)
 
         try:
             from .. import utils
