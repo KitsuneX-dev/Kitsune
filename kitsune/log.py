@@ -563,13 +563,11 @@ async def setup_tg_logging(client: typing.Any) -> None:
 
 async def _setup_bot_and_banner(client: typing.Any, group_id: int) -> None:
     """Добавляет бота в группу и отправляет стартовый баннер от его имени."""
-                                                        
-    bot_added = await _ensure_bot_in_group(client, group_id)
-
-                                             
-    bot = await _get_aiogram_bot(client)
-
-                              
+    # Запускаем параллельно — не ждём 90+90 секунд последовательно
+    bot_added, bot = await asyncio.gather(
+        _ensure_bot_in_group(client, group_id),
+        _get_aiogram_bot(client),
+    )
     await _send_startup_banner_via_bot(client, group_id, bot=bot, bot_added=bot_added)
 
 async def _send_startup_banner_via_bot(
