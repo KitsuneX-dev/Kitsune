@@ -10,6 +10,8 @@ from ..core.security import OWNER
 logger = logging.getLogger(__name__)
 
 _DB_OWNER = "kitsune.info"
+# Namespace used by _load_config_from_db in KitsuneModule — must match module name lowercased
+_DB_CONFIG = "kitsune.config.kitsuneinfo"
 
 def _esc(s: str) -> str:
     return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
@@ -324,13 +326,13 @@ class InfoModule(KitsuneModule):
             await event.reply(self.strings("setinfo_no_args"), parse_mode="html")
             return
         self.config["custom_message"] = args
-        await self.db.set(_DB_OWNER, "custom_message", args)
+        await self.db.set(_DB_CONFIG, "custom_message", args)
         await event.reply(self.strings("setinfo_success"), parse_mode="html")
 
     @command("resetinfo", required=OWNER)
     async def resetinfo_cmd(self, event) -> None:
         self.config["custom_message"] = None
-        await self.db.set(_DB_OWNER, "custom_message", None)
+        await self.db.delete(_DB_CONFIG, "custom_message")
         await event.reply("✅ Info-сообщение сброшено.", parse_mode="html")
 
     @command("fmt", required=OWNER)
