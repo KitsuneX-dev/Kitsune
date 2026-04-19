@@ -29,13 +29,11 @@ def _make_bot(token: str) -> typing.Any:
             return connector
 
         async def make_request(self, bot, method, timeout=None):
-            # Нормализуем timeout: aiogram иногда передаёт int для long-polling,
+            # Нормализуем timeout: aiogram передаёт int для long-polling,
             # что вызывает TypeError: ClientTimeout + int внутри aiohttp.
-            # Всегда конвертируем в ClientTimeout перед вызовом родителя.
-            from aiogram.client.session.base import UNSET as _UNSET
-            if timeout is not None and timeout is not _UNSET:
-                if isinstance(timeout, (int, float)):
-                    timeout = aiohttp.ClientTimeout(total=float(timeout) + 10)
+            # Конвертируем int/float → ClientTimeout без лишних импортов.
+            if isinstance(timeout, (int, float)):
+                timeout = aiohttp.ClientTimeout(total=float(timeout) + 10)
             return await super().make_request(bot, method, timeout=timeout)
 
     return Bot(
