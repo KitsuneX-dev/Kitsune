@@ -127,6 +127,13 @@ async def send_file(
 
     if hydro and not force_telethon:
         try:
+            # Резолвим пир заранее — Hydrogram выдаёт PEER_ID_INVALID
+            # если чат был создан недавно и не попал в его кэш диалогов
+            try:
+                await hydro.get_chat(chat_id)
+            except Exception:
+                pass  # если не вышло — пробуем всё равно, упадём в except ниже
+
             pm = "html" if parse_mode.lower() == "html" else None
             kwargs: dict = dict(chat_id=chat_id, document=file, caption=caption, parse_mode=pm)
             if reply_to:
@@ -140,7 +147,12 @@ async def send_file(
             return result
 
         except Exception as exc:
-            logger.warning("hydro_media: Hydrogram send failed (%s), falling back to Telethon", exc)
+            exc_str = str(exc)
+            # PEER_ID_INVALID — нормальный фоллбэк для недавно созданных чатов
+            if "PEER_ID_INVALID" in exc_str:
+                logger.debug("hydro_media: Hydrogram PEER_ID_INVALID for %s — falling back to Telethon", chat_id)
+            else:
+                logger.warning("hydro_media: Hydrogram send failed (%s), falling back to Telethon", exc)
             if hasattr(file, "seek"):
                 try:
                     file.seek(buf_start)
