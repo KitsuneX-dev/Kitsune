@@ -230,8 +230,13 @@ class InlineManager:
                         )
                     except Exception:
                         logger.debug("InlineManager.edit: Telethon fallback also failed", exc_info=True)
-        except Exception:
-            logger.exception("InlineManager.edit: failed")
+        except Exception as _edit_exc:
+            _err = str(_edit_exc)
+            # MESSAGE_ID_INVALID — сообщение устарело после перезапуска, не критично
+            if "MESSAGE_ID_INVALID" in _err or "message to edit not found" in _err.lower():
+                logger.debug("InlineManager.edit: stale message after restart, skipping")
+            else:
+                logger.exception("InlineManager.edit: failed")
 
     async def _invoke_unit(self, unit_id: str, message: typing.Any) -> typing.Any:
         if not self._bot_username:
