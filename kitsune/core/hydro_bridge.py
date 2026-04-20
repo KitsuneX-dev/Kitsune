@@ -112,15 +112,17 @@ class HydrogramBridge:
         self._db = db
 
     # ── Rate limiter ──────────────────────────────────────────────────────────
-    # Не более 20 исходящих запросов в 60 секунд (глобально через Hydrogram)
-    _RL_MAX     = 20
-    _RL_WINDOW  = 60.0
+    # Значения по умолчанию — переопределяются через APILimiter конфиг
+    _RL_MAX      = 20
+    _RL_WINDOW   = 60.0
+    _rl_enabled  = True   # управляется через APILimiter.config["hydro_enabled"]
     _rl_times: list = []
 
     def _rate_limit_ok(self) -> bool:
         """Возвращает True если запрос разрешён, False если надо притормозить."""
+        if not self._rl_enabled:
+            return True
         now = time.monotonic()
-        # Убираем старые записи за пределами окна
         self._rl_times = [t for t in self._rl_times if now - t < self._RL_WINDOW]
         if len(self._rl_times) >= self._RL_MAX:
             logger.warning(

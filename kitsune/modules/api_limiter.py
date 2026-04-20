@@ -62,31 +62,88 @@ class APILimiterModule(KitsuneModule):
         self._old_call: typing.Any = None
 
         self.config = ModuleConfig(
+            # ── Telethon лимиты ───────────────────────────────────────────────
+            ConfigValue(
+                "enabled",
+                default=True,
+                doc="Включить защиту Telethon API",
+            ),
             ConfigValue(
                 "time_sample",
                 default=15,
-                doc="Окно мониторинга запросов (секунд)",
+                doc="[Telethon] Окно мониторинга запросов (секунд)",
             ),
             ConfigValue(
                 "threshold",
                 default=80,
-                doc="Максимум пользовательских запросов за time_sample до срабатывания защиты",
+                doc="[Telethon] Максимум запросов за time_sample до срабатывания защиты",
             ),
             ConfigValue(
                 "local_floodwait",
                 default=30,
-                doc="Время паузы при превышении порога (секунд)",
+                doc="[Telethon] Время паузы при превышении порога (секунд)",
             ),
             ConfigValue(
-                "enabled",
+                "flood_sleep_threshold",
+                default=60,
+                doc="[Telethon] Авто-ожидание FloodWait до этого значения секунд (0 = не ждать)",
+            ),
+            # ── Hydrogram лимиты ──────────────────────────────────────────────
+            ConfigValue(
+                "hydro_enabled",
                 default=True,
-                doc="Включить защиту API",
+                doc="Включить rate limiter для Hydrogram",
+            ),
+            ConfigValue(
+                "hydro_max_requests",
+                default=20,
+                doc="[Hydrogram] Максимум исходящих запросов за hydro_window секунд",
+            ),
+            ConfigValue(
+                "hydro_window",
+                default=60,
+                doc="[Hydrogram] Окно мониторинга Hydrogram запросов (секунд)",
             ),
         )
 
     async def on_load(self) -> None:
         await asyncio.sleep(5)
         await self._install()
+        self._apply_hydro_limits()
+        self._apply_telethon_flood_threshold()
+
+    def _apply_hydro_limits(self) -> None:
+        """Применяет настройки rate limiter к HydrogramBridge."""
+        try:
+            bridge = getattr(self.client, "_kitsune_hydro_bridge", None)
+            if bridge is None:
+                # ищем через loader
+                loader = getattr(self.client, "_kitsune_loader", None)
+                if loader:
+                    from ..core.hydro_bridge import HydrogramBridge
+                    for obj in vars(self.client).values():
+                        if isinstance(obj, HydrogramBridge):
+                            bridge = obj
+                            break
+            if bridge:
+                bridge._RL_MAX    = int(self.config["hydro_max_requests"])
+                bridge._RL_WINDOW = float(self.config["hydro_window"])
+                bridge._rl_enabled = bool(self.config["hydro_enabled"])
+                logger.info(
+                    "APILimiter: Hydrogram limits applied — max=%d per %.0fs, enabled=%s",
+                    bridge._RL_MAX, bridge._RL_WINDOW, bridge._rl_enabled,
+                )
+        except Exception as exc:
+            logger.warning("APILimiter: could not apply Hydrogram limits — %s", exc)
+
+    def _apply_telethon_flood_threshold(self) -> None:
+        """Применяет flood_sleep_threshold к Telethon клиенту."""
+        try:
+            threshold = int(self.config["flood_sleep_threshold"])
+            self.client.flood_sleep_threshold = threshold
+            logger.info("APILimiter: Telethon flood_sleep_threshold set to %ds", threshold)
+        except Exception as exc:
+            logger.warning("APILimiter: could not apply flood_sleep_threshold — %s", exc)
 
     async def on_unload(self) -> None:
         self._uninstall()
