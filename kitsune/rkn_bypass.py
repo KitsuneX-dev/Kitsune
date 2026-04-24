@@ -8,6 +8,39 @@ import typing
 logger = logging.getLogger(__name__)
 
 
+def _patch_telethon_mtproxy() -> None:
+    """
+    Патч для совместимости Telethon MTProxy с Python 3.13.
+    В Python 3.13 asyncio.readexactly(0) бросает ValueError вместо b''.
+    """
+    import sys
+    if sys.version_info < (3, 13):
+        return
+    try:
+        from telethon.network.connection import tcpmtproxy as _m
+        import inspect, types
+
+        src = inspect.getsource(_m.MTProxyReader.readexactly)
+        if '_py313_patched' in src:
+            return
+
+        original = _m.MTProxyReader.readexactly
+
+        async def readexactly_patched(self, n):
+            if n <= 0:
+                return b''
+            return await original(self, n)
+
+        readexactly_patched._py313_patched = True
+        _m.MTProxyReader.readexactly = readexactly_patched
+        logger.info("rkn_bypass: Telethon MTProxy patched for Python 3.13")
+    except Exception as exc:
+        logger.debug("rkn_bypass: MTProxy patch failed — %s", exc)
+
+
+_patch_telethon_mtproxy()
+
+
 def normalize_secret(secret: str) -> str:
     """
     Нормализует секрет MTProto-прокси для совместимости с Telethon.
