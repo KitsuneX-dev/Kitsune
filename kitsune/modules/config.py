@@ -411,13 +411,10 @@ class ConfigModule(KitsuneModule):
 
         args = self.get_args(event).strip()
 
-        await event.message.edit("⚙️ <b>Загрузка...</b>", parse_mode="html")
-
-        # cfg <module_name> — сразу открываем нужный модуль
+        # cfg <module_name> — сразу открываем нужный модуль одним вызовом form
         if args:
             loader = getattr(self.client, "_kitsune_loader", None)
             if loader:
-                # Ищем модуль без учёта регистра
                 mod_name = next(
                     (k for k in loader.modules if k.lower() == args.lower()),
                     None,
@@ -427,13 +424,30 @@ class ConfigModule(KitsuneModule):
                 ):
                     mod = loader.modules[mod_name]
                     is_builtin = getattr(mod, "_is_builtin", False) or getattr(mod, "_builtin", False)
-                    await self._screen_mod(event.message, mod_name, is_builtin)
+
+                    # Строим контент экрана модуля и сразу открываем form — один round-trip
+                    text = self.strings("configuring_mod").format(
+                        _esc(mod_name),
+                        self._rows_text(mod),
+                    )
+                    btns = [
+                        {"text": k, "callback": self._cb_configure_option, "args": (mod_name, k, is_builtin)}
+                        for k in mod.config.keys()
+                    ]
+                    kb = _chunks(btns, 2)
+                    kb.append([
+                        {"text": self.strings("back_btn"),  "callback": self._cb_choose_category},
+                        {"text": self.strings("close_btn"), "callback": self._cb_close},
+                    ])
+
+                    await event.message.edit("⚙️ <b>Загрузка...</b>", parse_mode="html")
+                    await inline.form(text, event.message, kb)
                     return
 
-            # Модуль не найден или не имеет config — показываем стандартное меню
             await event.message.edit(self.strings("no_mod"), parse_mode="html")
             return
 
+        await event.message.edit("⚙️ <b>Загрузка...</b>", parse_mode="html")
         await self._screen_choose_category(event.message)
 
     @command("fconfig", required=OWNER, aliases=["fcfg"])
