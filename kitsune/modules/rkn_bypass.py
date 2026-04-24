@@ -321,7 +321,6 @@ class RKNBypassModule(KitsuneModule):
             parse_mode="html",
         )
 
-        # Сначала пробуем найти тот, что проходит TCP-тест
         proxy = await find_working_proxy(extra_proxies=web_proxies)
 
         if proxy:
@@ -333,26 +332,21 @@ class RKNBypassModule(KitsuneModule):
             )
             return
 
-        # TCP-тест не прошёл ни один — всё равно отдаём первые 3 из найденных.
-        # Многие MTProto-прокси не отвечают на plain-TCP, но всё равно рабочие.
+        # TCP-тест не прошёл ни один, но прокси найдены из каналов.
+        # MTProto-прокси часто блокируют plain-TCP, но работают для Telegram.
         lines = []
         for h, p, s in web_proxies[:3]:
             lines.append(
-                f"🌐 <code>{h}:{p}</code>
-"
-                f"<code>.setproxy {h} {p} {s}</code>"
+                "\U0001f310 <code>" + h + ":" + str(p) + "</code>\n"
+                "<code>.setproxy " + h + " " + str(p) + " " + s + "</code>"
             )
         text = (
-            "⚠️ <b>TCP-тест не прошёл, но найдены прокси из каналов.</b>
-"
-            "<i>Попробуй один из них — MTProto-прокси часто блокируют ping:</i>
-
-"
-            + "
-
-".join(lines)
+            "\u26a0\ufe0f <b>TCP-тест не прошёл, но найдены прокси из каналов.</b>\n"
+            "<i>Попробуй один из них — MTProto-прокси часто блокируют ping:</i>\n\n"
+            + "\n\n".join(lines)
         )
         await event.message.edit(text, parse_mode="html", link_preview=False)
+
 
     @command("setproxy", required=OWNER)
     async def setproxy_cmd(self, event) -> None:
