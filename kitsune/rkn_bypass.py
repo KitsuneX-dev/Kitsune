@@ -12,33 +12,40 @@ def normalize_secret(secret: str) -> str:
     """
     Нормализует секрет MTProto-прокси для совместимости с Telethon.
 
-    Telethon требует секрет в hex чётной длины или валидном base64.
-    Telegram Desktop может показывать секрет в нечётном hex (напр. 41 символ) —
-    в таком случае добавляем ведущий ноль.
+    Принимает:
+    - hex чётной длины:      a1b2c3... (32–48 символов)
+    - base64url без padding: секрет из tg://proxy?...&secret=XXXX ссылки
+
+    ⚠️  Hex нечётной длины исправить нельзя без искажения ключа.
+        Используй секрет из tg://proxy ссылки («Поделиться» в настройках прокси).
     """
     import base64
 
     s = secret.strip()
 
-    # Уже валидный hex чётной длины — ок
-    if len(s) % 2 == 0 and all(c in '0123456789abcdefABCDEF' for c in s):
+    # Валидный hex чётной длины — всё хорошо
+    is_hex = all(c in '0123456789abcdefABCDEF' for c in s)
+    if is_hex and len(s) % 2 == 0:
         return s.lower()
 
-    # Hex нечётной длины (напр. 41 символ) — добавляем ведущий ноль
-    if len(s) % 2 == 1 and all(c in '0123456789abcdefABCDEF' for c in s):
-        logger.debug("normalize_secret: нечётный hex (%d), добавляю ведущий 0", len(s))
-        return ('0' + s).lower()
+    # Hex нечётной длины — это ОШИБКА, не пытаемся угадать недостающий байт
+    if is_hex and len(s) % 2 == 1:
+        logger.warning(
+            "normalize_secret: секрет имеет нечётную длину (%d символов). "
+            "Используй секрет из tg://proxy ссылки (кнопка «Поделиться» в Telegram).",
+            len(s),
+        )
+        return s  # отдаём как есть, Telethon выдаст понятную ошибку
 
-    # Попробуем декодировать как base64 и перевести в hex
+    # base64url (секрет из tg://proxy ссылки) → hex
     try:
-        # Добавляем padding если нужно
         padded = s + '=' * (-len(s) % 4)
         decoded = base64.b64decode(padded.encode(), altchars=b'-_')
         return decoded.hex()
     except Exception:
         pass
 
-    # Отдаём как есть — Telethon сам разберётся или выдаст понятную ошибку
+    # Отдаём как есть
     return s
 
 
