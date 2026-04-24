@@ -257,13 +257,15 @@ class InlineManager:
             logger.error("InlineManager: cannot resolve entity", exc_info=True)
             return None
 
-        await asyncio.sleep(1.5)
+        # Минимальная пауза — даём боту зарегистрировать unit до inline_query
+        await asyncio.sleep(0.3)
 
         for attempt in range(5):
             try:
                 results = await self._client.inline_query(self._bot_username, unit_id)
                 if not results:
-                    await asyncio.sleep(1.0)
+                    # Бот ещё не ответил — короткая пауза и retry
+                    await asyncio.sleep(0.4)
                     continue
                 sent = await results[0].click(entity, reply_to=reply_to)
                 try:
@@ -274,7 +276,8 @@ class InlineManager:
             except Exception as exc:
                 err = str(exc)
                 if "BotResponseTimeout" in err or "timeout" in err.lower():
-                    delay = 1.5 * (attempt + 1)
+                    # Экспоненциальный backoff, но с меньшим базовым значением
+                    delay = 0.5 * (attempt + 1)
                     logger.warning(
                         "InlineManager._invoke_unit: timeout attempt %d/5, retrying in %.1fs",
                         attempt + 1, delay,
