@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import logging
+import re
 import ssl
 import typing
 
 logger = logging.getLogger(__name__)
+
+# ─────────────────────── встроенный список прокси ───────────────────────────
 
 _PUBLIC_PROXIES: list[tuple[str, int, str]] = [
     ("149.154.175.100", 443, "ee9000000000000000000000000000003900000000000000"),
@@ -12,6 +15,27 @@ _PUBLIC_PROXIES: list[tuple[str, int, str]] = [
     ("91.108.56.100",   443, "ee0000000000000000000000000000003900000000000000"),
     ("mtproto.telegram.org", 443, "ee0000000000000000000000000000003900000000000000"),
 ]
+
+# Публичные источники MTProto-прокси
+_TG_PROXY_CHANNELS: list[str] = [
+    "https://t.me/s/proxyme",
+    "https://t.me/s/MTProxyT",
+    "https://t.me/s/tg_proxy_mtproto",
+]
+
+_MTPRO_XYZ_URL = "https://mtpro.xyz/api/?type=mtproto"
+
+# Регулярки для парсинга tg://proxy?... и https://t.me/proxy?...
+_RE_TG_PROXY = re.compile(
+    r'tg://proxy\?server=([^&"\'<>\s]+)&port=(\d+)&secret=([0-9a-fA-F]+)',
+    re.IGNORECASE,
+)
+_RE_TG_PROXY_ALT = re.compile(
+    r'https://t\.me/proxy\?server=([^&"\'<>\s]+)&port=(\d+)&secret=([0-9a-fA-F]+)',
+    re.IGNORECASE,
+)
+
+# ─────────────────────── SSL-хелперы ────────────────────────────────────────
 
 def make_ssl_ctx_no_verify() -> ssl.SSLContext:
     ctx = ssl.create_default_context()
@@ -50,7 +74,13 @@ def get_connection_class(use_proxy: bool = False):
         return ConnectionTcpMTProxyRandomizedIntermediate
     return ConnectionTcpFull
 
-async def test_connection(host: str = "api.telegram.org", port: int = 443, timeout: float = 5.0) -> bool:
+# ─────────────────────── проверка соединения ────────────────────────────────
+
+async def test_connection(
+    host: str = "api.telegram.org",
+    port: int = 443,
+    timeout: float = 5.0,
+) -> bool:
     import asyncio
     try:
         reader, writer = await asyncio.wait_for(
@@ -66,16 +96,115 @@ async def test_connection(host: str = "api.telegram.org", port: int = 443, timeo
     except Exception:
         return False
 
-async def find_working_proxy() -> tuple[str, int, str] | None:
+# ─────────────────────── веб-поиск прокси ───────────────────────────────────
+
+async def _fetch_from_tg_channel(url: str) -> list[tuple[str, int, str]]:
+    """Парсит tg://proxy?... ссылки с публичной страницы Telegram-канала."""
+    try:
+        import aiohttp
+        ssl_ctx = make_ssl_ctx_no_verify()
+        async with aiohttp.ClientSession(
+            connector=aiohttp.TCPConnector(ssl=ssl_ctx)
+        ) as session:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                if resp.status != 200:
+                    return []
+                text = await resp.text(errors="replace")
+
+        found: list[tuple[str, int, str]] = []
+        for pattern in (_RE_TG_PROXY, _RE_TG_PROXY_ALT):
+            for m in pattern.finditer(text):
+                try:
+                    found.append((m.group(1).strip(), int(m.group(2)), m.group(3).strip()))
+                except ValueError:
+                    pass
+        return found
+    except Exception as exc:
+        logger.debug("rkn_bypass: channel %s — %s", url, exc)
+        return []
+
+async def _fetch_from_mtpro_xyz() -> list[tuple[str, int, str]]:
+    """JSON-список прокси с mtpro.xyz."""
+    try:
+        import aiohttp
+        ssl_ctx = make_ssl_ctx_no_verify()
+        async with aiohttp.ClientSession(
+            connector=aiohttp.TCPConnector(ssl=ssl_ctx)
+        ) as session:
+            async with session.get(
+                _MTPRO_XYZ_URL, timeout=aiohttp.ClientTimeout(total=8)
+            ) as resp:
+                if resp.status != 200:
+                    return []
+                data = await resp.json(content_type=None)
+        result: list[tuple[str, int, str]] = []
+        if isinstance(data, list):
+            for item in data:
+                host   = item.get("host") or item.get("ip") or ""
+                port   = item.get("port", 443)
+                secret = item.get("secret") or item.get("pass", "")
+                if host and secret:
+                    try:
+                        result.append((host, int(port), secret))
+                    except (ValueError, TypeError):
+                        pass
+        return result
+    except Exception as exc:
+        logger.debug("rkn_bypass: mtpro.xyz — %s", exc)
+        return []
+
+async def find_proxy_from_web() -> list[tuple[str, int, str]]:
+    """
+    Активно ищет MTProto-прокси в интернете:
+    сначала из Telegram-каналов, потом из JSON-API.
+    Возвращает все найденные (без проверки доступности).
+    """
     import asyncio
 
-    for host, port, secret in _PUBLIC_PROXIES:
+    tasks = [_fetch_from_tg_channel(u) for u in _TG_PROXY_CHANNELS]
+    tasks.append(_fetch_from_mtpro_xyz())
+
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    proxies: list[tuple[str, int, str]] = []
+    seen: set[tuple[str, int]] = set()
+    for r in results:
+        if isinstance(r, list):
+            for item in r:
+                key = (item[0], item[1])
+                if key not in seen:
+                    seen.add(key)
+                    proxies.append(item)
+
+    logger.info("rkn_bypass: найдено %d прокси из веб-источников", len(proxies))
+    return proxies
+
+# ─────────────────────── основной поиск ─────────────────────────────────────
+
+async def find_working_proxy(
+    extra_proxies: list[tuple[str, int, str]] | None = None,
+) -> tuple[str, int, str] | None:
+    """
+    Ищет первый рабочий прокси.
+    Порядок: встроенные → extra_proxies (из веб, если переданы).
+    """
+    candidates = list(_PUBLIC_PROXIES)
+    if extra_proxies:
+        seen = {(h, p) for h, p, _ in candidates}
+        for item in extra_proxies:
+            if (item[0], item[1]) not in seen:
+                candidates.append(item)
+                seen.add((item[0], item[1]))
+
+    for host, port, secret in candidates:
         if await test_connection(host, port, timeout=3.0):
-            logger.info("rkn_bypass: found working proxy %s:%d", host, port)
+            logger.info("rkn_bypass: рабочий прокси %s:%d", host, port)
             return host, port, secret
 
-    logger.warning("rkn_bypass: no working public proxy found")
+    logger.warning("rkn_bypass: рабочий прокси не найден")
     return None
+
+# ─────────────────────── применение к конфигу ───────────────────────────────
 
 def apply_bypass_to_config(cfg: dict) -> dict:
     import asyncio
@@ -97,6 +226,6 @@ def apply_bypass_to_config(cfg: dict) -> dict:
             "port": proxy[1],
             "secret": proxy[2],
         }
-        logger.info("rkn_bypass: applied MTProto proxy to config")
+        logger.info("rkn_bypass: прокси применён к конфигу")
 
     return cfg
