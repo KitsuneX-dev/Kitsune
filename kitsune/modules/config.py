@@ -409,9 +409,31 @@ class ConfigModule(KitsuneModule):
             await event.message.edit(self.strings("no_inline"), parse_mode="html")
             return
 
-        args   = self.get_args(event).strip()
+        args = self.get_args(event).strip()
 
         await event.message.edit("⚙️ <b>Загрузка...</b>", parse_mode="html")
+
+        # cfg <module_name> — сразу открываем нужный модуль
+        if args:
+            loader = getattr(self.client, "_kitsune_loader", None)
+            if loader:
+                # Ищем модуль без учёта регистра
+                mod_name = next(
+                    (k for k in loader.modules if k.lower() == args.lower()),
+                    None,
+                )
+                if mod_name and isinstance(
+                    getattr(loader.modules[mod_name], "config", None), ModuleConfig
+                ):
+                    mod = loader.modules[mod_name]
+                    is_builtin = getattr(mod, "_is_builtin", False) or getattr(mod, "_builtin", False)
+                    await self._screen_mod(event.message, mod_name, is_builtin)
+                    return
+
+            # Модуль не найден или не имеет config — показываем стандартное меню
+            await event.message.edit(self.strings("no_mod"), parse_mode="html")
+            return
+
         await self._screen_choose_category(event.message)
 
     @command("fconfig", required=OWNER, aliases=["fcfg"])
