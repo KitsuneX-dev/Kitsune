@@ -18,6 +18,7 @@ _PUBLIC_PROXIES: list[tuple[str, int, str]] = [
 
 # Публичные источники MTProto-прокси
 _TG_PROXY_CHANNELS: list[str] = [
+    "https://t.me/s/mtp4tg",          # основной — много рабочих прокси
     "https://t.me/s/proxyme",
     "https://t.me/s/MTProxyT",
     "https://t.me/s/tg_proxy_mtproto",
@@ -25,13 +26,15 @@ _TG_PROXY_CHANNELS: list[str] = [
 
 _MTPRO_XYZ_URL = "https://mtpro.xyz/api/?type=mtproto"
 
-# Регулярки для парсинга tg://proxy?... и https://t.me/proxy?...
+# Секрет MTProto может быть hex, hex с префиксом dd/ee, или base64
+_SECRET_PAT = r'([0-9a-zA-Z+/=_-]{16,})'
+
 _RE_TG_PROXY = re.compile(
-    r'tg://proxy\?server=([^&"\'<>\s]+)&port=(\d+)&secret=([0-9a-fA-F]+)',
+    r'tg://proxy\?server=([^&"\'<>\s]+)&port=(\d+)&secret=' + _SECRET_PAT,
     re.IGNORECASE,
 )
 _RE_TG_PROXY_ALT = re.compile(
-    r'https://t\.me/proxy\?server=([^&"\'<>\s]+)&port=(\d+)&secret=([0-9a-fA-F]+)',
+    r'https://t\.me/proxy\?server=([^&"\'<>\s]+)&port=(\d+)&secret=' + _SECRET_PAT,
     re.IGNORECASE,
 )
 
