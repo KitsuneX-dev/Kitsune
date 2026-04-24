@@ -7,6 +7,41 @@ import typing
 
 logger = logging.getLogger(__name__)
 
+
+def normalize_secret(secret: str) -> str:
+    """
+    Нормализует секрет MTProto-прокси для совместимости с Telethon.
+
+    Telethon требует секрет в hex чётной длины или валидном base64.
+    Telegram Desktop может показывать секрет в нечётном hex (напр. 41 символ) —
+    в таком случае добавляем ведущий ноль.
+    """
+    import base64
+
+    s = secret.strip()
+
+    # Уже валидный hex чётной длины — ок
+    if len(s) % 2 == 0 and all(c in '0123456789abcdefABCDEF' for c in s):
+        return s.lower()
+
+    # Hex нечётной длины (напр. 41 символ) — добавляем ведущий ноль
+    if len(s) % 2 == 1 and all(c in '0123456789abcdefABCDEF' for c in s):
+        logger.debug("normalize_secret: нечётный hex (%d), добавляю ведущий 0", len(s))
+        return ('0' + s).lower()
+
+    # Попробуем декодировать как base64 и перевести в hex
+    try:
+        # Добавляем padding если нужно
+        padded = s + '=' * (-len(s) % 4)
+        decoded = base64.b64decode(padded.encode(), altchars=b'-_')
+        return decoded.hex()
+    except Exception:
+        pass
+
+    # Отдаём как есть — Telethon сам разберётся или выдаст понятную ошибку
+    return s
+
+
 # ─────────────────────── встроенный список прокси ───────────────────────────
 
 _PUBLIC_PROXIES: list[tuple[str, int, str]] = [

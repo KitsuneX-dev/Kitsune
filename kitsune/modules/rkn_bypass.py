@@ -232,11 +232,12 @@ class RKNBypassModule(KitsuneModule):
                     new_host, new_port, new_secret = new_proxy
                     # Сохраняем новый прокси в config.toml
                     cfg = self._load_config()
+                    from ..rkn_bypass import normalize_secret
                     cfg["proxy"] = {
                         "type": "MTPROTO",
                         "host": new_host,
                         "port": new_port,
-                        "secret": new_secret,
+                        "secret": normalize_secret(new_secret),
                     }
                     self._save_config(cfg)
                     logger.info(
@@ -361,6 +362,9 @@ class RKNBypassModule(KitsuneModule):
         except ValueError:
             await event.message.edit("❌ Port должен быть числом.", parse_mode="html")
             return
+
+        from ..rkn_bypass import normalize_secret
+        secret = normalize_secret(secret)
 
         cfg = self._load_config()
         cfg["proxy"] = {
