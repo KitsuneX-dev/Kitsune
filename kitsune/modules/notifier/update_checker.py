@@ -448,8 +448,14 @@ class UpdateChecker:
                 )
                 await bot.session.close()
                 logger.info("UpdateChecker: update done sent as new DM message")
-            except Exception:
-                logger.exception("UpdateChecker: failed to send update_done message")
+            except Exception as _exc2:
+                if "Forbidden" in type(_exc2).__name__ or "forbidden" in str(_exc2).lower():
+                    logger.warning(
+                        "UpdateChecker: бот не может начать диалог. "
+                        "Напиши /start боту в Telegram. (%s)", _exc2,
+                    )
+                else:
+                    logger.exception("UpdateChecker: failed to send update_done message")
 
     async def send_restart_report(self, restart_time: str, total_time: str, mod_count: int) -> None:
         token    = self._db.get(_DB_KEY, "bot_token", None)
@@ -469,8 +475,16 @@ class UpdateChecker:
                 ),
             )
             await bot.session.close()
-        except Exception:
-            logger.exception("UpdateChecker: failed to send restart report")
+        except Exception as _exc:
+            # ── Фикс #5: если бот не может написать — просто предупреждаем ──
+            if "Forbidden" in type(_exc).__name__ or "forbidden" in str(_exc).lower():
+                logger.warning(
+                    "UpdateChecker: бот не может начать диалог с пользователем. "
+                    "Напиши /start боту в Telegram — и уведомления о рестарте заработают. (%s)",
+                    _exc,
+                )
+            else:
+                logger.exception("UpdateChecker: failed to send restart report")
 
 
 def _fmt_time(seconds: float) -> str:

@@ -227,6 +227,12 @@ async def _startup(args: argparse.Namespace) -> None:
         await setup.start(host="0.0.0.0", port=web_port)
         await setup.wait_done()
         client = setup.get_client()
+        # ── Фикс #1: после регистрации через веб правим права на сессию ──────
+        # Иначе Telethon падает с «sqlite3.OperationalError: attempt to write a
+        # readonly database» потому что SetupServer создаёт файл с 0o444 / 0o400.
+        _fix_session_permissions()
+        _fix_db_readonly()
+        # ─────────────────────────────────────────────────────────────────────
         cfg      = _load_raw_config()
         api_id   = int(cfg.get("api_id", 0))
         api_hash = str(cfg.get("api_hash", ""))
