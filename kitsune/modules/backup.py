@@ -239,8 +239,17 @@ class BackupModule(KitsuneModule):
                 reply_markup=kb,
                 parse_mode="HTML",
             )
-        except Exception:
-            logger.exception("Backup: failed to send interval setup")
+        # ── Фикс #5: бот не может САМ начать диалог — это нормально ─────────
+        # Пользователь должен написать /start боту первым. Не крашим.
+        except Exception as _exc:
+            if "Forbidden" in type(_exc).__name__ or "forbidden" in str(_exc).lower():
+                logger.warning(
+                    "Backup: бот не может начать диалог с owner_id=%s. "
+                    "Напиши боту /start в Telegram — и уведомления заработают. (%s)",
+                    owner_id, _exc,
+                )
+            else:
+                logger.exception("Backup: failed to send interval setup")
 
     async def handle_interval_callback(self, call) -> None:
         try:

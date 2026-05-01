@@ -312,6 +312,22 @@ chmod 755 "$HOME/.kitsune" "$HOME/.kitsune/modules" "$HOME/.kitsune/logs"
 [[ -f "$HOME/.kitsune/kitsune.session.enc" ]] && chmod 600 "$HOME/.kitsune/kitsune.session.enc" || true
 ok "Директории: ~/.kitsune/"
 
+# ── Фикс #4: PATH — добавляем ~/.local/bin в .bashrc/.profile ────────────────
+# pip3 install --user кладёт скрипты в ~/.local/bin, которого нет в PATH
+# по умолчанию в UserLand/Ubuntu. Добавляем один раз, если ещё не добавлено.
+step "Настройка PATH"
+_PATH_LINE='export PATH="$HOME/.local/bin:$PATH"'
+for _RC in "$HOME/.bashrc" "$HOME/.profile"; do
+    if [[ -f "$_RC" ]] && ! grep -qF '.local/bin' "$_RC" 2>/dev/null; then
+        echo "" >> "$_RC"
+        echo "# Kitsune: добавлено установщиком" >> "$_RC"
+        echo "$_PATH_LINE" >> "$_RC"
+        ok "PATH: добавлено ~/.local/bin → $_RC"
+    fi
+done
+# Применяем для текущего процесса прямо сейчас
+export PATH="$HOME/.local/bin:$PATH"
+
 # ── Скрипт запуска ────────────────────────────────────────────────────────────
 step "Скрипт запуска"
 if $IS_TERMUX; then
