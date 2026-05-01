@@ -26,16 +26,77 @@ try:
 except ImportError:
     pass
 
+
+def _derive_key_from_credentials() -> bytes | None:
+    """
+    Выводит ключ детерминировано из api_id + api_hash из config.toml.
+    После переустановки бота с теми же данными ключ будет ОДИНАКОВЫМ —
+    поэтому бэкап можно расшифровать без сохранённого kitsune.key.
+    """
+    try:
+        import toml
+        cfg_path = Path(__file__).parent.parent / "config.toml"
+        if not cfg_path.exists():
+            # Fallback: ищем на уровень выше (на случай нестандартной структуры)
+            cfg_path = Path.home() / "Kitsune" / "config.toml"
+        if not cfg_path.exists():
+            return None
+
+        cfg      = toml.loads(cfg_path.read_text(encoding="utf-8"))
+        api_id   = str(cfg.get("api_id", "")).strip()
+        api_hash = str(cfg.get("api_hash", "")).strip()
+
+        if not api_id or not api_hash:
+            return None
+
+        # HKDF-like деривация: SHA-256(api_id + ":" + api_hash + ":kitsune-backup-key")
+        # Результат — стабильный 32-байтовый ключ, уникальный для каждого аккаунта.
+        seed  = f"{api_id}:{api_hash}:kitsune-backup-key".encode()
+        digest = hashlib.sha256(seed).digest()
+        return base64.urlsafe_b64encode(digest)
+    except Exception:
+        return None
+
+
 def _load_or_create_key() -> bytes:
+    # 1. Переменная окружения — наивысший приоритет
     env_key = os.environ.get(KEY_ENV, "").strip()
     if env_key:
         return env_key.encode()
 
+    # 2. Файл kitsune.key — если уже существует (обратная совместимость)
     if KEY_PATH.exists():
-        return KEY_PATH.read_bytes().strip()
+        stored = KEY_PATH.read_bytes().strip()
+        # Если файл содержит метку "derived" — это наш детерминированный ключ,
+        # просто перевычисляем его (на случай если файл удалят при переустановке).
+        if stored.startswith(b"derived:"):
+            derived = _derive_key_from_credentials()
+            if derived:
+                return derived
+        else:
+            return stored
 
+    # 3. Деривация из api_id + api_hash — детерминированный ключ.
+    #    После переустановки с теми же кредами = тот же ключ = бэкап восстанавливается.
+    derived = _derive_key_from_credentials()
+    if derived:
+        # Сохраняем с меткой чтобы отличать от случайного ключа
+        KEY_PATH.parent.mkdir(parents=True, exist_ok=True)
+        KEY_PATH.write_bytes(b"derived:" + derived)
+        try:
+            KEY_PATH.chmod(0o600)
+        except Exception:
+            pass
+        return derived
+
+    # 4. Последний резерв: случайный ключ (только если config.toml недоступен).
+    #    Предупреждаем пользователя.
+    import logging
+    logging.getLogger(__name__).warning(
+        "crypto: не удалось получить api_id/api_hash из config.toml — "
+        "генерирую случайный ключ. После переустановки бэкап может не открыться!"
+    )
     key = base64.urlsafe_b64encode(os.urandom(32))
-
     KEY_PATH.parent.mkdir(parents=True, exist_ok=True)
     KEY_PATH.write_bytes(key)
     try:
@@ -44,13 +105,13 @@ def _load_or_create_key() -> bytes:
         pass
     return key
 
+
 def _aes_gcm_encrypt(data: bytes, key: bytes) -> bytes:
     raw_key = base64.urlsafe_b64decode(key + b"==")
     aes_key = hashlib.sha256(raw_key).digest()
-    nonce = os.urandom(12)  
+    nonce = os.urandom(12)
     aesgcm = _AESGCM(aes_key)
     ciphertext = aesgcm.encrypt(nonce, data, None)
-
     return struct.pack(">I", len(nonce)) + nonce + ciphertext
 
 def _aes_gcm_decrypt(data: bytes, key: bytes) -> bytes:
@@ -84,13 +145,14 @@ def _xor_decrypt(data: bytes, key: bytes) -> bytes:
         result[i] = byte ^ digest[i % 32]
     return bytes(result)
 
+
 def encrypt(data: bytes) -> bytes:
     key = _load_or_create_key()
-    if _AES_GCM_AVAILABLE:                                         
+    if _AES_GCM_AVAILABLE:
         return MAGIC + b"AESGCM1:" + _aes_gcm_encrypt(data, key)
-    if _FERNET_AVAILABLE:                                          
+    if _FERNET_AVAILABLE:
         return MAGIC + _Fernet(key).encrypt(data)
-    return MAGIC + b"XOR1:" + _xor_encrypt(data, key)             
+    return MAGIC + b"XOR1:" + _xor_encrypt(data, key)
 
 def decrypt(data: bytes) -> bytes:
     if not data.startswith(MAGIC):
