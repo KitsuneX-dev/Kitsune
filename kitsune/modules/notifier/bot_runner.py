@@ -34,6 +34,70 @@ def _make_bot(token: str) -> typing.Any:
         session=_NoSSLSession(timeout=60),
     )
 
+
+def _get_platform() -> str:
+    """Определяет платформу где запущен бот."""
+    import sys, os
+    # UserLand / Android
+    if os.path.exists("/data/data/tech.ula") or "com.termux" in os.environ.get("PREFIX", ""):
+        return "📱 Android (UserLand)"
+    if "ANDROID_ROOT" in os.environ or "ANDROID_DATA" in os.environ:
+        return "📱 Android (Termux)"
+    # iOS
+    if sys.platform == "darwin" and os.path.exists("/var/mobile"):
+        return "🍎 iOS (iSH)"
+    # Linux
+    try:
+        release = open("/etc/os-release").read()
+        if "ubuntu" in release.lower(): return "🐧 Ubuntu"
+        if "debian" in release.lower(): return "🐧 Debian"
+        if "alpine" in release.lower(): return "🏔 Alpine Linux"
+        if "arch"   in release.lower(): return "🎯 Arch Linux"
+    except Exception:
+        pass
+    if sys.platform.startswith("linux"):
+        return "🐧 Linux"
+    if sys.platform == "win32":
+        return "🪟 Windows"
+    if sys.platform == "darwin":
+        return "🍎 macOS"
+    return f"❓ {sys.platform}"
+
+
+def _build_welcome_text(db) -> str:
+    """Строит welcome-сообщение для /start в боте."""
+    prefix       = db.get("kitsune.core", "prefix", ".")
+    interval_set = db.get("kitsune.backup", "interval_h", None)
+    backup_str   = f"каждые <b>{interval_set} ч</b>" if interval_set else "не настроен"
+    platform     = _get_platform()
+
+    return (
+        "🦊 <b>Добро пожаловать в Kitsune Userbot!</b>\n"
+        "Kitsune успешно запущен и готов к работе.\n\n"
+        "⚡ <b>Быстрый старт:</b>\n"
+        "<blockquote>"
+        f"<code>{prefix}help</code> — список всех команд\n"
+        f"<code>{prefix}ping</code> — проверить работу\n"
+        f"<code>{prefix}cfg</code> — настройка модулей\n"
+        f"<code>{prefix}dlm &lt;url&gt;</code> — установить модуль"
+        "</blockquote>\n"
+        "🔒 <b>Безопасность:</b>\n"
+        "<blockquote>"
+        f"<code>{prefix}security</code> — управление доступом\n"
+        f"<code>{prefix}backupall</code> — полный бэкап (БД + модули)\n"
+        f"<code>{prefix}setbackupinterval</code> — изменить время авто-бэкапа"
+        "</blockquote>\n"
+        "🗂 <b>Авто-бэкап:</b> " + backup_str + "\n\n"
+        "🔗 <b>Полезные ссылки:</b>\n"
+        "<blockquote>"
+        "Репозиторий: github.com/youshi-dev/Kitsune\n"
+        "Разработчик: @Mikasu32"
+        "</blockquote>\n"
+        "🎉 <i>Приятного использования!</i>\n"
+        f"🖥 <b>Платформа:</b> {platform}"
+    )
+
+
 class BotRunner:
 
     def __init__(self, client, db) -> None:
@@ -69,6 +133,16 @@ class BotRunner:
                 owner_id = self._db.get(_DB_KEY, "owner_id", None)
                 if owner_id:
                     await asyncio.sleep(2)
+                    # ── Фикс: welcome в бота, не в «Избранное» ────────────────
+                    try:
+                        await self.bot.send_message(
+                            chat_id=int(owner_id),
+                            text=_build_welcome_text(self._db),
+                            parse_mode="HTML",
+                        )
+                    except Exception as _wexc:
+                        logger.warning("BotRunner: не удалось отправить welcome: %s", _wexc)
+                    # ── Настройка авто-бэкапа ──────────────────────────────────
                     loader = getattr(self._client, "_kitsune_loader", None)
                     backup = loader.modules.get("backup") if loader else None
                     if backup:
@@ -160,17 +234,9 @@ class BotRunner:
                 await backup.show_interval_setup(self.bot, msg.from_user.id)
                 await self._db.set(_DB_KEY, "backup_interval_asked", True)
             else:
-                backup_status = f"каждые <b>{interval_set} ч</b>" if interval_set else "не настроен"
                 await msg.answer(
-                    "🦊 <b>Kitsune Notifier</b>\n\n"
-                    "Я присылаю уведомления об обновлениях и храню бэкапы.\n\n"
-                    f"🗂 Авто-бэкап: {backup_status}\n\n"
-                    "Команды:\n"
-                    "• <code>.backup</code> — создать бэкап вручную\n"
-                    "• <code>.restore</code> — восстановить из бэкапа\n"
-                    "• <code>.autodel</code> — авто-удаление сервисных сообщений\n"
-                    "• <code>.resetbot</code> — пересоздать бота\n"
-                    "• <code>.update</code> — проверить обновления"
+                    _build_welcome_text(self._db),
+                    parse_mode="HTML",
                 )
         except Exception as e:
             logger.warning("BotRunner: on_start failed — %s", e)
