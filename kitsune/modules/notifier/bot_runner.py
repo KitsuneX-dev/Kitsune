@@ -129,17 +129,34 @@ class BotRunner:
             )
             logger.info("BotRunner: polling started (first_run=%s)", first_run)
 
+            # Проверяем и устанавливаем аватарки (один раз, флаги в БД)
+            try:
+                from ..assets import setup_all_avatars
+                await setup_all_avatars(self._client, self._db)
+            except Exception as _ae:
+                logger.debug("BotRunner: setup_all_avatars: %s", _ae)
+
             if first_run:
                 owner_id = self._db.get(_DB_KEY, "owner_id", None)
                 if owner_id:
                     await asyncio.sleep(2)
                     # ── Фикс: welcome в бота, не в «Избранное» ────────────────
                     try:
-                        await self.bot.send_message(
-                            chat_id=int(owner_id),
-                            text=_build_welcome_text(self._db),
-                            parse_mode="HTML",
-                        )
+                        from pathlib import Path as _Path
+                        _info = _Path(__file__).parent.parent.parent / "assets" / "kitsune_info.png"
+                        if _info.exists():
+                            await self.bot.send_photo(
+                                chat_id=int(owner_id),
+                                photo=_info.open("rb"),
+                                caption=_build_welcome_text(self._db),
+                                parse_mode="HTML",
+                            )
+                        else:
+                            await self.bot.send_message(
+                                chat_id=int(owner_id),
+                                text=_build_welcome_text(self._db),
+                                parse_mode="HTML",
+                            )
                     except Exception as _wexc:
                         logger.warning("BotRunner: не удалось отправить welcome: %s", _wexc)
                     # ── Настройка авто-бэкапа ──────────────────────────────────
@@ -234,10 +251,20 @@ class BotRunner:
                 await backup.show_interval_setup(self.bot, msg.from_user.id)
                 await self._db.set(_DB_KEY, "backup_interval_asked", True)
             else:
-                await msg.answer(
-                    _build_welcome_text(self._db),
-                    parse_mode="HTML",
-                )
+                # Отправляем баннер + текст
+                from pathlib import Path as _Path
+                _info = _Path(__file__).parent.parent.parent / "assets" / "kitsune_info.png"
+                if _info.exists():
+                    await msg.answer_photo(
+                        photo=_info.open("rb"),
+                        caption=_build_welcome_text(self._db),
+                        parse_mode="HTML",
+                    )
+                else:
+                    await msg.answer(
+                        _build_welcome_text(self._db),
+                        parse_mode="HTML",
+                    )
         except Exception as e:
             logger.warning("BotRunner: on_start failed — %s", e)
 
