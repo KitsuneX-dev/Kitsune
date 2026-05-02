@@ -88,7 +88,7 @@ class BackupModule(KitsuneModule):
         ),
     }
 
-    strings = {
+    strings_en = {
         "creating":       "⏳ Creating database backup...",
         "done":           "✅ Database backup sent.",
         "restoring":      "⏳ Restoring database...",

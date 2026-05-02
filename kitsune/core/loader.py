@@ -135,8 +135,10 @@ class KitsuneModule:
         db = getattr(self, "db", None)
         lang = db.get("kitsune.core", "lang", "ru") if db else "ru"
 
-        strings_key = f"strings_{lang}" if lang != "en" else "strings"
-        strings = getattr(self, strings_key, None) or getattr(self, "strings_ru", None) or getattr(self, "strings", {})
+        # Всегда используем суффикс: strings_ru, strings_en и т.д.
+        # Это исключает конфликт с методом strings() если модуль объявит strings = {}.
+        strings_key = f"strings_{lang}"
+        strings = getattr(self, strings_key, None) or getattr(self, "strings_ru", None) or getattr(self, "strings_en", {})
 
         text = strings.get(key, key) if isinstance(strings, dict) else key
 
