@@ -122,7 +122,12 @@ class KitsuneModule:
         prefix = dispatcher._prefix if dispatcher else "."
         text = event.message.raw_text or event.message.text or ""
         if text.startswith(prefix):
-            parts = text.split(maxsplit=1)
+            # Фикс: срезаем префикс и убираем пробелы — чтобы
+            # "*help" и "* help" давали одинаковый результат.
+            # Без этого "* help" → split → ["*","help"] → get_args
+            # возвращал "help" как аргумент вместо пустой строки.
+            remainder = text[len(prefix):].lstrip()
+            parts = remainder.split(maxsplit=1)
             return parts[1] if len(parts) > 1 else ""
         return ""
 
