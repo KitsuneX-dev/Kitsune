@@ -7,6 +7,7 @@ from telethon.tl.types import MessageEntityBlockquote
 
 from ..core.loader import KitsuneModule, command, ModuleConfig, ConfigValue
 from ..core.security import OWNER
+from ..assets import GUIDE_BANNER
 
 class HelpModule(KitsuneModule):
 
@@ -42,6 +43,11 @@ class HelpModule(KitsuneModule):
                 "banner_url",
                 default=None,
                 doc="Прямая ссылка на баннер (gif/mp4/jpg). Оставь пустым чтобы убрать.",
+            ),
+            ConfigValue(
+                "show_banner",
+                default=True,
+                doc="Показывать баннер Kitsune Guide перед списком модулей. True/False.",
             ),
         )
 
@@ -136,21 +142,41 @@ class HelpModule(KitsuneModule):
         if plain_lines:
             body += "\n<blockquote expandable>" + "".join(plain_lines) + "\n</blockquote>"
 
-        banner = self.config["banner_url"]
-        inline = self._inline()
+        # ── Баннер Kitsune Guide ──────────────────────────────────────────────
+        show_banner = self.config.get("show_banner", True)
+        banner_url  = self.config["banner_url"]
 
-        if banner and inline and getattr(inline, "_bot", None):
-            try:
-                await inline.form(
-                    text=body,
-                    message=event.message,
-                    reply_markup=[],
-                    gif=banner,
-                )
-                return
-            except Exception:
-                pass
+        # Приоритет: кастомный banner_url → встроенный GUIDE_BANNER → текст
+        if show_banner:
+            # 1. Кастомный URL через inline-форму
+            inline = self._inline()
+            if banner_url and inline and getattr(inline, "_bot", None):
+                try:
+                    await inline.form(
+                        text=body,
+                        message=event.message,
+                        reply_markup=[],
+                        gif=banner_url,
+                    )
+                    return
+                except Exception:
+                    pass
 
+            # 2. Встроенный локальный баннер kitsune_guide.png
+            if GUIDE_BANNER.exists():
+                try:
+                    await event.message.delete()
+                    await event.client.send_file(
+                        event.chat_id,
+                        str(GUIDE_BANNER),
+                        caption=body,
+                        parse_mode="html",
+                    )
+                    return
+                except Exception:
+                    pass
+
+        # 3. Fallback — просто текст
         await self._edit_collapsed(event.message, body)
 
     async def _mod_help(self, event, mod: KitsuneModule) -> None:

@@ -349,8 +349,13 @@ class BackupModule(KitsuneModule):
             logger.error("backup: не удалось создать KitsuneBackup: %s", exc)
             return None
 
-        # ── 4. Добавляем в папку Kitsune ──────────────────────────────────────
+        # ── 4. Аватарка + папка Kitsune ──────────────────────────────────────
         if new_id:
+            try:
+                from ..assets import ensure_channel_photo, BACKUP_AVATAR
+                await ensure_channel_photo(self.client, self.db, new_id, BACKUP_AVATAR)
+            except Exception as e:
+                logger.debug("backup: аватарка не установлена: %s", e)
             try:
                 await _ensure_kitsune_folder(self.client, new_id)
             except Exception as e:
