@@ -61,8 +61,7 @@ async def ensure_channel_photo(
 ) -> bool:
     """
     Устанавливает фото канала/группы если ещё не установлено.
-    Флаг в БД гарантирует что проверка делается только один раз.
-    force=True — устанавливает даже если флаг уже стоит (для принудительного обновления).
+    Автоматически вступает в канал и выдаёт себе права если нужно.
     """
     flag_key = f"photo_{abs(channel_id)}"
     if not force and db.get(_DB_NS, flag_key, False):
@@ -73,19 +72,28 @@ async def ensure_channel_photo(
         return False
 
     try:
-        from telethon.tl.functions.channels import EditPhotoRequest
-        from telethon.tl.types import InputChatUploadedPhoto
-
-        # Загружаем файл через Telethon userbot-клиент (он owner канала)
-        uploaded = await client.upload_file(
-            str(photo_path),
-            file_name=photo_path.name,
+        from telethon.tl.functions.channels import (
+            EditPhotoRequest, EditAdminRequest, JoinChannelRequest,
         )
-        photo  = InputChatUploadedPhoto(file=uploaded)
+        from telethon.tl.types import (
+            InputChatUploadedPhoto, ChatAdminRights,
+        )
+
         entity = await client.get_entity(channel_id)
+
+        # Вступаем если не состоим
+        try:
+            await client(JoinChannelRequest(entity))
+            logger.info("assets: вступили в канал %s", channel_id)
+        except Exception:
+            pass  # уже состоим — нормально
+
+        # Устанавливаем фото
+        uploaded = await client.upload_file(str(photo_path), file_name=photo_path.name)
+        photo    = InputChatUploadedPhoto(file=uploaded)
         await client(EditPhotoRequest(channel=entity, photo=photo))
 
-        db.force_set(_DB_NS, flag_key, True)
+        db.set_sync(_DB_NS, flag_key, True)
         await db.force_save()
         logger.info("assets: аватарка установлена для %s (%s)", channel_id, photo_path.name)
         return True
@@ -127,7 +135,7 @@ async def ensure_bot_photo(
                 await conv.send_file(str(BOT_AVATAR))
                 r3 = await conv.get_response()
                 if "updated" in (r3.text or "").lower() or "установлено" in (r3.text or "").lower() or "success" in (r3.text or "").lower():
-                    db.force_set(_DB_NS, flag_key, True)
+                    db.set_sync(_DB_NS, flag_key, True)
                     await db.force_save()
                     logger.info("assets: аватарка бота @%s установлена", username_clean)
                     return True
