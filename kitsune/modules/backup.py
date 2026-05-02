@@ -25,6 +25,87 @@ _INTERVAL_OPTIONS = [2, 4, 6, 8, 12, 24, 48]
 _USER_MODULES_DIR = Path.home() / ".kitsune" / "modules"
 
 
+
+async def _ensure_kitsune_folder(client, *peer_ids: int) -> None:
+    """
+    Создаёт папку «Kitsune» если её нет, и добавляет туда переданные чаты.
+    Использует низкоуровневый API Telethon (DialogFilter).
+    """
+    from telethon.tl.functions.messages import (
+        GetDialogFiltersRequest,
+        UpdateDialogFilterRequest,
+    )
+    from telethon.tl.types import (
+        DialogFilter,
+        InputPeerChannel,
+        InputPeerChat,
+    )
+
+    FOLDER_NAME = "Kitsune"
+
+    # Получаем текущие папки
+    filters = await client(GetDialogFiltersRequest())
+    existing: DialogFilter | None = None
+    max_id = 2  # id=1 зарезервирован Telegram, наши папки начинаются с 2
+
+    for f in filters.filters:
+        fid = getattr(f, "id", 0)
+        if fid > max_id:
+            max_id = fid
+        title = getattr(f, "title", None)
+        if title == FOLDER_NAME:
+            existing = f
+            break
+
+    # Конвертируем peer_ids → InputPeer
+    new_peers = []
+    for pid in peer_ids:
+        try:
+            entity = await client.get_entity(pid)
+            eid = getattr(entity, "id", None)
+            ah  = getattr(entity, "access_hash", 0)
+            if eid:
+                new_peers.append(InputPeerChannel(channel_id=eid, access_hash=ah or 0))
+        except Exception:
+            pass
+
+    if existing:
+        # Добавляем в существующую папку если peer ещё не там
+        current_ids = {
+            getattr(p, "channel_id", None) or getattr(p, "chat_id", None)
+            for p in getattr(existing, "include_peers", [])
+        }
+        to_add = [
+            p for p in new_peers
+            if (getattr(p, "channel_id", None) or getattr(p, "chat_id", None)) not in current_ids
+        ]
+        if not to_add:
+            return  # уже есть
+        existing.include_peers = list(getattr(existing, "include_peers", [])) + to_add
+        await client(UpdateDialogFilterRequest(id=existing.id, filter=existing))
+        logger.debug("_ensure_kitsune_folder: добавлено %d чатов в папку Kitsune", len(to_add))
+    else:
+        # Создаём папку заново
+        new_filter = DialogFilter(
+            id=max_id + 1,
+            title=FOLDER_NAME,
+            pinned_peers=[],
+            include_peers=new_peers,
+            exclude_peers=[],
+            contacts=False,
+            non_contacts=False,
+            groups=False,
+            broadcasts=False,
+            bots=False,
+            exclude_muted=False,
+            exclude_read=False,
+            exclude_archived=False,
+            emoticon="🦊",
+        )
+        await client(UpdateDialogFilterRequest(id=new_filter.id, filter=new_filter))
+        logger.debug("_ensure_kitsune_folder: создана папка Kitsune с %d чатами", len(new_peers))
+
+
 class BackupModule(KitsuneModule):
     name        = "backup"
     description = "Резервное копирование — без шифрования, совместимо с Hikka/Heroku"
@@ -206,18 +287,51 @@ class BackupModule(KitsuneModule):
         return archive.getvalue(), mod_count
 
     async def _get_dest(self, event=None) -> int | None:
-        """Возвращает chat_id группы KitsuneBackup (создаёт при необходимости)."""
+        """
+        Возвращает chat_id группы KitsuneBackup.
+        Порядок:
+          1. Берём сохранённый group_id из БД и проверяем что он живой
+          2. Ищем группу с названием KitsuneBackup среди всех диалогов
+          3. Только если не нашли — создаём новую
+          4. Добавляем группу в папку Kitsune (создаём папку если нет)
+        """
+        # ── 1. Проверяем сохранённый ID ───────────────────────────────────────
         chat_id = self.db.get(_DB_OWNER, "group_id", None)
         if chat_id:
             try:
-                await asyncio.wait_for(self.client.get_entity(int(chat_id)), timeout=20)
+                await asyncio.wait_for(
+                    self.client.get_entity(int(chat_id)), timeout=20
+                )
                 return int(chat_id)
             except Exception:
-                pass
+                logger.debug("backup: сохранённый group_id %s недоступен — ищем заново", chat_id)
 
+        # ── 2. Ищем KitsuneBackup в диалогах ─────────────────────────────────
+        found_id: int | None = None
+        try:
+            async for dialog in self.client.iter_dialogs(limit=500):
+                if (dialog.title or "").strip() == "KitsuneBackup":
+                    entity = dialog.entity
+                    cid = getattr(entity, "id", None)
+                    if cid:
+                        if getattr(entity, "megagroup", False) or getattr(entity, "broadcast", False):
+                            found_id = int(f"-100{cid}")
+                        else:
+                            found_id = -cid
+                        logger.info("backup: нашли существующий KitsuneBackup id=%s", found_id)
+                        break
+        except Exception as e:
+            logger.warning("backup: ошибка поиска KitsuneBackup: %s", e)
+
+        if found_id:
+            await self.db.set(_DB_OWNER, "group_id", found_id)
+            return found_id
+
+        # ── 3. Создаём новую группу ───────────────────────────────────────────
         if event:
             await event.reply(self.strings("no_dest"), parse_mode="html")
 
+        new_id: int | None = None
         try:
             from telethon.tl.functions.channels import CreateChannelRequest
             result = await self.client(CreateChannelRequest(
@@ -225,14 +339,24 @@ class BackupModule(KitsuneModule):
                 about="🦊 Kitsune Userbot — резервные копии",
                 megagroup=False,
             ))
-            new_id = result.chats[0].id
+            entity = result.chats[0]
+            new_id = int(f"-100{entity.id}")
             await self.db.set(_DB_OWNER, "group_id", new_id)
             if event:
                 await event.reply(self.strings("group_created"), parse_mode="html")
-            return new_id
+            logger.info("backup: создана группа KitsuneBackup id=%s", new_id)
         except Exception as exc:
-            logger.error("backup: не удалось создать группу: %s", exc)
+            logger.error("backup: не удалось создать KitsuneBackup: %s", exc)
             return None
+
+        # ── 4. Добавляем в папку Kitsune ──────────────────────────────────────
+        if new_id:
+            try:
+                await _ensure_kitsune_folder(self.client, new_id)
+            except Exception as e:
+                logger.debug("backup: не удалось добавить в папку Kitsune: %s", e)
+
+        return new_id
 
     @staticmethod
     def _strip_tokens(db_data: dict) -> None:
