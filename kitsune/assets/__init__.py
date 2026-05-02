@@ -148,29 +148,90 @@ async def setup_all_avatars(client: "TelegramClient", db) -> None:
     """
     pairs: list[tuple[int, Path]] = []
 
-    backup_id = db.get("kitsune.backup", "group_id", None)
+    # kitsune.backup использует разные ключи в разных версиях
+    backup_id = (
+        db.get("kitsune.backup", "group_id", None) or
+        db.get("kitsune.backup", "chat_id", None) or
+        db.get("kitsune.modules.backup", "group_id", None)
+    )
+    logger.info("assets: backup_id из БД = %s", backup_id)
     if backup_id:
         pairs.append((int(backup_id), BACKUP_AVATAR))
 
-    logs_id = db.get("kitsune.logs", "channel_id", None)
+    logs_id = (
+        db.get("kitsune.logs", "channel_id", None) or
+        db.get("kitsune.logs", "chat_id", None)
+    )
     if logs_id:
         pairs.append((int(logs_id), LOGS_AVATAR))
 
-    assets_id = db.get("kitsune.assets_channel", "channel_id", None)
+    assets_id = (
+        db.get("kitsune.assets_channel", "channel_id", None) or
+        db.get("kitsune.assets", "channel_id", None)
+    )
     if assets_id:
         pairs.append((int(assets_id), ASSETS_AVATAR))
 
+    logger.info("assets: setup_all_avatars — найдено %d каналов/групп", len(pairs))
     for channel_id, photo_path in pairs:
         flag_key = f"photo_{abs(channel_id)}"
         already  = db.get(_DB_NS, flag_key, False)
+        logger.info("assets: канал %s — флаг=%s, файл=%s", channel_id, already, photo_path.exists())
         if not already:
-            logger.info("assets: аватарка не установлена для %s — ставим...", channel_id)
-        await ensure_channel_photo(client, db, channel_id, photo_path)
+            await ensure_channel_photo(client, db, channel_id, photo_path)
 
     # Аватарка бота
     bot_username = db.get("kitsune.inline", "bot_username", None)
+    logger.info("assets: bot_username из БД = %s", bot_username)
     if bot_username:
         flag_key = f"bot_photo_{bot_username.lstrip('@').lower()}"
         if not db.get(_DB_NS, flag_key, False):
-            logger.info("assets: аватарка бота @%s не установлена — ставим...", bot_username)
-        await ensure_bot_photo(client, db, bot_username)
+            await ensure_bot_photo(client, db, bot_username)
+
+
+# ── Диагностика (вызывается из .assetcheck) ───────────────────────────────────
+
+async def diagnose(client: "TelegramClient", db) -> str:
+    """
+    Возвращает диагностический отчёт — что найдено в БД и что будет делать setup_all_avatars.
+    Вызови через команду .assetcheck
+    """
+    lines = ["🔍 <b>Kitsune Assets — диагностика</b>\n"]
+
+    # Файлы
+    lines.append("📁 <b>Файлы:</b>")
+    for name, path in [
+        ("kitsune.jpeg",      BOT_AVATAR),
+        ("kitsune_backup.png",BACKUP_AVATAR),
+        ("kitsune_logs.png",  LOGS_AVATAR),
+        ("kitsune_assets.png",ASSETS_AVATAR),
+        ("kitsune_info.png",  INFO_BANNER),
+        ("kitsune_guide.png", GUIDE_BANNER),
+    ]:
+        lines.append(f"  {'✅' if path.exists() else '❌'} {name}")
+
+    # БД ключи
+    lines.append("\n🗄 <b>БД ключи:</b>")
+    backup_id = db.get("kitsune.backup", "group_id", None)
+    bot_user  = db.get("kitsune.inline", "bot_username", None)
+    logs_id   = db.get("kitsune.logs", "channel_id", None)
+    assets_id = db.get("kitsune.assets_channel", "channel_id", None)
+
+    lines.append(f"  backup group_id = <code>{backup_id}</code>")
+    lines.append(f"  bot_username    = <code>{bot_user}</code>")
+    lines.append(f"  logs channel_id = <code>{logs_id}</code>")
+    lines.append(f"  assets chan id  = <code>{assets_id}</code>")
+
+    # Флаги установки
+    lines.append("\n🚩 <b>Флаги установки (kitsune.assets):</b>")
+    for cid in [backup_id, logs_id, assets_id]:
+        if cid:
+            key = f"photo_{abs(int(cid))}"
+            val = db.get(_DB_NS, key, False)
+            lines.append(f"  {key} = {val}")
+    if bot_user:
+        key = f"bot_photo_{bot_user.lstrip('@').lower()}"
+        val = db.get(_DB_NS, key, False)
+        lines.append(f"  {key} = {val}")
+
+    return "\n".join(lines)
