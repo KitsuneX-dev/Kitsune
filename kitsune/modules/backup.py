@@ -635,6 +635,10 @@ class BackupModule(KitsuneModule):
             else:
                 logger.exception("Backup: failed to send interval setup")
 
+    async def handle_interval_callback(self, call) -> None:
+        """Алиас для совместимости с bot_runner."""
+        await self.on_callback(call)
+
     async def on_callback(self, call) -> None:
         if not call.data.startswith("backup_interval:"):
             return
