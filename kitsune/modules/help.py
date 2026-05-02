@@ -143,8 +143,12 @@ class HelpModule(KitsuneModule):
             body += "\n<blockquote expandable>" + "".join(plain_lines) + "\n</blockquote>"
 
         # ── Баннер Kitsune Guide ──────────────────────────────────────────────
-        show_banner = self.config.get("show_banner", True)
-        banner_url  = self.config["banner_url"]
+        # ModuleConfig не имеет .get() — используем [] с fallback
+        try:
+            show_banner = bool(self.config["show_banner"])
+        except Exception:
+            show_banner = True
+        banner_url = self.config["banner_url"]
 
         # Приоритет: кастомный banner_url → встроенный GUIDE_BANNER → текст
         if show_banner:
