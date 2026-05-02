@@ -145,9 +145,10 @@ class BotRunner:
                         from pathlib import Path as _Path
                         _info = _Path(__file__).parent.parent.parent / "assets" / "kitsune_info.png"
                         if _info.exists():
+                            from aiogram.types import FSInputFile
                             await self.bot.send_photo(
                                 chat_id=int(owner_id),
-                                photo=_info.open("rb"),
+                                photo=FSInputFile(str(_info)),
                                 caption=_build_welcome_text(self._db),
                                 parse_mode="HTML",
                             )
@@ -255,8 +256,9 @@ class BotRunner:
                 from pathlib import Path as _Path
                 _info = _Path(__file__).parent.parent.parent / "assets" / "kitsune_info.png"
                 if _info.exists():
+                    from aiogram.types import FSInputFile
                     await msg.answer_photo(
-                        photo=_info.open("rb"),
+                        photo=FSInputFile(str(_info)),
                         caption=_build_welcome_text(self._db),
                         parse_mode="HTML",
                     )
