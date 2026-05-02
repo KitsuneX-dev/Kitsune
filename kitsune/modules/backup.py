@@ -139,7 +139,13 @@ class BackupModule(KitsuneModule):
         Plain JSON дамп всей базы данных.
         Формат совместим с Hikka и Heroku — можно восстановить любым из них.
         """
-        return json.dumps(dict(self.db), ensure_ascii=False, indent=2).encode("utf-8")
+        # Фикс: dict(self.db) вызывает __getitem__ с int-ключами → KeyError.
+        # export_data() возвращает правильный dict {owner: {key: value}}.
+        if hasattr(self.db, "export_data"):
+            data = self.db.export_data()
+        else:
+            data = {k: dict(v) for k, v in self.db._data.items()}
+        return json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8")
 
     def _collect_module_files(self) -> list[tuple[str, bytes]]:
         """
@@ -298,8 +304,12 @@ class BackupModule(KitsuneModule):
                 return
 
             self._strip_tokens(db_data)
+            # Фикс: db.update(**db_data) не работает — используем set() для каждого ключа.
             self.db.clear()
-            self.db.update(**db_data)
+            for owner, keys in db_data.items():
+                if isinstance(keys, dict):
+                    for key, val in keys.items():
+                        self.db.force_set(owner, key, val)
             await self.db.force_save()
             await prog.done(self.strings("restored"))
 
@@ -427,7 +437,10 @@ class BackupModule(KitsuneModule):
 
                     self._strip_tokens(db_data)
                     self.db.clear()
-                    self.db.update(**db_data)
+                    for owner, keys in db_data.items():
+                        if isinstance(keys, dict):
+                            for key, val in keys.items():
+                                self.db.force_set(owner, key, val)
                     await self.db.force_save()
 
                     # ── Восстановление модулей ─────────────────────────────
