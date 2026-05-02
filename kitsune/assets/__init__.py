@@ -56,14 +56,16 @@ async def ensure_channel_photo(
     db,
     channel_id: int,
     photo_path: Path,
+    *,
+    force: bool = False,
 ) -> bool:
     """
     Устанавливает фото канала/группы если ещё не установлено.
-    Использует флаг в БД чтобы не проверять повторно.
-    Возвращает True если фото было установлено (или уже стояло).
+    Флаг в БД гарантирует что проверка делается только один раз.
+    force=True — устанавливает даже если флаг уже стоит (для принудительного обновления).
     """
     flag_key = f"photo_{abs(channel_id)}"
-    if db.get(_DB_NS, flag_key, False):
+    if not force and db.get(_DB_NS, flag_key, False):
         return True  # уже установлено
 
     if not photo_path.exists():
@@ -72,17 +74,20 @@ async def ensure_channel_photo(
 
     try:
         from telethon.tl.functions.channels import EditPhotoRequest
-        from telethon.tl.functions.messages import UploadMediaRequest
-        from telethon.tl.types import InputChatUploadedPhoto, InputMediaUploadedPhoto
+        from telethon.tl.types import InputChatUploadedPhoto
 
-        uploaded = await client.upload_file(str(photo_path))
-        photo    = InputChatUploadedPhoto(file=uploaded)
-        entity   = await client.get_entity(channel_id)
+        # Загружаем файл через Telethon userbot-клиент (он owner канала)
+        uploaded = await client.upload_file(
+            str(photo_path),
+            file_name=photo_path.name,
+        )
+        photo  = InputChatUploadedPhoto(file=uploaded)
+        entity = await client.get_entity(channel_id)
         await client(EditPhotoRequest(channel=entity, photo=photo))
 
         db.force_set(_DB_NS, flag_key, True)
         await db.force_save()
-        logger.info("assets: аватарка установлена для %s", channel_id)
+        logger.info("assets: аватарка установлена для %s (%s)", channel_id, photo_path.name)
         return True
     except Exception as exc:
         logger.warning("assets: не удалось установить аватарку для %s: %s", channel_id, exc)
@@ -137,10 +142,10 @@ async def ensure_bot_photo(
 async def setup_all_avatars(client: "TelegramClient", db) -> None:
     """
     Вызывается при запуске бота.
-    Проходит по всем известным каналам/группам и устанавливает аватарки
-    если они ещё не установлены (проверка через флаги в БД).
+    Устанавливает аватарки для всех каналов/групп/бота если ещё не установлены.
+    Старые пользователи: флага нет → ensure_channel_photo сам установит.
+    Новые/повторные запуски: флаг есть → пропускаем.
     """
-    # Собираем channel_id → photo_path из БД
     pairs: list[tuple[int, Path]] = []
 
     backup_id = db.get("kitsune.backup", "group_id", None)
@@ -156,9 +161,16 @@ async def setup_all_avatars(client: "TelegramClient", db) -> None:
         pairs.append((int(assets_id), ASSETS_AVATAR))
 
     for channel_id, photo_path in pairs:
+        flag_key = f"photo_{abs(channel_id)}"
+        already  = db.get(_DB_NS, flag_key, False)
+        if not already:
+            logger.info("assets: аватарка не установлена для %s — ставим...", channel_id)
         await ensure_channel_photo(client, db, channel_id, photo_path)
 
     # Аватарка бота
     bot_username = db.get("kitsune.inline", "bot_username", None)
     if bot_username:
+        flag_key = f"bot_photo_{bot_username.lstrip('@').lower()}"
+        if not db.get(_DB_NS, flag_key, False):
+            logger.info("assets: аватарка бота @%s не установлена — ставим...", bot_username)
         await ensure_bot_photo(client, db, bot_username)
