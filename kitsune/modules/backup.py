@@ -62,6 +62,12 @@ class BackupModule(KitsuneModule):
         ),
         "interval_set":   "✅ Авто-бэкап каждые <b>{h} ч</b>.",
         "interval_off":   "🔕 Авто-бэкап отключён.",
+        "interval_usage": (
+            "Использование: <code>.setbackupinterval &lt;часы&gt;</code> или <code>.setbackupinterval off</code>\n"
+            f"Доступные значения: 2 4 6 8 12 24 48\n"
+            "Пример: <code>.setbackupinterval 6</code>"
+        ),
+        "interval_bad":   "❌ Неверное значение. Доступно: 2 4 6 8 12 24 48 или off",
         # captions (в сообщении Telegram)
         "db_caption": (
             "🦊 <b>Kitsune DB Backup</b>\n"
@@ -104,6 +110,8 @@ class BackupModule(KitsuneModule):
         "setup_interval": "🗂 <b>Kitsune Auto-Backup</b>\n\nChoose backup interval.",
         "interval_set":   "✅ Auto-backup every <b>{h} h</b>.",
         "interval_off":   "🔕 Auto-backup disabled.",
+        "interval_usage": "Usage: <code>.setbackupinterval &lt;hours&gt;</code> or <code>.setbackupinterval off</code>\nAvailable: 2 4 6 8 12 24 48",
+        "interval_bad":   "❌ Invalid value. Available: 2 4 6 8 12 24 48 or off",
         "db_caption":     "🦊 <b>Kitsune DB Backup</b>\n🕐 {ts}\n📋 Reply: <code>.restoredb</code>",
         "mods_caption":   "🦊 <b>Kitsune Mods Backup</b>\n🕐 {ts}\n📦 {count} files\n📋 Reply: <code>.restoremods</code>",
         "all_caption":    "🦊 <b>Kitsune Full Backup</b>\n🕐 {ts}\n📦 {count} files\n📋 Reply: <code>.restoreall</code>",
@@ -434,7 +442,56 @@ class BackupModule(KitsuneModule):
 
             await prog.done(self.strings("all_restored"))
 
-    # ── Внутренний restore модулей ────────────────────────────────────────────
+    # ── setbackupinterval ─────────────────────────────────────────────────────
+
+    @command("setbackupinterval", required=OWNER)
+    async def setbackupinterval_cmd(self, event) -> None:
+        """
+        Изменить интервал авто-бэкапа прямо из чата.
+        Примеры:
+            .setbackupinterval 6    — каждые 6 часов
+            .setbackupinterval off  — отключить авто-бэкап
+        """
+        dispatcher = getattr(self.client, "_kitsune_dispatcher", None)
+        prefix     = dispatcher._prefix if dispatcher else "."
+        raw        = event.message.text[len(prefix):].split(maxsplit=1)
+        arg        = raw[1].strip().lower() if len(raw) > 1 else ""
+
+        if not arg:
+            current = self.db.get(_DB_OWNER, "interval_h", None)
+            status  = f"каждые <b>{current} ч</b>" if current else "отключён"
+            await event.reply(
+                f"🗂 Авто-бэкап сейчас: {status}\n\n"
+                + self.strings("interval_usage"),
+                parse_mode="html",
+            )
+            return
+
+        # Отключение
+        if arg in ("off", "0", "no", "disable", "выкл", "отключить"):
+            if self._auto_task and not self._auto_task.done():
+                self._auto_task.cancel()
+            await self.db.delete(_DB_OWNER, "interval_h")
+            await event.reply(self.strings("interval_off"), parse_mode="html")
+            return
+
+        # Числовое значение
+        try:
+            h = int(arg)
+        except ValueError:
+            await event.reply(self.strings("interval_bad"), parse_mode="html")
+            return
+
+        if h not in _INTERVAL_OPTIONS:
+            await event.reply(self.strings("interval_bad"), parse_mode="html")
+            return
+
+        await self.db.set(_DB_OWNER, "interval_h", h)
+        await self.db.set(_DB_OWNER, "last_backup", int(time.time()))
+        self._start_auto(h)
+        await event.reply(self.strings("interval_set").format(h=h), parse_mode="html")
+
+        # ── Внутренний restore модулей ────────────────────────────────────────────
 
     async def _restore_mods_from_zip(self, mods_zip_bytes: bytes) -> int:
         """
