@@ -49,6 +49,115 @@ def get_asset(name: str) -> Path:
     raise FileNotFoundError(f"Asset not found: {name}")
 
 
+# ── Авто-определение bot_username из inline-модуля ────────────────────────────
+
+def _resolve_bot_username(client: "TelegramClient", db) -> str | None:
+    """
+    Ищет username инлайн-бота в нескольких местах:
+      1. DB: kitsune.inline / bot_username
+      2. Живой объект: client._kitsune_inline._bot_username
+    Если нашли через объект, попутно сохраняем в БД чтобы следующий запуск
+    тоже его видел.
+    """
+    # 1. Из БД
+    username = db.get("kitsune.inline", "bot_username", None)
+    if username:
+        return username
+
+    # 2. Из живого инлайн-объекта (inline/core.py хранит его в памяти,
+    #    но не сохраняет в БД — ФИКС: читаем и сохраняем)
+    inline = getattr(client, "_kitsune_inline", None)
+    if inline:
+        username = getattr(inline, "_bot_username", None)
+        if username:
+            logger.info("assets: bot_username взят из inline-объекта: %s", username)
+            try:
+                db.set_sync("kitsune.inline", "bot_username", username)
+            except Exception as e:
+                logger.debug("assets: не удалось сохранить bot_username в БД: %s", e)
+            return username
+
+    return None
+
+
+# ── Приглашение инлайн-бота в канал/группу и выдача прав ─────────────────────
+
+async def _ensure_bot_in_channel(
+    client: "TelegramClient",
+    db,
+    entity,
+    channel_id: int,
+) -> None:
+    """
+    Проверяет, добавлен ли инлайн-бот в канал/группу.
+    Если нет — приглашает через аккаунт пользователя и выдаёт права админа.
+    Результат запоминает в БД чтобы не проверять повторно.
+    """
+    inline = getattr(client, "_kitsune_inline", None)
+    if not inline or not getattr(inline, "_bot", None):
+        return
+
+    mem_flag = f"bot_member_{abs(channel_id)}"
+    if db.get(_DB_NS, mem_flag, False):
+        return  # уже добавлен (по флагу)
+
+    try:
+        from telethon.tl.functions.channels import (
+            InviteToChannelRequest, EditAdminRequest,
+        )
+        from telethon.tl.types import ChatAdminRights
+        from telethon.errors import UserAlreadyParticipantError
+
+        bot_obj = inline._bot
+        me = await bot_obj.get_me()
+        bot_id = me.id
+
+        # Получаем полный InputUser через resolve_peer
+        try:
+            bot_peer = await client.get_input_entity(bot_id)
+        except Exception:
+            bot_peer = await client.get_input_entity(f"@{me.username}")
+
+        # Пробуем пригласить
+        try:
+            await client(InviteToChannelRequest(channel=entity, users=[bot_peer]))
+            logger.info("assets: бот @%s добавлен в канал %s", me.username, channel_id)
+        except UserAlreadyParticipantError:
+            logger.info("assets: бот @%s уже в канале %s", me.username, channel_id)
+        except Exception as exc:
+            logger.warning("assets: не удалось добавить бота в %s: %s", channel_id, exc)
+            return
+
+        # Выдаём права администратора (нужные для работы нотификаций)
+        try:
+            rights = ChatAdminRights(
+                post_messages=True,
+                edit_messages=True,
+                delete_messages=True,
+                change_info=False,
+                invite_users=True,
+                pin_messages=True,
+            )
+            await client(EditAdminRequest(
+                channel=entity,
+                user_id=bot_peer,
+                admin_rights=rights,
+                rank="Kitsune Bot",
+            ))
+            logger.info("assets: боту @%s выданы права в %s", me.username, channel_id)
+        except Exception as exc:
+            logger.warning("assets: не удалось выдать права боту в %s: %s", channel_id, exc)
+
+        db.set_sync(_DB_NS, mem_flag, True)
+        try:
+            await db.force_save()
+        except Exception:
+            pass
+
+    except Exception as exc:
+        logger.warning("assets: _ensure_bot_in_channel ошибка для %s: %s", channel_id, exc)
+
+
 # ── Установка аватарки канала/группы ─────────────────────────────────────────
 
 async def ensure_channel_photo(
@@ -61,7 +170,8 @@ async def ensure_channel_photo(
 ) -> bool:
     """
     Устанавливает фото канала/группы если ещё не установлено.
-    Автоматически вступает в канал и выдаёт себе права если нужно.
+    Автоматически вступает в канал/группу, выдаёт себе права если нужно,
+    а также приглашает инлайн-бота и выдаёт ему права.
     """
     flag_key = f"photo_{abs(channel_id)}"
     if not force and db.get(_DB_NS, flag_key, False):
@@ -88,14 +198,42 @@ async def ensure_channel_photo(
         except Exception:
             pass  # уже состоим — нормально
 
+        # Пробуем выдать себе права (если мы не создатель, но есть возможность)
+        try:
+            me = await client.get_me()
+            me_peer = await client.get_input_entity(me.id)
+            rights = ChatAdminRights(
+                post_messages=True,
+                edit_messages=True,
+                delete_messages=True,
+                change_info=True,
+                invite_users=True,
+                pin_messages=True,
+            )
+            await client(EditAdminRequest(
+                channel=entity,
+                user_id=me_peer,
+                admin_rights=rights,
+                rank="Kitsune",
+            ))
+        except Exception:
+            pass  # уже создатель или нет прав на редактирование — не критично
+
         # Устанавливаем фото
         uploaded = await client.upload_file(str(photo_path), file_name=photo_path.name)
         photo    = InputChatUploadedPhoto(file=uploaded)
         await client(EditPhotoRequest(channel=entity, photo=photo))
 
         db.set_sync(_DB_NS, flag_key, True)
-        await db.force_save()
+        try:
+            await db.force_save()
+        except Exception:
+            pass
         logger.info("assets: аватарка установлена для %s (%s)", channel_id, photo_path.name)
+
+        # Добавляем инлайн-бота в канал/группу и выдаём ему права
+        await _ensure_bot_in_channel(client, db, entity, channel_id)
+
         return True
     except Exception as exc:
         logger.warning("assets: не удалось установить аватарку для %s: %s", channel_id, exc)
@@ -136,7 +274,10 @@ async def ensure_bot_photo(
                 r3 = await conv.get_response()
                 if "updated" in (r3.text or "").lower() or "установлено" in (r3.text or "").lower() or "success" in (r3.text or "").lower():
                     db.set_sync(_DB_NS, flag_key, True)
-                    await db.force_save()
+                    try:
+                        await db.force_save()
+                    except Exception:
+                        pass
                     logger.info("assets: аватарка бота @%s установлена", username_clean)
                     return True
     except Exception as exc:
@@ -151,31 +292,41 @@ async def setup_all_avatars(client: "TelegramClient", db) -> None:
     """
     Вызывается при запуске бота.
     Устанавливает аватарки для всех каналов/групп/бота если ещё не установлены.
-    Старые пользователи: флага нет → ensure_channel_photo сам установит.
-    Новые/повторные запуски: флаг есть → пропускаем.
+
+    ФИКС:
+    - bot_username теперь авто-определяется из живого inline-объекта если в БД None.
+    - При вступлении в канал/группу выдаются права администратора.
+    - Инлайн-бот автоматически приглашается в каналы/группы и получает права.
+    - Расширен поиск ID каналов по нескольким ключам БД.
     """
     pairs: list[tuple[int, Path]] = []
 
     # kitsune.backup использует разные ключи в разных версиях
     backup_id = (
-        db.get("kitsune.backup", "group_id", None) or
-        db.get("kitsune.backup", "chat_id", None) or
-        db.get("kitsune.modules.backup", "group_id", None)
+        db.get("kitsune.backup",         "group_id",   None) or
+        db.get("kitsune.backup",         "chat_id",    None) or
+        db.get("kitsune.modules.backup", "group_id",   None) or
+        db.get("kitsune.modules.backup", "chat_id",    None)
     )
     logger.info("assets: backup_id из БД = %s", backup_id)
     if backup_id:
         pairs.append((int(backup_id), BACKUP_AVATAR))
 
     logs_id = (
-        db.get("kitsune.logs", "channel_id", None) or
-        db.get("kitsune.logs", "chat_id", None)
+        db.get("kitsune.logs",         "channel_id", None) or
+        db.get("kitsune.logs",         "chat_id",    None) or
+        db.get("kitsune.notifier",     "logs_id",    None) or
+        db.get("kitsune.notifier",     "channel_id", None) or
+        db.get("kitsune.modules.logs", "channel_id", None)
     )
     if logs_id:
         pairs.append((int(logs_id), LOGS_AVATAR))
 
     assets_id = (
-        db.get("kitsune.assets_channel", "channel_id", None) or
-        db.get("kitsune.assets", "channel_id", None)
+        db.get("kitsune.assets_channel",  "channel_id", None) or
+        db.get("kitsune.assets",          "channel_id", None) or
+        db.get("kitsune.notifier",        "assets_id",  None) or
+        db.get("kitsune.modules.assets",  "channel_id", None)
     )
     if assets_id:
         pairs.append((int(assets_id), ASSETS_AVATAR))
@@ -188,9 +339,9 @@ async def setup_all_avatars(client: "TelegramClient", db) -> None:
         if not already:
             await ensure_channel_photo(client, db, channel_id, photo_path)
 
-    # Аватарка бота
-    bot_username = db.get("kitsune.inline", "bot_username", None)
-    logger.info("assets: bot_username из БД = %s", bot_username)
+    # Аватарка бота: ФИКС — авто-определяем username из inline-объекта если в БД None
+    bot_username = _resolve_bot_username(client, db)
+    logger.info("assets: bot_username = %s", bot_username)
     if bot_username:
         flag_key = f"bot_photo_{bot_username.lstrip('@').lower()}"
         if not db.get(_DB_NS, flag_key, False):
@@ -221,7 +372,7 @@ async def diagnose(client: "TelegramClient", db) -> str:
     # БД ключи
     lines.append("\n🗄 <b>БД ключи:</b>")
     backup_id = db.get("kitsune.backup", "group_id", None)
-    bot_user  = db.get("kitsune.inline", "bot_username", None)
+    bot_user  = _resolve_bot_username(client, db)
     logs_id   = db.get("kitsune.logs", "channel_id", None)
     assets_id = db.get("kitsune.assets_channel", "channel_id", None)
 
@@ -241,5 +392,16 @@ async def diagnose(client: "TelegramClient", db) -> str:
         key = f"bot_photo_{bot_user.lstrip('@').lower()}"
         val = db.get(_DB_NS, key, False)
         lines.append(f"  {key} = {val}")
+
+    # Inline-бот
+    lines.append("\n🤖 <b>Inline-бот:</b>")
+    inline = getattr(client, "_kitsune_inline", None)
+    if inline:
+        ub = getattr(inline, "_bot_username", None)
+        lines.append(f"  _bot_username (в памяти) = <code>{ub}</code>")
+        has_bot = bool(getattr(inline, "_bot", None))
+        lines.append(f"  _bot объект = {'✅' if has_bot else '❌'}")
+    else:
+        lines.append("  inline-модуль не найден")
 
     return "\n".join(lines)

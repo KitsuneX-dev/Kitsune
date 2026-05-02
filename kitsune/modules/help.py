@@ -143,14 +143,12 @@ class HelpModule(KitsuneModule):
             body += "\n<blockquote expandable>" + "".join(plain_lines) + "\n</blockquote>"
 
         # ── Баннер Kitsune Guide ──────────────────────────────────────────────
-        # ModuleConfig не имеет .get() — используем [] с fallback
         try:
             show_banner = bool(self.config["show_banner"])
         except Exception:
             show_banner = True
         banner_url = self.config["banner_url"]
 
-        # Приоритет: кастомный banner_url → встроенный GUIDE_BANNER → текст
         if show_banner:
             # 1. Кастомный URL через inline-форму
             inline = self._inline()
@@ -167,20 +165,27 @@ class HelpModule(KitsuneModule):
                     pass
 
             # 2. Встроенный локальный баннер kitsune_guide.png
+            # ФИКС: сначала send_file, потом delete.
+            # Раньше: delete() шёл ДО send_file() — если send_file падал,
+            # сообщение было удалено, edit() тоже падал → полная тишина.
             if GUIDE_BANNER.exists():
                 try:
-                    await event.message.delete()
                     await event.client.send_file(
                         event.chat_id,
                         str(GUIDE_BANNER),
                         caption=body,
                         parse_mode="html",
                     )
+                    # Удаляем оригинальное сообщение только после успешной отправки
+                    try:
+                        await event.message.delete()
+                    except Exception:
+                        pass
                     return
                 except Exception:
-                    pass
+                    pass  # send_file не удался → оригинальное сообщение живо
 
-        # 3. Fallback — просто текст
+        # 3. Fallback — просто текст (сообщение гарантированно живо)
         await self._edit_collapsed(event.message, body)
 
     async def _mod_help(self, event, mod: KitsuneModule) -> None:
