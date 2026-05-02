@@ -66,12 +66,24 @@ class SettingsModule(KitsuneModule):
 
         await event.reply(self.strings("prefix_set").format(p=new_prefix), parse_mode="html")
 
-    # ── Фикс #6: алиас setprefix (была в прошлых версиях Kitsune) ─────────────
-    # Поддерживаем обе формы: .setprefix * и .prefix *
+    # ── Фикс #6: алиас setprefix ─────────────────────────────────────────────────
     @command("setprefix", required=OWNER)
     async def setprefix_cmd(self, event) -> None:
         """Алиас для команды prefix — обратная совместимость."""
         await self.prefix_cmd(event)
+
+    @command("assetcheck", required=OWNER)
+    async def assetcheck_cmd(self, event) -> None:
+        """Диагностика аватарок — показывает что найдено и что установлено."""
+        try:
+            from ..assets import diagnose, setup_all_avatars
+            report = await diagnose(self.client, self.db)
+            await event.reply(report, parse_mode="html")
+            # Принудительно запускаем установку
+            await setup_all_avatars(self.client, self.db)
+            await event.reply("✅ Установка аватарок запущена. Смотри логи.", parse_mode="html")
+        except Exception as exc:
+            await event.reply(f"❌ Ошибка: <code>{exc}</code>", parse_mode="html")
 
     @command("lang", required=OWNER)
     async def lang_cmd(self, event) -> None:
