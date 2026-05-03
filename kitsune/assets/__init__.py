@@ -56,25 +56,41 @@ async def _find_channels_by_title(
     titles: set[str],
 ) -> dict[str, int]:
     """
-    Сканирует диалоги и возвращает {title: channel_id} для каждого найденного.
+    Сканирует диалоги (включая архивные) и возвращает {title: channel_id}.
     Нужно потому что log.py создаёт Kitsune-logs без сохранения ID в БД.
+    Ищем в folder=0 (обычные) И folder=1 (архив) — каналы часто туда попадают.
     """
     found: dict[str, int] = {}
+
+    def _extract(dialog) -> None:
+        t = dialog.title or ""
+        if t in titles and t not in found:
+            entity = dialog.entity
+            cid = getattr(entity, "id", None)
+            if cid:
+                if getattr(entity, "megagroup", False) or getattr(entity, "broadcast", False):
+                    found[t] = int(f"-100{cid}")
+                else:
+                    found[t] = -cid
+
+    # Папка 0 — обычные диалоги
     try:
-        async for dialog in client.iter_dialogs(limit=500):
-            t = dialog.title or ""
-            if t in titles:
-                entity = dialog.entity
-                cid = getattr(entity, "id", None)
-                if cid:
-                    if getattr(entity, "megagroup", False) or getattr(entity, "broadcast", False):
-                        found[t] = int(f"-100{cid}")
-                    else:
-                        found[t] = -cid
-                if len(found) == len(titles):
-                    break
+        async for dialog in client.iter_dialogs(limit=500, folder=0):
+            _extract(dialog)
+            if len(found) == len(titles):
+                return found
     except Exception as e:
-        logger.warning("assets: ошибка при поиске каналов: %s", e)
+        logger.warning("assets: ошибка iter_dialogs(folder=0): %s", e)
+
+    # Папка 1 — архив (сюда попадают заархивированные каналы)
+    try:
+        async for dialog in client.iter_dialogs(limit=500, folder=1):
+            _extract(dialog)
+            if len(found) == len(titles):
+                return found
+    except Exception as e:
+        logger.warning("assets: ошибка iter_dialogs(folder=1): %s", e)
+
     return found
 
 
@@ -199,19 +215,22 @@ async def setup_all_avatars(client: "TelegramClient", db) -> None:
     # ── Шаг 1: собираем ID из БД ─────────────────────────────────────────────
     id_map: dict[str, int | None] = {
         "KitsuneBackup": (
-            db.get("kitsune.backup",         "group_id",   None) or
-            db.get("kitsune.backup",         "chat_id",    None) or
-            db.get("kitsune.modules.backup", "group_id",   None)
+            db.get("kitsune.backup",         "group_id",        None) or
+            db.get("kitsune.backup",         "chat_id",         None) or
+            db.get("kitsune.modules.backup", "group_id",        None) or
+            db.get("kitsune.assets",         "known_kitsunebackup", None)
         ),
         "Kitsune-logs": (
-            db.get("kitsune.logs",           "channel_id", None) or
-            db.get("kitsune.logs",           "chat_id",    None) or
-            db.get("kitsune.notifier",       "logs_id",    None)
+            db.get("kitsune.logs",           "channel_id",      None) or
+            db.get("kitsune.logs",           "chat_id",         None) or
+            db.get("kitsune.notifier",       "logs_id",         None) or
+            db.get("kitsune.assets",         "known_kitsune_logs", None)
         ),
         "kitsune-assets": (
-            db.get("kitsune.assets_channel", "channel_id", None) or
-            db.get("kitsune.assets",         "channel_id", None) or
-            db.get("kitsune.notifier",       "assets_id",  None)
+            db.get("kitsune.assets_channel", "channel_id",      None) or
+            db.get("kitsune.assets",         "channel_id",      None) or
+            db.get("kitsune.notifier",       "assets_id",       None) or
+            db.get("kitsune.assets",         "known_kitsune_assets", None)
         ),
     }
 
@@ -225,11 +244,14 @@ async def setup_all_avatars(client: "TelegramClient", db) -> None:
         for title, cid in found.items():
             logger.info("assets: нашли '%s' в диалогах: id=%s", title, cid)
             id_map[title] = cid
-            # Сохраняем в БД чтобы следующий запуск не сканировал диалоги
+            # Сохраняем в БД — следующий запуск не будет сканировать диалоги
+            _db_key = title.replace("-", "_").lower()
             try:
-                db.set_sync("kitsune.assets", f"known_{title.replace('-','_').lower()}", cid)
-            except Exception:
-                pass
+                db.set_sync("kitsune.assets", f"known_{_db_key}", cid)
+                await db.force_save()
+                logger.info("assets: сохранили id '%s'=%s в БД", title, cid)
+            except Exception as _e:
+                logger.debug("assets: не удалось сохранить id '%s': %s", title, _e)
 
     # ── Шаг 2.5: создаём kitsune-assets если не существует ──────────────────
     if not id_map.get("kitsune-assets"):
