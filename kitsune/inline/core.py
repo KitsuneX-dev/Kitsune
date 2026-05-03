@@ -46,7 +46,46 @@ class InlineManager:
         self._bot_username: str | None       = None
         self._started       = False
 
+    def attach(
+        self,
+        bot: typing.Any,
+        dp: typing.Any,
+        router: typing.Any,
+        bot_username: str | None = None,
+    ) -> None:
+        """Подключить InlineManager к уже запущенному polling BotRunner-а.
+
+        Вместо создания нового Bot/Dispatcher и запуска второго polling —
+        регистрируем наши обработчики на готовый router.
+        polling НЕ запускается: он уже работает в BotRunner.
+        """
+        if not AIOGRAM_AVAILABLE:
+            return
+        if self._started:
+            return
+        self._bot    = bot
+        self._dp     = dp
+        self._router = router
+        if bot_username:
+            self._bot_username = bot_username
+        self._router.callback_query.register(self._on_callback)
+        self._router.inline_query.register(self._on_inline_query)
+        self._router.chosen_inline_result.register(self._on_chosen_inline)
+        # _on_message НЕ регистрируем — за /start и текст отвечает BotRunner
+        self._started = True
+        asyncio.ensure_future(self._cleaner())
+        logger.info(
+            "InlineManager: attached to BotRunner router (username=@%s, no separate polling)",
+            self._bot_username or "?",
+        )
+
     async def start(self) -> None:
+        """Запустить InlineManager с собственным polling.
+
+        Используется ТОЛЬКО если BotRunner недоступен (нет токена).
+        В нормальной работе вызывай attach() — иначе два polling на
+        одном токене конкурируют и inline-запросы теряются.
+        """
         if not AIOGRAM_AVAILABLE:
             return
         if self._started:
@@ -65,13 +104,13 @@ class InlineManager:
         self._started = True
         asyncio.ensure_future(self._dp.start_polling(self._bot, handle_signals=False))
         asyncio.ensure_future(self._cleaner())
-        await asyncio.sleep(3)  
+        await asyncio.sleep(3)
         try:
             me = await self._bot.get_me()
             self._bot_username = me.username
         except Exception:
             pass
-        logger.info("InlineManager: started")
+        logger.info("InlineManager: started (standalone polling)")
 
     async def stop(self) -> None:
         if self._bot and self._started:
