@@ -210,10 +210,13 @@ async def reset_avatar_flags(db) -> list[str]:
     """
     cleared: list[str] = []
     try:
-        raw = db._db.get(_DB_NS, {})
-        keys_to_clear = [k for k in raw if k.startswith("photo_") or k.startswith("bot_photo_")]
+        ns_data = db._data.get(_DB_NS, {})
+        keys_to_clear = [
+            k for k in list(ns_data.keys())
+            if k.startswith("photo_") or k.startswith("bot_photo_")
+        ]
         for key in keys_to_clear:
-            db.set_sync(_DB_NS, key, False)
+            await db.delete(_DB_NS, key)
             cleared.append(key)
         if cleared:
             try:
