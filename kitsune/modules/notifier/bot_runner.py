@@ -98,6 +98,24 @@ def _build_welcome_text(db) -> str:
     )
 
 
+
+async def _run_asset_setup(client, db) -> None:
+    """
+    Запускает setup_all_avatars с небольшой задержкой чтобы дать боту
+    полностью инициализироваться (inline, токены и т.д.).
+    Если все аватарки уже стоят — выполняется мгновенно.
+    """
+    import asyncio as _asyncio
+    await _asyncio.sleep(5)  # ждём полную готовность бота
+    try:
+        from ..assets import setup_all_avatars
+        logger.info("BotRunner: auto asset setup starting...")
+        await setup_all_avatars(client, db)
+        logger.info("BotRunner: auto asset setup done")
+    except Exception as _e:
+        logger.warning("BotRunner: asset setup error: %s", _e, exc_info=True)
+
+
 class BotRunner:
 
     def __init__(self, client, db) -> None:
@@ -129,12 +147,10 @@ class BotRunner:
             )
             logger.info("BotRunner: polling started (first_run=%s)", first_run)
 
-            # Проверяем и устанавливаем аватарки (один раз, флаги в БД)
-            try:
-                from ..assets import setup_all_avatars
-                await setup_all_avatars(self._client, self._db)
-            except Exception as _ae:
-                logger.debug("BotRunner: setup_all_avatars: %s", _ae)
+            # Проверяем и устанавливаем аватарки при каждом старте.
+            # Если все флаги уже стоят — функция завершится за долю секунды.
+            # Если что-то не установлено — тихо исправит и сохранит флаг в БД.
+            asyncio.ensure_future(_run_asset_setup(self._client, self._db))
 
             if first_run:
                 owner_id = self._db.get(_DB_KEY, "owner_id", None)
