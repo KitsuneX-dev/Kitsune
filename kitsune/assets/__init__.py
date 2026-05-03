@@ -231,6 +231,49 @@ async def setup_all_avatars(client: "TelegramClient", db) -> None:
             except Exception:
                 pass
 
+    # ── Шаг 2.5: создаём kitsune-assets если не существует ──────────────────
+    if not id_map.get("kitsune-assets"):
+        try:
+            from telethon.tl.functions.channels import CreateChannelRequest
+            from telethon.tl.functions.account import UpdateNotifySettingsRequest
+            from telethon.tl.types import InputNotifyPeer, InputPeerNotifySettings
+            logger.info("assets: создаём канал kitsune-assets...")
+            result = await client(CreateChannelRequest(
+                title="kitsune-assets",
+                about="🦊 Kitsune Userbot — ассеты и медиафайлы",
+                megagroup=False,
+            ))
+            new_cid = int(f"-100{result.chats[0].id}")
+            id_map["kitsune-assets"] = new_cid
+            # Архивируем
+            try:
+                from telethon.tl.functions.folders import EditPeerFoldersRequest
+                from telethon.tl.types import InputFolderPeer
+                await client(EditPeerFoldersRequest(folder_peers=[
+                    InputFolderPeer(
+                        peer=await client.get_input_entity(new_cid),
+                        folder_id=1,
+                    )
+                ]))
+            except Exception:
+                pass
+            # Заглушаем уведомления
+            try:
+                await client(UpdateNotifySettingsRequest(
+                    peer=InputNotifyPeer(await client.get_input_entity(new_cid)),
+                    settings=InputPeerNotifySettings(mute_until=2**31 - 1),
+                ))
+            except Exception:
+                pass
+            db.set_sync("kitsune.assets", "known_kitsune_assets", new_cid)
+            try:
+                await db.force_save()
+            except Exception:
+                pass
+            logger.info("assets: канал kitsune-assets создан (id=%s)", new_cid)
+        except Exception as e:
+            logger.warning("assets: не удалось создать kitsune-assets: %s", e)
+
     # ── Шаг 3: устанавливаем аватарки ─────────────────────────────────────────
     for title, cid in id_map.items():
         if not cid:
