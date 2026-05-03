@@ -74,13 +74,24 @@ class SettingsModule(KitsuneModule):
 
     @command("assetcheck", required=OWNER)
     async def assetcheck_cmd(self, event) -> None:
-        """Диагностика аватарок — показывает что найдено и что установлено."""
+        """Диагностика аватарок. С аргументом `force` — сбрасывает флаги и переустанавливает."""
         try:
-            from ..assets import diagnose, setup_all_avatars
+            from ..assets import diagnose, setup_all_avatars, reset_avatar_flags
+            args = self.get_args(event).strip().lower()
+            force = args in ("force", "f", "-f", "--force")
+
             report = await diagnose(self.client, self.db)
             await event.reply(report, parse_mode="html")
-            # Принудительно запускаем установку
-            await setup_all_avatars(self.client, self.db)
+
+            if force:
+                cleared = await reset_avatar_flags(self.db)
+                await event.reply(
+                    f"🔄 <b>Force-режим:</b> сброшено {len(cleared)} флаг(ов): "
+                    + ", ".join(f"<code>{k}</code>" for k in cleared),
+                    parse_mode="html",
+                )
+
+            await setup_all_avatars(self.client, self.db, force=force)
             await event.reply("✅ Установка аватарок запущена. Смотри логи.", parse_mode="html")
         except Exception as exc:
             await event.reply(f"❌ Ошибка: <code>{exc}</code>", parse_mode="html")
