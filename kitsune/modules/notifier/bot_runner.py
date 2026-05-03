@@ -20,17 +20,101 @@ def _make_bot(token: str) -> typing.Any:
     ssl_ctx.check_hostname = False
     ssl_ctx.verify_mode = ssl.CERT_NONE
 
+
     class _NoSSLSession(AiohttpSession):
         async def create_connector(self, _bot=None):
             connector = aiohttp.TCPConnector(ssl=ssl_ctx)
             self._should_reset_connector = False
             return connector
 
+
     return Bot(
         token=str(token),
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
-        session=_NoSSLSession(timeout=30),
+        session=_NoSSLSession(timeout=60),
     )
+
+
+def _get_platform() -> str:
+    """Определяет платформу где запущен бот."""
+    import sys, os
+    # UserLand / Android
+    if os.path.exists("/data/data/tech.ula") or "com.termux" in os.environ.get("PREFIX", ""):
+        return "📱 Android (UserLand)"
+    if "ANDROID_ROOT" in os.environ or "ANDROID_DATA" in os.environ:
+        return "📱 Android (Termux)"
+    # iOS
+    if sys.platform == "darwin" and os.path.exists("/var/mobile"):
+        return "🍎 iOS (iSH)"
+    # Linux
+    try:
+        release = open("/etc/os-release").read()
+        if "ubuntu" in release.lower(): return "🐧 Ubuntu"
+        if "debian" in release.lower(): return "🐧 Debian"
+        if "alpine" in release.lower(): return "🏔 Alpine Linux"
+        if "arch"   in release.lower(): return "🎯 Arch Linux"
+    except Exception:
+        pass
+    if sys.platform.startswith("linux"):
+        return "🐧 Linux"
+    if sys.platform == "win32":
+        return "🪟 Windows"
+    if sys.platform == "darwin":
+        return "🍎 macOS"
+    return f"❓ {sys.platform}"
+
+
+def _build_welcome_text(db) -> str:
+    """Строит welcome-сообщение для /start в боте."""
+    prefix       = db.get("kitsune.core", "prefix", ".")
+    interval_set = db.get("kitsune.backup", "interval_h", None)
+    backup_str   = f"каждые <b>{interval_set} ч</b>" if interval_set else "не настроен"
+    platform     = _get_platform()
+
+    return (
+        "🦊 <b>Добро пожаловать в Kitsune Userbot!</b>\n"
+        "Kitsune успешно запущен и готов к работе.\n\n"
+        "⚡ <b>Быстрый старт:</b>\n"
+        "<blockquote>"
+        f"<code>{prefix}help</code> — список всех команд\n"
+        f"<code>{prefix}ping</code> — проверить работу\n"
+        f"<code>{prefix}cfg</code> — настройка модулей\n"
+        f"<code>{prefix}dlm &lt;url&gt;</code> — установить модуль"
+        "</blockquote>\n"
+        "🔒 <b>Безопасность:</b>\n"
+        "<blockquote>"
+        f"<code>{prefix}security</code> — управление доступом\n"
+        f"<code>{prefix}backupall</code> — полный бэкап (БД + модули)\n"
+        f"<code>{prefix}setbackupinterval</code> — изменить время авто-бэкапа"
+        "</blockquote>\n"
+        "🗂 <b>Авто-бэкап:</b> " + backup_str + "\n\n"
+        "🔗 <b>Полезные ссылки:</b>\n"
+        "<blockquote>"
+        "Репозиторий: github.com/youshi-dev/Kitsune\n"
+        "Разработчик: @Mikasu32"
+        "</blockquote>\n"
+        "🎉 <i>Приятного использования!</i>\n"
+        f"🖥 <b>Платформа:</b> {platform}"
+    )
+
+
+
+async def _run_asset_setup(client, db) -> None:
+    """
+    Запускает setup_all_avatars с небольшой задержкой чтобы дать боту
+    полностью инициализироваться (inline, токены и т.д.).
+    Если все аватарки уже стоят — выполняется мгновенно.
+    """
+    import asyncio as _asyncio
+    await _asyncio.sleep(5)  # ждём полную готовность бота
+    try:
+        from ...assets import setup_all_avatars
+        logger.info("BotRunner: auto asset setup starting...")
+        await setup_all_avatars(client, db)
+        logger.info("BotRunner: auto asset setup done")
+    except Exception as _e:
+        logger.warning("BotRunner: asset setup error: %s", _e, exc_info=True)
+
 
 class BotRunner:
 
@@ -63,23 +147,36 @@ class BotRunner:
             )
             logger.info("BotRunner: polling started (first_run=%s)", first_run)
 
-            # ── InlineManager: подключаем к нашему polling ─────────────────
-            try:
-                from ..inline import InlineManager
-                _me = await self.bot.get_me()
-                _inline_mgr = InlineManager(self._client, self._db, token)
-                _inline_mgr.attach(self.bot, self.dp, router, bot_username=_me.username)
-                self._client._kitsune_inline = _inline_mgr
-                logger.info(
-                    "BotRunner: InlineManager attached (username=@%s)", _me.username
-                )
-            except Exception as _ie:
-                logger.warning("BotRunner: не удалось подключить InlineManager: %s", _ie)
+            # Проверяем и устанавливаем аватарки при каждом старте.
+            # Если все флаги уже стоят — функция завершится за долю секунды.
+            # Если что-то не установлено — тихо исправит и сохранит флаг в БД.
+            asyncio.ensure_future(_run_asset_setup(self._client, self._db))
 
             if first_run:
                 owner_id = self._db.get(_DB_KEY, "owner_id", None)
                 if owner_id:
                     await asyncio.sleep(2)
+                    # ── Фикс: welcome в бота, не в «Избранное» ────────────────
+                    try:
+                        from pathlib import Path as _Path
+                        _info = _Path(__file__).parent.parent.parent / "assets" / "kitsune_info.png"
+                        if _info.exists():
+                            from aiogram.types import FSInputFile
+                            await self.bot.send_photo(
+                                chat_id=int(owner_id),
+                                photo=FSInputFile(str(_info)),
+                                caption=_build_welcome_text(self._db),
+                                parse_mode="HTML",
+                            )
+                        else:
+                            await self.bot.send_message(
+                                chat_id=int(owner_id),
+                                text=_build_welcome_text(self._db),
+                                parse_mode="HTML",
+                            )
+                    except Exception as _wexc:
+                        logger.warning("BotRunner: не удалось отправить welcome: %s", _wexc)
+                    # ── Настройка авто-бэкапа ──────────────────────────────────
                     loader = getattr(self._client, "_kitsune_loader", None)
                     backup = loader.modules.get("backup") if loader else None
                     if backup:
@@ -171,32 +268,45 @@ class BotRunner:
                 await backup.show_interval_setup(self.bot, msg.from_user.id)
                 await self._db.set(_DB_KEY, "backup_interval_asked", True)
             else:
-                backup_status = f"каждые <b>{interval_set} ч</b>" if interval_set else "не настроен"
-                await msg.answer(
-                    "🦊 <b>Kitsune Notifier</b>\n\n"
-                    "Я присылаю уведомления об обновлениях и храню бэкапы.\n\n"
-                    f"🗂 Авто-бэкап: {backup_status}\n\n"
-                    "Команды:\n"
-                    "• <code>.backup</code> — создать бэкап вручную\n"
-                    "• <code>.restore</code> — восстановить из бэкапа\n"
-                    "• <code>.autodel</code> — авто-удаление сервисных сообщений\n"
-                    "• <code>.resetbot</code> — пересоздать бота\n"
-                    "• <code>.update</code> — проверить обновления"
-                )
+                # Отправляем баннер + текст
+                from pathlib import Path as _Path
+                _info = _Path(__file__).parent.parent.parent / "assets" / "kitsune_info.png"
+                if _info.exists():
+                    from aiogram.types import FSInputFile
+                    await msg.answer_photo(
+                        photo=FSInputFile(str(_info)),
+                        caption=_build_welcome_text(self._db),
+                        parse_mode="HTML",
+                    )
+                else:
+                    await msg.answer(
+                        _build_welcome_text(self._db),
+                        parse_mode="HTML",
+                    )
         except Exception as e:
             logger.warning("BotRunner: on_start failed — %s", e)
 
     async def _on_update_cb(self, call) -> None:
         owner_id = self._db.get(_DB_KEY, "owner_id", None)
-        if call.from_user.id != owner_id:
-            await call.answer("🔒 Нет доступа.", show_alert=True)
-            return
-        await call.answer()
+                                                                              
+        try:
+            if call.from_user.id != owner_id:
+                await call.answer("🔒 Нет доступа.", show_alert=True)
+                return
+            await call.answer()
+        except Exception:
+            return                                        
         if call.data == "update_no":
             await self._db.delete("kitsune.updater", "pending_update")
-            await call.message.edit_text("❌ Обновление отменено.")
+            try:
+                await call.message.edit_text("❌ Обновление отменено.")
+            except Exception:
+                pass
             return
-        await call.message.edit_text("⬇️ <b>Скачиваю обновление...</b>\nDownloading update...", parse_mode="HTML")
+        try:
+            await call.message.edit_text("⬇️ <b>Скачиваю обновление...</b>", parse_mode="HTML")
+        except Exception:
+            pass
         asyncio.ensure_future(self._safe_update_run(call.message))
 
     async def _safe_update_run(self, msg) -> None:
@@ -226,8 +336,11 @@ class BotRunner:
 
     async def _on_backup_interval(self, call) -> None:
         owner_id = self._db.get(_DB_KEY, "owner_id", None)
-        if call.from_user.id != owner_id:
-            await call.answer("🔒 Нет доступа.", show_alert=True)
+        try:
+            if call.from_user.id != owner_id:
+                await call.answer("🔒 Нет доступа.", show_alert=True)
+                return
+        except Exception:
             return
         loader = getattr(self._client, "_kitsune_loader", None)
         backup = loader.modules.get("backup") if loader else None
@@ -238,10 +351,13 @@ class BotRunner:
 
     async def _on_config_cb(self, call) -> None:
         owner_id = self._db.get(_DB_KEY, "owner_id", None)
-        if call.from_user.id != owner_id:
-            await call.answer("🔒 Нет доступа.", show_alert=True)
+        try:
+            if call.from_user.id != owner_id:
+                await call.answer("🔒 Нет доступа.", show_alert=True)
+                return
+            await call.answer()
+        except Exception:
             return
-        await call.answer()
 
         from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
         from ..config import _get_configurable, _mod_text, _list_text
@@ -350,7 +466,6 @@ class BotRunner:
             return
         pending = self._db.get("kitsune.config", "pending_input", None)
         if not pending:
-
             return
         await self._db.delete("kitsune.config", "pending_input")
         mod_name, key, value = pending["mod"], pending["key"], msg.text or ""

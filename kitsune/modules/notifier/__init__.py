@@ -129,19 +129,6 @@ class BotRunner:
             )
             logger.info("BotRunner: polling started (first_run=%s)", first_run)
 
-            # ── InlineManager: подключаем к нашему polling ─────────────────
-            try:
-                from ...inline import InlineManager
-                _me = await self.bot.get_me()
-                _inline_mgr = InlineManager(self._client, self._db, token)
-                _inline_mgr.attach(self.bot, self.dp, router, bot_username=_me.username)
-                self._client._kitsune_inline = _inline_mgr
-                logger.info(
-                    "BotRunner: InlineManager attached (username=@%s)", _me.username
-                )
-            except Exception as _ie:
-                logger.warning("BotRunner: не удалось подключить InlineManager: %s", _ie)
-
             # Проверяем и устанавливаем аватарки (один раз, флаги в БД)
             try:
                 from ..assets import setup_all_avatars
