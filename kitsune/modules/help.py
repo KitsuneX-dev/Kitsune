@@ -5,9 +5,7 @@ import inspect
 from telethon.extensions import html as tl_html
 from telethon.tl.types import MessageEntityBlockquote
 
-import logging
 from ..core.loader import KitsuneModule, command, ModuleConfig, ConfigValue
-logger = logging.getLogger(__name__)
 from ..core.security import OWNER
 from ..assets import GUIDE_BANNER
 
@@ -48,7 +46,7 @@ class HelpModule(KitsuneModule):
             ),
             ConfigValue(
                 "show_banner",
-                default=False,
+                default=True,
                 doc="Показывать баннер Kitsune Guide перед списком модулей. True/False.",
             ),
         )
@@ -173,25 +171,13 @@ class HelpModule(KitsuneModule):
                 body += "\n<blockquote expandable>\n" + "\n".join(plain_l) + "\n</blockquote>"
             return body
 
-        inline     = self._inline()
+        show_banner = show_banner_early  # уже прочитан выше для расчёта страниц
+
+        inline = self._inline()
         total_pages = len(pages)
 
         # ── Inline-пагинация (через бота) ─────────────────────────────────────
-        _bot = getattr(inline, "_bot", None) if inline else None
-
-        if inline and _bot:
-            # Гарантируем что _bot_username инициализирован ДО вызова form()
-            # Без этого _invoke_unit зависает на 30 с если get_me() медленный
-            if not getattr(inline, "_bot_username", None):
-                try:
-                    _me = await _bot.get_me()
-                    inline._bot_username = _me.username
-                    logger.debug("help: pre-fetched bot username: %s", inline._bot_username)
-                except Exception as _e:
-                    logger.warning("help: не удалось получить bot username: %s — fallback", _e)
-                    _bot = None  # Помечаем как недоступный
-
-        if inline and _bot:
+        if inline and getattr(inline, "_bot", None):
             state = {"page": 0}
 
             def make_buttons(idx: int) -> list:
@@ -209,14 +195,29 @@ class HelpModule(KitsuneModule):
             async def _prev(call) -> None:
                 if state["page"] > 0:
                     state["page"] -= 1
-                await inline.edit(call, make_page_text(state["page"]), make_buttons(state["page"]))
+                await inline.edit(
+                    call,
+                    make_page_text(state["page"]),
+                    make_buttons(state["page"]),
+                )
                 await call.answer()
 
             async def _next(call) -> None:
                 if state["page"] < total_pages - 1:
                     state["page"] += 1
-                await inline.edit(call, make_page_text(state["page"]), make_buttons(state["page"]))
+                await inline.edit(
+                    call,
+                    make_page_text(state["page"]),
+                    make_buttons(state["page"]),
+                )
                 await call.answer()
+
+            # Отправляем баннер отдельно (локальный файл)
+            if show_banner and GUIDE_BANNER.exists():
+                try:
+                    await event.client.send_file(event.chat_id, str(GUIDE_BANNER))
+                except Exception:
+                    pass
 
             try:
                 await inline.form(
@@ -224,14 +225,33 @@ class HelpModule(KitsuneModule):
                     message=event.message,
                     reply_markup=make_buttons(0),
                 )
+                try:
+                    await event.message.delete()
+                except Exception:
+                    pass
                 return
             except Exception as _ie:
-                logger.warning("help: inline.form упал: %s — fallback к тексту", _ie)
+                import logging as _log
+                _log.getLogger(__name__).debug("help: inline.form упал (%s), fallback", _ie)
 
-        # ── Fallback: текст без кнопок ─────────────────────────────────────────
+        # ── Fallback: баннер + текст без кнопок ───────────────────────────────
         body = make_page_text(0)
         if total_pages > 1:
-            body += f"\n\n<i>📖 Показана стр. 1 из {total_pages}. Установи бота для навигации.</i>"
+            body += f"\n\n<i>⚠️ Страниц: {total_pages}. Установи бота для навигации.</i>"
+
+        if show_banner and GUIDE_BANNER.exists():
+            try:
+                await event.client.send_file(event.chat_id, str(GUIDE_BANNER))
+                await event.client.send_message(
+                    event.chat_id, body, parse_mode="html", link_preview=False,
+                )
+                try:
+                    await event.message.delete()
+                except Exception:
+                    pass
+                return
+            except Exception:
+                pass
 
         await self._edit_collapsed(event.message, body)
 
