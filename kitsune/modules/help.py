@@ -106,13 +106,18 @@ class HelpModule(KitsuneModule):
 
         await self._full_help(event, loader)
 
+    # ── Конфиг страниц ────────────────────────────────────────────────────────
+    # С баннером: 12 модулей (фото занимает место, меньше = читабельнее)
+    # Без баннера: 20 модулей (чистый текст, Telegram лимит 4096 символов)
+    MODS_PER_PAGE_BANNER = 12
+    MODS_PER_PAGE_TEXT   = 20
+
     async def _full_help(self, event, loader) -> None:
         prefix = self._prefix()
         hidden: list[str] = self.db.get("kitsune.help", "hidden", []) if self.db else []
 
-        core_lines:  list[str] = []
-        plain_lines: list[str] = []
-
+        # ── Собираем все строки модулей ───────────────────────────────────────
+        entries: list[tuple[bool, str]] = []  # (is_core, line)
         for name, mod in sorted(loader.modules.items(), key=lambda x: x[0].lower()):
             if name in hidden:
                 continue
@@ -122,70 +127,132 @@ class HelpModule(KitsuneModule):
             is_core = getattr(mod, "_is_builtin", False)
             icon    = self.config["core_emoji"] if is_core else self.config["plain_emoji"]
             display = mod.name or name.capitalize()
-            line = f"\n{icon} <code>{display}</code>: ( {' | '.join(prefix + c for c in cmds)} )"
-            if is_core:
-                core_lines.append(line)
-            else:
-                plain_lines.append(line)
+            line    = f"{icon} <code>{display}</code>: ( {' | '.join(prefix + c for c in cmds)} )"
+            entries.append((is_core, line))
 
         total        = len(loader.modules)
         hidden_count = len(hidden)
 
-        body = (
-            f"{self.config['desc_icon']} "
-            f"<b>{self.strings('header').format(count=total, hidden=hidden_count)}</b>"
-        )
-
-        if core_lines:
-            body += "\n<blockquote expandable>" + "".join(core_lines) + "\n</blockquote>"
-
-        if plain_lines:
-            body += "\n<blockquote expandable>" + "".join(plain_lines) + "\n</blockquote>"
-
-        # ── Баннер Kitsune Guide ──────────────────────────────────────────────
+        # ── Разбиваем на страницы ─────────────────────────────────────────────
+        # Размер страницы зависит от того включён ли баннер
         try:
-            show_banner = bool(self.config["show_banner"])
+            show_banner_early = bool(self.config["show_banner"])
         except Exception:
-            show_banner = True
-        banner_url = self.config["banner_url"]
+            show_banner_early = True
+        mods_per_page = self.MODS_PER_PAGE_BANNER if show_banner_early else self.MODS_PER_PAGE_TEXT
 
-        if show_banner:
-            # 1. Кастомный URL через inline-форму
-            inline = self._inline()
-            if banner_url and inline and getattr(inline, "_bot", None):
+        pages: list[list[tuple[bool, str]]] = []
+        page: list[tuple[bool, str]] = []
+        for entry in entries:
+            page.append(entry)
+            if len(page) >= mods_per_page:
+                pages.append(page)
+                page = []
+        if page:
+            pages.append(page)
+
+        if not pages:
+            await event.message.edit(self.strings("no_modules"), parse_mode="html")
+            return
+
+        desc_icon = self.config["desc_icon"]
+
+        def make_page_text(idx: int) -> str:
+            hdr = (
+                f"{desc_icon} <b>{self.strings('header').format(count=total, hidden=hidden_count)}</b>"
+                f"   <i>стр. {idx + 1}/{len(pages)}</i>\n"
+            )
+            core_l  = [ln for ic, ln in pages[idx] if ic]
+            plain_l = [ln for ic, ln in pages[idx] if not ic]
+            body = hdr
+            if core_l:
+                body += "\n<blockquote expandable>\n" + "\n".join(core_l) + "\n</blockquote>"
+            if plain_l:
+                body += "\n<blockquote expandable>\n" + "\n".join(plain_l) + "\n</blockquote>"
+            return body
+
+        show_banner = show_banner_early  # уже прочитан выше для расчёта страниц
+
+        inline = self._inline()
+        total_pages = len(pages)
+
+        # ── Inline-пагинация (через бота) ─────────────────────────────────────
+        if inline and getattr(inline, "_bot", None):
+            state = {"page": 0}
+
+            def make_buttons(idx: int) -> list:
+                row = []
+                if idx > 0:
+                    row.append({"text": "◀️", "callback": _prev})
+                row.append({"text": f"📋 {idx + 1} / {total_pages}", "callback": _noop})
+                if idx < total_pages - 1:
+                    row.append({"text": "▶️", "callback": _next})
+                return [row]
+
+            async def _noop(call) -> None:
+                await call.answer()
+
+            async def _prev(call) -> None:
+                if state["page"] > 0:
+                    state["page"] -= 1
+                await inline.edit(
+                    call,
+                    make_page_text(state["page"]),
+                    make_buttons(state["page"]),
+                )
+                await call.answer()
+
+            async def _next(call) -> None:
+                if state["page"] < total_pages - 1:
+                    state["page"] += 1
+                await inline.edit(
+                    call,
+                    make_page_text(state["page"]),
+                    make_buttons(state["page"]),
+                )
+                await call.answer()
+
+            # Отправляем баннер отдельно (локальный файл)
+            if show_banner and GUIDE_BANNER.exists():
                 try:
-                    await inline.form(
-                        text=body,
-                        message=event.message,
-                        reply_markup=[],
-                        gif=banner_url,
-                    )
-                    return
+                    await event.client.send_file(event.chat_id, str(GUIDE_BANNER))
                 except Exception:
                     pass
 
-            # 2. Встроенный локальный баннер kitsune_guide.png
-            # ФИКС: сначала send_file, потом delete.
-            # Раньше: delete() шёл ДО send_file() — если send_file падал,
-            # сообщение было удалено, edit() тоже падал → полная тишина.
-            if GUIDE_BANNER.exists():
+            try:
+                await inline.form(
+                    text=make_page_text(0),
+                    message=event.message,
+                    reply_markup=make_buttons(0),
+                )
                 try:
-                    await event.client.send_file(
-                        event.chat_id,
-                        str(GUIDE_BANNER),
-                        caption=body,
-                        parse_mode="html",
-                    )
-                    # Удаляем оригинальное сообщение только после успешной отправки
-                    try:
-                        await event.message.delete()
-                    except Exception:
-                        pass
-                    return
+                    await event.message.delete()
                 except Exception:
-                    pass  # send_file не удался → оригинальное сообщение живо
+                    pass
+                return
+            except Exception as _ie:
+                import logging as _log
+                _log.getLogger(__name__).debug("help: inline.form упал (%s), fallback", _ie)
 
-        # 3. Fallback — просто текст (сообщение гарантированно живо)
+        # ── Fallback: баннер + текст без кнопок ───────────────────────────────
+        body = make_page_text(0)
+        if total_pages > 1:
+            body += f"\n\n<i>⚠️ Страниц: {total_pages}. Установи бота для навигации.</i>"
+
+        if show_banner and GUIDE_BANNER.exists():
+            try:
+                await event.client.send_file(event.chat_id, str(GUIDE_BANNER))
+                await event.client.send_message(
+                    event.chat_id, body, parse_mode="html", link_preview=False,
+                )
+                try:
+                    await event.message.delete()
+                except Exception:
+                    pass
+                return
+            except Exception:
+                pass
+
         await self._edit_collapsed(event.message, body)
 
     async def _mod_help(self, event, mod: KitsuneModule) -> None:
