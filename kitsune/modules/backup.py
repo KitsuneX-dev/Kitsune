@@ -523,37 +523,22 @@ class BackupModule(KitsuneModule):
         count: int = 0,
     ) -> None:
         """
-        Универсальная отправка бэкапа: в KitsuneBackup (если есть) и в «Избранное».
-        После каждой отправки прицепляет кнопку «🔄 Восстановить» через inline.form.
+        Отправка бэкапа только в KitsuneBackup с кнопкой «🔄 Восстановить».
+        В «Избранное» не отправляется.
         """
-        # → группа KitsuneBackup
-        if dest:
-            buf = io.BytesIO(data)
-            buf.name = fname
-            try:
-                sent = await hydro_send_file(
-                    self.client, dest, buf, caption=caption, parse_mode="html",
-                )
-                await self._attach_restore_button(dest, sent, kind, ts, count)
-            except Exception:
-                logger.exception("backup: send to dest failed")
+        if not dest:
+            logger.warning("backup: нет dest — файл не отправлен")
+            return
 
-        # → Saved Messages
+        buf = io.BytesIO(data)
+        buf.name = fname
         try:
-            buf2 = io.BytesIO(data)
-            buf2.name = fname
-            sent_me = await hydro_send_file(
-                self.client, "me", buf2, caption=caption, parse_mode="html",
+            sent = await hydro_send_file(
+                self.client, dest, buf, caption=caption, parse_mode="html",
             )
-            # У "me" chat_id == self.client.tg_id
-            try:
-                me_id = int(self.client.tg_id)
-            except Exception:
-                me_id = None
-            if me_id:
-                await self._attach_restore_button(me_id, sent_me, kind, ts, count)
+            await self._attach_restore_button(dest, sent, kind, ts, count)
         except Exception:
-            logger.exception("backup: send to Saved Messages failed")
+            logger.exception("backup: send to KitsuneBackup failed")
 
     # ── backupdb ──────────────────────────────────────────────────────────────
 
