@@ -200,10 +200,19 @@ class InlineManager:
                                                                              
         if sent is not None and unit_id in self._units:
             self._units[unit_id]["telethon_msg"] = sent
+        
+        # Если _invoke_unit вернул None (timeout/ошибка), не ждём inline_message_id
+        if sent is None:
+            logger.debug("form: _invoke_unit returned None, skipping inline_message_id wait")
+            if "future" in self._units.get(unit_id, {}):
+                del self._units[unit_id]["future"]
+            return None
+        
         try:
-            await asyncio.wait_for(asyncio.shield(future), timeout=30)
+            # Увеличенный timeout для медленных соединений
+            await asyncio.wait_for(asyncio.shield(future), timeout=45)
         except asyncio.TimeoutError:
-            logger.warning("form: timeout waiting for inline_message_id for unit %s (PC fallback active)", unit_id)
+            logger.debug("form: timeout waiting for inline_message_id for unit %s (PC fallback active)", unit_id)
         if "future" in self._units.get(unit_id, {}):
             del self._units[unit_id]["future"]
         return sent
@@ -297,14 +306,19 @@ class InlineManager:
             return None
 
         # Увеличенная начальная пауза — даём боту больше времени зарегистрировать unit
-        await asyncio.sleep(0.8)
+        await asyncio.sleep(1.2)
 
-        for attempt in range(7):
+        for attempt in range(10):
             try:
                 results = await self._client.inline_query(self._bot_username, unit_id)
                 if not results:
                     # Бот ещё не ответил — пауза и retry
-                    await asyncio.sleep(0.6 + attempt * 0.2)
+                    delay = 0.8 + (attempt * 0.3)
+                    logger.debug(
+                        "InlineManager: empty results attempt %d/10, retry in %.1fs",
+                        attempt + 1, delay,
+                    )
+                    await asyncio.sleep(delay)
                     continue
                 sent = await results[0].click(entity, reply_to=reply_to)
                 try:
@@ -313,23 +327,39 @@ class InlineManager:
                     pass
                 return sent
             except Exception as exc:
-                err = str(exc)
-                if "BotResponseTimeout" in err or "timeout" in err.lower():
-                    # Прогрессивный backoff с большими задержками
-                    delay = 1.0 + (attempt * 0.5)
-                    if attempt < 6:
+                exc_name = type(exc).__name__
+                err_str = str(exc)
+                
+                # Проверяем является ли это timeout ошибкой
+                is_timeout = (
+                    "BotResponseTimeout" in exc_name or
+                    "BotResponseTimeout" in err_str or
+                    "timeout" in err_str.lower()
+                )
+                
+                if is_timeout:
+                    if attempt < 9:
+                        # Прогрессивный backoff с большими задержками
+                        delay = 1.5 + (attempt * 0.7)
                         logger.debug(
-                            "InlineManager: timeout attempt %d/7, retry in %.1fs",
+                            "InlineManager: timeout attempt %d/10, retry in %.1fs",
                             attempt + 1, delay,
                         )
                         await asyncio.sleep(delay)
                         continue
                     else:
-                        logger.error("InlineManager: timeout after %d attempts for unit %s", attempt + 1, unit_id)
+                        # Последняя попытка провалилась
+                        logger.warning(
+                            "InlineManager: timeout after %d attempts for unit %s",
+                            attempt + 1, unit_id,
+                        )
                         return None
-                logger.exception("InlineManager._invoke_unit failed")
-                return None
-        logger.error("InlineManager._invoke_unit: all attempts failed for unit %s", unit_id)
+                else:
+                    # Не timeout ошибка — логируем и выходим
+                    logger.exception("InlineManager._invoke_unit failed with non-timeout error")
+                    return None
+        
+        logger.warning("InlineManager._invoke_unit: all attempts exhausted for unit %s", unit_id)
         return None
 
     async def _on_inline_query(self, query: "InlineQuery") -> None:
