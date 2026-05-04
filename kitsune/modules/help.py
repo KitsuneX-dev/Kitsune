@@ -8,6 +8,9 @@ from telethon.tl.types import MessageEntityBlockquote
 from ..core.loader import KitsuneModule, command, ModuleConfig, ConfigValue
 from ..core.security import OWNER
 
+PAGE_SIZE = 30
+
+
 class HelpModule(KitsuneModule):
 
     name        = "help"
@@ -42,8 +45,12 @@ class HelpModule(KitsuneModule):
 
     strings_ru = {
         "header":     "{count} модулей доступно, {hidden} скрыто:",
+        "header_page": "{count} модулей доступно, {hidden} скрыто • Страница {page}/{total}:",
         "no_modules": "⚙️ Модули не загружены.",
         "no_mod":     "❌ Модуль <code>{name}</code> не найден.",
+        "prev_btn":   "◀️ Назад",
+        "next_btn":   "Вперёд ▶️",
+        "page_btn":   "{page}/{total}",
     }
 
     @staticmethod
@@ -93,21 +100,42 @@ class HelpModule(KitsuneModule):
             await self._mod_help(event, mod)
             return
 
-        await self._full_help(event, loader)
+        await self._full_help(event, loader, page=0)
 
-    async def _full_help(self, event, loader) -> None:
+    def _collect_visible_modules(self, loader) -> list[tuple[str, "KitsuneModule"]]:
+        """Возвращает упорядоченный список (имя, модуль), который попадёт в .help."""
+        hidden: list[str] = self.db.get("kitsune.help", "hidden", []) if self.db else []
+        visible: list[tuple[str, KitsuneModule]] = []
+        for name, mod in sorted(loader.modules.items(), key=lambda x: x[0].lower()):
+            if name in hidden:
+                continue
+            if not self._get_cmds(mod):
+                continue
+            visible.append((name, mod))
+        return visible
+
+    def _build_page_body(self, loader, page: int) -> tuple[str, int, int]:
+        """Собирает HTML-тело для нужной страницы.
+
+        Возвращает (body_html, page, total_pages).
+        """
         prefix = self._prefix()
         hidden: list[str] = self.db.get("kitsune.help", "hidden", []) if self.db else []
+        visible = self._collect_visible_modules(loader)
+
+        total_modules_with_cmds = len(visible)
+        total_pages = max(1, -(-total_modules_with_cmds // PAGE_SIZE))  # ceil
+        page = max(0, min(page, total_pages - 1))
+
+        start = page * PAGE_SIZE
+        end   = start + PAGE_SIZE
+        page_slice = visible[start:end]
 
         core_lines:  list[str] = []
         plain_lines: list[str] = []
 
-        for name, mod in sorted(loader.modules.items(), key=lambda x: x[0].lower()):
-            if name in hidden:
-                continue
+        for name, mod in page_slice:
             cmds = self._get_cmds(mod)
-            if not cmds:
-                continue
             is_core = getattr(mod, "_is_builtin", False)
             icon    = self.config["core_emoji"] if is_core else self.config["plain_emoji"]
             display = mod.name or name.capitalize()
@@ -120,10 +148,15 @@ class HelpModule(KitsuneModule):
         total        = len(loader.modules)
         hidden_count = len(hidden)
 
-        body = (
-            f"{self.config['desc_icon']} "
-            f"<b>{self.strings('header').format(count=total, hidden=hidden_count)}</b>"
-        )
+        if total_pages > 1:
+            header_text = self.strings("header_page").format(
+                count=total, hidden=hidden_count,
+                page=page + 1, total=total_pages,
+            )
+        else:
+            header_text = self.strings("header").format(count=total, hidden=hidden_count)
+
+        body = f"{self.config['desc_icon']} <b>{header_text}</b>"
 
         if core_lines:
             body += "\n<blockquote expandable>" + "".join(core_lines) + "\n</blockquote>"
@@ -131,7 +164,75 @@ class HelpModule(KitsuneModule):
         if plain_lines:
             body += "\n<blockquote expandable>" + "".join(plain_lines) + "\n</blockquote>"
 
+        return body, page, total_pages
+
+    def _build_nav_kb(self, page: int, total_pages: int) -> list:
+        """Создаёт клавиатуру навигации. Если страница одна — пустой список."""
+        if total_pages <= 1:
+            return []
+
+        nav_row = []
+        if page > 0:
+            nav_row.append({
+                "text": self.strings("prev_btn"),
+                "callback": self._cb_help_page,
+                "args": (page - 1,),
+            })
+
+        nav_row.append({
+            "text": self.strings("page_btn").format(page=page + 1, total=total_pages),
+            "callback": self._cb_help_noop,
+        })
+
+        if page < total_pages - 1:
+            nav_row.append({
+                "text": self.strings("next_btn"),
+                "callback": self._cb_help_page,
+                "args": (page + 1,),
+            })
+
+        return [nav_row]
+
+    async def _full_help(self, event, loader, page: int = 0) -> None:
+        body, page, total_pages = self._build_page_body(loader, page)
+
+        # Если страниц больше одной — выводим через inline-форму с кнопками.
+        if total_pages > 1:
+            inline = self._inline()
+            if inline is not None:
+                kb = self._build_nav_kb(page, total_pages)
+                try:
+                    await event.message.delete()
+                except Exception:
+                    pass
+                await inline.form(body, event, kb)
+                return
+
+        # Фолбэк: нет inline-менеджера или страница всего одна — обычное редактирование.
         await self._edit_collapsed(event.message, body)
+
+    async def _cb_help_page(self, call, page: int) -> None:
+        loader = self._loader()
+        if not loader:
+            await call.answer(self.strings("no_modules"), show_alert=True)
+            return
+
+        body, page, total_pages = self._build_page_body(loader, page)
+        kb = self._build_nav_kb(page, total_pages)
+
+        inline = self._inline()
+        if inline is None:
+            await call.answer("Inline недоступен.", show_alert=True)
+            return
+
+        await inline.edit(call, body, kb)
+
+    async def _cb_help_noop(self, call) -> None:
+        # Кнопка-индикатор страницы — просто закрываем «часики».
+        try:
+            await call.answer("")
+        except Exception:
+            pass
 
     async def _mod_help(self, event, mod: KitsuneModule) -> None:
         prefix  = self._prefix()
