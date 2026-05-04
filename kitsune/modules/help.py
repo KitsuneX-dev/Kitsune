@@ -199,14 +199,19 @@ class HelpModule(KitsuneModule):
         # Если страниц больше одной — выводим через inline-форму с кнопками.
         if total_pages > 1:
             inline = self._inline()
-            if inline is not None:
+            if inline is not None and getattr(inline, "_bot", None):
                 kb = self._build_nav_kb(page, total_pages)
                 try:
-                    await event.message.delete()
+                    await event.message.edit("🦊 <b>Загрузка...</b>", parse_mode="html")
                 except Exception:
                     pass
-                await inline.form(body, event, kb)
-                return
+                try:
+                    await inline.form(body, event.message, kb)
+                    return
+                except Exception:
+                    # Если по какой-то причине inline-форма не отправилась —
+                    # падаем в обычный fallback и редактируем сообщение текстом.
+                    pass
 
         # Фолбэк: нет inline-менеджера или страница всего одна — обычное редактирование.
         await self._edit_collapsed(event.message, body)
