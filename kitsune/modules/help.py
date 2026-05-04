@@ -5,11 +5,8 @@ import inspect
 from telethon.extensions import html as tl_html
 from telethon.tl.types import MessageEntityBlockquote
 
-import logging
 from ..core.loader import KitsuneModule, command, ModuleConfig, ConfigValue
-logger = logging.getLogger(__name__)
 from ..core.security import OWNER
-from ..assets import GUIDE_BANNER
 
 class HelpModule(KitsuneModule):
 
@@ -45,11 +42,6 @@ class HelpModule(KitsuneModule):
                 "banner_url",
                 default=None,
                 doc="Прямая ссылка на баннер (gif/mp4/jpg). Оставь пустым чтобы убрать.",
-            ),
-            ConfigValue(
-                "show_banner",
-                default=False,
-                doc="Показывать баннер Kitsune Guide перед списком модулей. True/False.",
             ),
         )
 
@@ -108,18 +100,13 @@ class HelpModule(KitsuneModule):
 
         await self._full_help(event, loader)
 
-    # ── Конфиг страниц ────────────────────────────────────────────────────────
-    # С баннером: 12 модулей (фото занимает место, меньше = читабельнее)
-    # Без баннера: 20 модулей (чистый текст, Telegram лимит 4096 символов)
-    MODS_PER_PAGE_BANNER = 12
-    MODS_PER_PAGE_TEXT   = 20
-
     async def _full_help(self, event, loader) -> None:
         prefix = self._prefix()
         hidden: list[str] = self.db.get("kitsune.help", "hidden", []) if self.db else []
 
-        # ── Собираем все строки модулей ───────────────────────────────────────
-        entries: list[tuple[bool, str]] = []  # (is_core, line)
+        core_lines:  list[str] = []
+        plain_lines: list[str] = []
+
         for name, mod in sorted(loader.modules.items(), key=lambda x: x[0].lower()):
             if name in hidden:
                 continue
@@ -129,109 +116,40 @@ class HelpModule(KitsuneModule):
             is_core = getattr(mod, "_is_builtin", False)
             icon    = self.config["core_emoji"] if is_core else self.config["plain_emoji"]
             display = mod.name or name.capitalize()
-            line    = f"{icon} <code>{display}</code>: ( {' | '.join(prefix + c for c in cmds)} )"
-            entries.append((is_core, line))
+            line = f"\n{icon} <code>{display}</code>: ( {' | '.join(prefix + c for c in cmds)} )"
+            if is_core:
+                core_lines.append(line)
+            else:
+                plain_lines.append(line)
 
         total        = len(loader.modules)
         hidden_count = len(hidden)
 
-        # ── Разбиваем на страницы ─────────────────────────────────────────────
-        # Размер страницы зависит от того включён ли баннер
-        try:
-            show_banner_early = bool(self.config["show_banner"])
-        except Exception:
-            show_banner_early = True
-        mods_per_page = self.MODS_PER_PAGE_BANNER if show_banner_early else self.MODS_PER_PAGE_TEXT
+        body = (
+            f"{self.config['desc_icon']} "
+            f"<b>{self.strings('header').format(count=total, hidden=hidden_count)}</b>"
+        )
 
-        pages: list[list[tuple[bool, str]]] = []
-        page: list[tuple[bool, str]] = []
-        for entry in entries:
-            page.append(entry)
-            if len(page) >= mods_per_page:
-                pages.append(page)
-                page = []
-        if page:
-            pages.append(page)
+        if core_lines:
+            body += "\n<blockquote expandable>" + "".join(core_lines) + "\n</blockquote>"
 
-        if not pages:
-            await event.message.edit(self.strings("no_modules"), parse_mode="html")
-            return
+        if plain_lines:
+            body += "\n<blockquote expandable>" + "".join(plain_lines) + "\n</blockquote>"
 
-        desc_icon = self.config["desc_icon"]
+        banner = self.config["banner_url"]
+        inline = self._inline()
 
-        def make_page_text(idx: int) -> str:
-            hdr = (
-                f"{desc_icon} <b>{self.strings('header').format(count=total, hidden=hidden_count)}</b>"
-                f"   <i>стр. {idx + 1}/{len(pages)}</i>\n"
-            )
-            core_l  = [ln for ic, ln in pages[idx] if ic]
-            plain_l = [ln for ic, ln in pages[idx] if not ic]
-            body = hdr
-            if core_l:
-                body += "\n<blockquote expandable>\n" + "\n".join(core_l) + "\n</blockquote>"
-            if plain_l:
-                body += "\n<blockquote expandable>\n" + "\n".join(plain_l) + "\n</blockquote>"
-            return body
-
-        inline     = self._inline()
-        total_pages = len(pages)
-
-        # ── Inline-пагинация (через бота) ─────────────────────────────────────
-        _bot = getattr(inline, "_bot", None) if inline else None
-
-        if inline and _bot:
-            # Гарантируем что _bot_username инициализирован ДО вызова form()
-            # Без этого _invoke_unit зависает на 30 с если get_me() медленный
-            if not getattr(inline, "_bot_username", None):
-                try:
-                    _me = await _bot.get_me()
-                    inline._bot_username = _me.username
-                    logger.debug("help: pre-fetched bot username: %s", inline._bot_username)
-                except Exception as _e:
-                    logger.warning("help: не удалось получить bot username: %s — fallback", _e)
-                    _bot = None  # Помечаем как недоступный
-
-        if inline and _bot:
-            state = {"page": 0}
-
-            def make_buttons(idx: int) -> list:
-                row = []
-                if idx > 0:
-                    row.append({"text": "◀️", "callback": _prev})
-                row.append({"text": f"📋 {idx + 1} / {total_pages}", "callback": _noop})
-                if idx < total_pages - 1:
-                    row.append({"text": "▶️", "callback": _next})
-                return [row]
-
-            async def _noop(call) -> None:
-                await call.answer()
-
-            async def _prev(call) -> None:
-                if state["page"] > 0:
-                    state["page"] -= 1
-                await inline.edit(call, make_page_text(state["page"]), make_buttons(state["page"]))
-                await call.answer()
-
-            async def _next(call) -> None:
-                if state["page"] < total_pages - 1:
-                    state["page"] += 1
-                await inline.edit(call, make_page_text(state["page"]), make_buttons(state["page"]))
-                await call.answer()
-
+        if banner and inline and getattr(inline, "_bot", None):
             try:
                 await inline.form(
-                    text=make_page_text(0),
+                    text=body,
                     message=event.message,
-                    reply_markup=make_buttons(0),
+                    reply_markup=[],
+                    gif=banner,
                 )
                 return
-            except Exception as _ie:
-                logger.warning("help: inline.form упал: %s — fallback к тексту", _ie)
-
-        # ── Fallback: текст без кнопок ─────────────────────────────────────────
-        body = make_page_text(0)
-        if total_pages > 1:
-            body += f"\n\n<i>📖 Показана стр. 1 из {total_pages}. Установи бота для навигации.</i>"
+            except Exception:
+                pass
 
         await self._edit_collapsed(event.message, body)
 
