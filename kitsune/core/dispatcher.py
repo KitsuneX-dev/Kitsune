@@ -293,7 +293,7 @@ class CommandDispatcher:
                     pass
                 return
 
-            raw = text[len(self._prefix):].lstrip()  # фикс: .help и . help — одно и то же
+            raw = text[len(self._prefix):]
             parts = raw.split(maxsplit=1)
             if not parts:
                 return

@@ -122,12 +122,7 @@ class KitsuneModule:
         prefix = dispatcher._prefix if dispatcher else "."
         text = event.message.raw_text or event.message.text or ""
         if text.startswith(prefix):
-            # Фикс: срезаем префикс и убираем пробелы — чтобы
-            # "*help" и "* help" давали одинаковый результат.
-            # Без этого "* help" → split → ["*","help"] → get_args
-            # возвращал "help" как аргумент вместо пустой строки.
-            remainder = text[len(prefix):].lstrip()
-            parts = remainder.split(maxsplit=1)
+            parts = text.split(maxsplit=1)
             return parts[1] if len(parts) > 1 else ""
         return ""
 
@@ -135,10 +130,8 @@ class KitsuneModule:
         db = getattr(self, "db", None)
         lang = db.get("kitsune.core", "lang", "ru") if db else "ru"
 
-        # Всегда используем суффикс: strings_ru, strings_en и т.д.
-        # Это исключает конфликт с методом strings() если модуль объявит strings = {}.
-        strings_key = f"strings_{lang}"
-        strings = getattr(self, strings_key, None) or getattr(self, "strings_ru", None) or getattr(self, "strings_en", {})
+        strings_key = f"strings_{lang}" if lang != "en" else "strings"
+        strings = getattr(self, strings_key, None) or getattr(self, "strings_ru", None) or getattr(self, "strings", {})
 
         text = strings.get(key, key) if isinstance(strings, dict) else key
 
