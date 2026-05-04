@@ -290,6 +290,15 @@ class InlineManager:
         return None
 
     async def _on_inline_query(self, query: "InlineQuery") -> None:
+        try:
+            await self._handle_inline_query(query)
+        except Exception as exc:
+            if "query is too old" in str(exc) or "query ID is invalid" in str(exc):
+                logger.debug("InlineManager._on_inline_query: stale query ignored (%s)", exc)
+            else:
+                logger.exception("InlineManager._on_inline_query failed")
+
+    async def _handle_inline_query(self, query: "InlineQuery") -> None:
         q = query.query.strip()
 
         for unit in self._units.values():
