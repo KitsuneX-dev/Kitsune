@@ -74,8 +74,8 @@ class InlineManager:
         # _on_message НЕ регистрируем — за /start и текст отвечает BotRunner
         self._started = True
         asyncio.ensure_future(self._cleaner())
-        logger.info(
-            "InlineManager: attached to BotRunner router (username=@%s, no separate polling)",
+        logger.debug(
+            "InlineManager: attached to BotRunner router (username=@%s)",
             self._bot_username or "?",
         )
 
@@ -296,15 +296,15 @@ class InlineManager:
             logger.error("InlineManager: cannot resolve entity", exc_info=True)
             return None
 
-        # Минимальная пауза — даём боту зарегистрировать unit до inline_query
-        await asyncio.sleep(0.3)
+        # Увеличенная начальная пауза — даём боту больше времени зарегистрировать unit
+        await asyncio.sleep(0.8)
 
-        for attempt in range(5):
+        for attempt in range(7):
             try:
                 results = await self._client.inline_query(self._bot_username, unit_id)
                 if not results:
-                    # Бот ещё не ответил — короткая пауза и retry
-                    await asyncio.sleep(0.4)
+                    # Бот ещё не ответил — пауза и retry
+                    await asyncio.sleep(0.6 + attempt * 0.2)
                     continue
                 sent = await results[0].click(entity, reply_to=reply_to)
                 try:
@@ -315,14 +315,18 @@ class InlineManager:
             except Exception as exc:
                 err = str(exc)
                 if "BotResponseTimeout" in err or "timeout" in err.lower():
-                    # Экспоненциальный backoff, но с меньшим базовым значением
-                    delay = 0.5 * (attempt + 1)
-                    logger.warning(
-                        "InlineManager._invoke_unit: timeout attempt %d/5, retrying in %.1fs",
-                        attempt + 1, delay,
-                    )
-                    await asyncio.sleep(delay)
-                    continue
+                    # Прогрессивный backoff с большими задержками
+                    delay = 1.0 + (attempt * 0.5)
+                    if attempt < 6:
+                        logger.debug(
+                            "InlineManager: timeout attempt %d/7, retry in %.1fs",
+                            attempt + 1, delay,
+                        )
+                        await asyncio.sleep(delay)
+                        continue
+                    else:
+                        logger.error("InlineManager: timeout after %d attempts for unit %s", attempt + 1, unit_id)
+                        return None
                 logger.exception("InlineManager._invoke_unit failed")
                 return None
         logger.error("InlineManager._invoke_unit: all attempts failed for unit %s", unit_id)

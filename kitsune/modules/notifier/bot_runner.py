@@ -109,9 +109,7 @@ async def _run_asset_setup(client, db) -> None:
     await _asyncio.sleep(5)  # ждём полную готовность бота
     try:
         from ...assets import setup_all_avatars
-        logger.info("BotRunner: auto asset setup starting...")
         await setup_all_avatars(client, db)
-        logger.info("BotRunner: auto asset setup done")
     except Exception as _e:
         logger.warning("BotRunner: asset setup error: %s", _e, exc_info=True)
 
@@ -145,7 +143,7 @@ class BotRunner:
             self._polling_task = asyncio.ensure_future(
                 self.dp.start_polling(self.bot, handle_signals=False)
             )
-            logger.info("BotRunner: polling started (first_run=%s)", first_run)
+            logger.debug("BotRunner: polling started (first_run=%s)", first_run)
 
             # ── Инициализируем InlineManager ──────────────────────────────────
             # Подключаем InlineManager к уже запущенному polling этого BotRunner-а.
@@ -157,7 +155,7 @@ class BotRunner:
                 _inline = _InlineMgr(self._client, self._db, token)
                 _inline.attach(self.bot, self.dp, router, bot_username=_me_info.username)
                 self._client._kitsune_inline = _inline
-                logger.info("BotRunner: InlineManager подключён (@%s)", _me_info.username)
+                logger.debug("BotRunner: InlineManager подключён (@%s)", _me_info.username)
             except Exception as _ie:
                 logger.warning("BotRunner: InlineManager не удалось подключить: %s", _ie)
 
