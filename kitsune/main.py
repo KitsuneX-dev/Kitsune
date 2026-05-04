@@ -485,7 +485,7 @@ async def _start_bot_runner(client: Any, db: Any, cfg: dict) -> None:
         await runner.start(str(bot_token))
         # Сохраняем runner на клиенте для доступа из других модулей
         client._kitsune_bot_runner = runner
-        logger.info("main: BotRunner запущен, InlineManager инициализирован")
+        logger.debug("main: BotRunner запущен, InlineManager инициализирован")
     except Exception as _be:
         logger.warning("main: не удалось запустить BotRunner: %s", _be)
 
