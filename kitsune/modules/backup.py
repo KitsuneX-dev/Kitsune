@@ -106,6 +106,39 @@ async def _ensure_kitsune_folder(client, *peer_ids: int) -> None:
         logger.debug("_ensure_kitsune_folder: создана папка Kitsune с %d чатами", len(new_peers))
 
 
+def _extract_msg_ids(sent) -> tuple[int | None, int | None]:
+    """
+    Унифицировано достаёт (chat_id, msg_id) из объекта Message,
+    возвращённого Hydrogram или Telethon.
+    """
+    if sent is None:
+        return None, None
+
+    msg_id = getattr(sent, "id", None)
+
+    chat_id = None
+    chat_obj = getattr(sent, "chat", None)  # Hydrogram
+    if chat_obj is not None:
+        chat_id = getattr(chat_obj, "id", None)
+
+    if chat_id is None:
+        chat_id = getattr(sent, "chat_id", None)  # Telethon
+
+    if chat_id is None:
+        peer = getattr(sent, "peer_id", None)
+        if peer is not None:
+            chat_id = (
+                getattr(peer, "channel_id", None)
+                or getattr(peer, "chat_id", None)
+                or getattr(peer, "user_id", None)
+            )
+            # Каналы в Telethon отдают «голый» id — приводим к -100…
+            if chat_id and getattr(peer, "channel_id", None):
+                chat_id = int(f"-100{chat_id}")
+
+    return chat_id, msg_id
+
+
 class BackupModule(KitsuneModule):
     name        = "backup"
     description = "Резервное копирование — без шифрования, совместимо с Hikka/Heroku"
@@ -167,6 +200,31 @@ class BackupModule(KitsuneModule):
             "📦 Файлов: {count}\n"
             "📋 Ответь: <code>.restoreall</code>"
         ),
+        # restore button
+        "restore_btn":     "🔄 Восстановить",
+        "restore_form_db": (
+            "🦊 <b>Управление бэкапом БД</b>\n"
+            "🕐 {ts}\n\n"
+            "Нажми кнопку, чтобы восстановить базу данных из этого бэкапа."
+        ),
+        "restore_form_mods": (
+            "🦊 <b>Управление бэкапом модулей</b>\n"
+            "🕐 {ts}\n"
+            "📦 Файлов: {count}\n\n"
+            "Нажми кнопку, чтобы восстановить модули из этого бэкапа."
+        ),
+        "restore_form_all": (
+            "🦊 <b>Управление полным бэкапом</b>\n"
+            "🕐 {ts}\n"
+            "📦 Файлов: {count}\n\n"
+            "Нажми кнопку, чтобы восстановить БД и модули из этого бэкапа."
+        ),
+        "restore_alert":   "⏳ Восстанавливаю...",
+        "restore_done_db":   "✅ База данных восстановлена из бэкапа.\n🕐 {ts}\n♻️ Перезапустите бота.",
+        "restore_done_mods": "✅ Модули восстановлены ({count} шт.).\n🕐 {ts}\n♻️ Перезапустите бота.",
+        "restore_done_all":  "✅ Полное восстановление выполнено ({count} модулей).\n🕐 {ts}\n♻️ Перезапустите бота.",
+        "restore_fail":      "❌ Не удалось восстановить: {err}",
+        "restore_lost":      "❌ Не нашёл исходный файл бэкапа в чате.",
     }
 
     strings_en = {
@@ -196,6 +254,16 @@ class BackupModule(KitsuneModule):
         "db_caption":     "🦊 <b>Kitsune DB Backup</b>\n🕐 {ts}\n📋 Reply: <code>.restoredb</code>",
         "mods_caption":   "🦊 <b>Kitsune Mods Backup</b>\n🕐 {ts}\n📦 {count} files\n📋 Reply: <code>.restoremods</code>",
         "all_caption":    "🦊 <b>Kitsune Full Backup</b>\n🕐 {ts}\n📦 {count} files\n📋 Reply: <code>.restoreall</code>",
+        "restore_btn":      "🔄 Restore",
+        "restore_form_db":  "🦊 <b>DB Backup management</b>\n🕐 {ts}\n\nTap the button to restore the database from this backup.",
+        "restore_form_mods":"🦊 <b>Mods Backup management</b>\n🕐 {ts}\n📦 {count} files\n\nTap the button to restore modules from this backup.",
+        "restore_form_all": "🦊 <b>Full Backup management</b>\n🕐 {ts}\n📦 {count} files\n\nTap the button to restore everything from this backup.",
+        "restore_alert":    "⏳ Restoring...",
+        "restore_done_db":  "✅ Database restored from backup.\n🕐 {ts}\n♻️ Please restart.",
+        "restore_done_mods":"✅ Modules restored ({count}).\n🕐 {ts}\n♻️ Please restart.",
+        "restore_done_all": "✅ Full restore done ({count} modules).\n🕐 {ts}\n♻️ Please restart.",
+        "restore_fail":     "❌ Restore failed: {err}",
+        "restore_lost":     "❌ Original backup file not found in chat.",
     }
 
     def __init__(self, *args, **kwargs) -> None:
@@ -372,6 +440,121 @@ class BackupModule(KitsuneModule):
             except Exception:
                 pass
 
+    # ── Кнопка «Восстановить» под бэкапом ─────────────────────────────────────
+
+    def _inline(self):
+        return getattr(self.client, "_kitsune_inline", None)
+
+    async def _attach_restore_button(
+        self,
+        chat_id,
+        sent,
+        kind: str,
+        ts: str,
+        count: int = 0,
+    ) -> None:
+        """
+        Под отправленным файлом-бэкапом публикует мини-форму с кнопкой
+        «🔄 Восстановить». Реализация — через inline.form, как в команде
+        config/cfg: пользовательский бот публикует сообщение с инлайн-кнопкой,
+        привязанное reply_to к файлу с бэкапом.
+
+        Если бот недоступен или что-то падает — просто молча пропускаем,
+        текстовая команда (.restoredb / .restoremods / .restoreall) всегда
+        остаётся как fallback.
+        """
+        inline = self._inline()
+        if not inline or not getattr(inline, "_bot", None):
+            return
+
+        sent_chat_id, sent_msg_id = _extract_msg_ids(sent)
+        if not sent_msg_id:
+            return
+        # Если в sent не нашлось chat_id — используем тот, в который отправляли.
+        if not sent_chat_id:
+            sent_chat_id = chat_id
+
+        try:
+            placeholder = await self.client.send_message(
+                chat_id,
+                "🔄 <i>Загружаю кнопки управления...</i>",
+                parse_mode="html",
+                reply_to=sent_msg_id,
+            )
+        except Exception as exc:
+            logger.debug("backup: send_message placeholder failed (%s)", exc)
+            return
+
+        if kind == "db":
+            text = self.strings("restore_form_db").format(ts=ts)
+            cb   = self._cb_restore
+        elif kind == "mods":
+            text = self.strings("restore_form_mods").format(ts=ts, count=count)
+            cb   = self._cb_restore
+        else:  # all
+            text = self.strings("restore_form_all").format(ts=ts, count=count)
+            cb   = self._cb_restore
+
+        markup = [[
+            {
+                "text":     self.strings("restore_btn"),
+                "callback": cb,
+                "args":     (int(sent_chat_id), int(sent_msg_id), kind),
+            },
+        ]]
+
+        try:
+            await inline.form(text, placeholder, markup)
+        except Exception as exc:
+            logger.debug("backup: inline.form failed (%s)", exc)
+            try:
+                await placeholder.delete()
+            except Exception:
+                pass
+
+    async def _send_backup(
+        self,
+        dest: int | None,
+        data: bytes,
+        fname: str,
+        caption: str,
+        kind: str,
+        ts: str,
+        count: int = 0,
+    ) -> None:
+        """
+        Универсальная отправка бэкапа: в KitsuneBackup (если есть) и в «Избранное».
+        После каждой отправки прицепляет кнопку «🔄 Восстановить» через inline.form.
+        """
+        # → группа KitsuneBackup
+        if dest:
+            buf = io.BytesIO(data)
+            buf.name = fname
+            try:
+                sent = await hydro_send_file(
+                    self.client, dest, buf, caption=caption, parse_mode="html",
+                )
+                await self._attach_restore_button(dest, sent, kind, ts, count)
+            except Exception:
+                logger.exception("backup: send to dest failed")
+
+        # → Saved Messages
+        try:
+            buf2 = io.BytesIO(data)
+            buf2.name = fname
+            sent_me = await hydro_send_file(
+                self.client, "me", buf2, caption=caption, parse_mode="html",
+            )
+            # У "me" chat_id == self.client.tg_id
+            try:
+                me_id = int(self.client.tg_id)
+            except Exception:
+                me_id = None
+            if me_id:
+                await self._attach_restore_button(me_id, sent_me, kind, ts, count)
+        except Exception:
+            logger.exception("backup: send to Saved Messages failed")
+
     # ── backupdb ──────────────────────────────────────────────────────────────
 
     @command("backupdb", required=OWNER)
@@ -380,17 +563,47 @@ class BackupModule(KitsuneModule):
         async with ProgressMessage(event, self.strings("creating")) as prog:
             data    = self._db_bytes()
             dest    = await self._get_dest(event)
+            ts      = self._ts()
             fname   = f"kitsune-db-{self._fname_ts()}.json"
-            caption = self.strings("db_caption").format(ts=self._ts())
+            caption = self.strings("db_caption").format(ts=ts)
 
-            buf = io.BytesIO(data)
-            buf.name = fname
-            if dest:
-                await hydro_send_file(self.client, dest, buf, caption=caption, parse_mode="html")
-            await hydro_send_file(self.client, "me", buf, caption=caption, parse_mode="html")
+            await self._send_backup(dest, data, fname, caption, "db", ts)
             await prog.done(self.strings("done"))
 
     # ── restoredb ─────────────────────────────────────────────────────────────
+
+    async def _do_restore_db(self, raw: bytes) -> bool:
+        """
+        Чистый restore БД из сырых байтов файла. Возвращает True/False.
+        Принимает .json или .backup (ZIP с db.json внутри).
+        """
+        db_data = None
+
+        if raw[:2] == b"PK":
+            try:
+                with zipfile.ZipFile(io.BytesIO(raw)) as zf:
+                    if "db.json" in zf.namelist():
+                        db_data = json.loads(zf.open("db.json").read())
+            except Exception as e:
+                logger.warning("restoredb: не смог распаковать .backup: %s", e)
+
+        if db_data is None:
+            try:
+                db_data = json.loads(raw.decode("utf-8"))
+            except Exception:
+                return False
+
+        if not isinstance(db_data, dict):
+            return False
+
+        self._strip_tokens(db_data)
+        self.db.clear()
+        for owner, keys in db_data.items():
+            if isinstance(keys, dict):
+                for key, val in keys.items():
+                    self.db.force_set(owner, key, val)
+        await self.db.force_save()
+        return True
 
     @command("restoredb", required=OWNER)
     async def restoredb_cmd(self, event) -> None:
@@ -408,38 +621,11 @@ class BackupModule(KitsuneModule):
             return
 
         async with ProgressMessage(event, self.strings("restoring")) as prog:
-            raw     = await hydro_download(self.client, reply)
-            db_data = None
-
-            # .backup → ZIP, достаём db.json
-            if raw[:2] == b"PK":
-                try:
-                    with zipfile.ZipFile(io.BytesIO(raw)) as zf:
-                        if "db.json" in zf.namelist():
-                            db_data = json.loads(zf.open("db.json").read())
-                except Exception as e:
-                    logger.warning("restoredb: не смог распаковать .backup: %s", e)
-
-            # .json → прямой дамп
-            if db_data is None:
-                try:
-                    db_data = json.loads(raw.decode("utf-8"))
-                except Exception:
-                    await prog.done(self.strings("bad_file"))
-                    return
-
-            if not isinstance(db_data, dict):
+            raw = await hydro_download(self.client, reply)
+            ok = await self._do_restore_db(raw)
+            if not ok:
                 await prog.done(self.strings("bad_file"))
                 return
-
-            self._strip_tokens(db_data)
-            # Фикс: db.update(**db_data) не работает — используем set() для каждого ключа.
-            self.db.clear()
-            for owner, keys in db_data.items():
-                if isinstance(keys, dict):
-                    for key, val in keys.items():
-                        self.db.force_set(owner, key, val)
-            await self.db.force_save()
             await prog.done(self.strings("restored"))
 
     # ── backupmods ────────────────────────────────────────────────────────────
@@ -457,17 +643,38 @@ class BackupModule(KitsuneModule):
                 return
 
             dest    = await self._get_dest(event)
+            ts      = self._ts()
             fname   = f"kitsune-mods-{self._fname_ts()}.zip"
-            caption = self.strings("mods_caption").format(ts=self._ts(), count=count)
+            caption = self.strings("mods_caption").format(ts=ts, count=count)
 
-            buf = io.BytesIO(mods_zip)
-            buf.name = fname
-            if dest:
-                await hydro_send_file(self.client, dest, buf, caption=caption, parse_mode="html")
-            await hydro_send_file(self.client, "me", buf, caption=caption, parse_mode="html")
+            await self._send_backup(dest, mods_zip, fname, caption, "mods", ts, count)
             await prog.done(self.strings("mods_done").format(count=count))
 
     # ── restoremods ───────────────────────────────────────────────────────────
+
+    async def _do_restore_mods(self, raw: bytes) -> int | None:
+        """
+        Чистый restore модулей из сырых байтов файла.
+        Принимает .zip (mods.zip напрямую) или .backup (с mods.zip внутри).
+        Возвращает количество восстановленных файлов или None при ошибке.
+        """
+        mods_zip_bytes = None
+
+        if raw[:2] == b"PK":
+            try:
+                with zipfile.ZipFile(io.BytesIO(raw)) as zf:
+                    names = zf.namelist()
+                    if "mods.zip" in names:
+                        mods_zip_bytes = zf.open("mods.zip").read()
+                    elif any(n.startswith("mods/") for n in names) or "urls.json" in names:
+                        mods_zip_bytes = raw
+            except Exception as e:
+                logger.warning("restoremods: %s", e)
+
+        if mods_zip_bytes is None:
+            return None
+
+        return await self._restore_mods_from_zip(mods_zip_bytes)
 
     @command("restoremods", required=OWNER)
     async def restoremods_cmd(self, event) -> None:
@@ -484,27 +691,11 @@ class BackupModule(KitsuneModule):
             return
 
         async with ProgressMessage(event, self.strings("mods_restoring"), total=3) as prog:
-            raw            = await hydro_download(self.client, reply)
-            mods_zip_bytes = None
-
-            if raw[:2] == b"PK":
-                try:
-                    with zipfile.ZipFile(io.BytesIO(raw)) as zf:
-                        names = zf.namelist()
-                        if "mods.zip" in names:
-                            # .backup формат
-                            mods_zip_bytes = zf.open("mods.zip").read()
-                        elif any(n.startswith("mods/") for n in names) or "urls.json" in names:
-                            # прямой mods.zip
-                            mods_zip_bytes = raw
-                except Exception as e:
-                    logger.warning("restoremods: %s", e)
-
-            if mods_zip_bytes is None:
+            raw = await hydro_download(self.client, reply)
+            count = await self._do_restore_mods(raw)
+            if count is None:
                 await prog.done(self.strings("mods_bad_file"))
                 return
-
-            count = await self._restore_mods_from_zip(mods_zip_bytes)
             await prog.done(self.strings("mods_restored").format(count=count))
 
     # ── backupall ─────────────────────────────────────────────────────────────
@@ -520,17 +711,49 @@ class BackupModule(KitsuneModule):
             archive_bytes, count = self._make_full_backup()
 
             dest    = await self._get_dest(event)
+            ts      = self._ts()
             fname   = f"kitsune-{self._fname_ts()}.backup"
-            caption = self.strings("all_caption").format(ts=self._ts(), count=count)
+            caption = self.strings("all_caption").format(ts=ts, count=count)
 
-            buf = io.BytesIO(archive_bytes)
-            buf.name = fname
-            if dest:
-                await hydro_send_file(self.client, dest, buf, caption=caption, parse_mode="html")
-            await hydro_send_file(self.client, "me", buf, caption=caption, parse_mode="html")
+            await self._send_backup(dest, archive_bytes, fname, caption, "all", ts, count)
             await prog.done(self.strings("all_done"))
 
     # ── restoreall ────────────────────────────────────────────────────────────
+
+    async def _do_restore_all(self, raw: bytes) -> int | None:
+        """
+        Чистый restore полного .backup. Возвращает количество восстановленных
+        модулей или None при ошибке.
+        """
+        if raw[:2] != b"PK":
+            return None
+
+        try:
+            with zipfile.ZipFile(io.BytesIO(raw)) as zf:
+                names = zf.namelist()
+                if "db.json" not in names:
+                    return None
+
+                db_data = json.loads(zf.open("db.json").read().decode("utf-8"))
+                if not isinstance(db_data, dict):
+                    return None
+
+                self._strip_tokens(db_data)
+                self.db.clear()
+                for owner, keys in db_data.items():
+                    if isinstance(keys, dict):
+                        for key, val in keys.items():
+                            self.db.force_set(owner, key, val)
+                await self.db.force_save()
+
+                count = 0
+                if "mods.zip" in names:
+                    mods_zip_bytes = zf.open("mods.zip").read()
+                    count = await self._restore_mods_from_zip(mods_zip_bytes)
+                return count
+        except Exception:
+            logger.exception("restoreall: ошибка")
+            return None
 
     @command("restoreall", required=OWNER)
     async def restoreall_cmd(self, event) -> None:
@@ -545,44 +768,95 @@ class BackupModule(KitsuneModule):
             return
 
         async with ProgressMessage(event, self.strings("all_restoring"), total=5) as prog:
-            raw = await hydro_download(self.client, reply)
-
-            if raw[:2] != b"PK":
+            raw   = await hydro_download(self.client, reply)
+            count = await self._do_restore_all(raw)
+            if count is None:
                 await prog.done(self.strings("all_bad_file"))
                 return
-
-            try:
-                with zipfile.ZipFile(io.BytesIO(raw)) as zf:
-                    names = zf.namelist()
-                    if "db.json" not in names:
-                        await prog.done(self.strings("all_bad_file"))
-                        return
-
-                    # ── Восстановление БД ──────────────────────────────────
-                    db_data = json.loads(zf.open("db.json").read().decode("utf-8"))
-                    if not isinstance(db_data, dict):
-                        await prog.done(self.strings("all_bad_file"))
-                        return
-
-                    self._strip_tokens(db_data)
-                    self.db.clear()
-                    for owner, keys in db_data.items():
-                        if isinstance(keys, dict):
-                            for key, val in keys.items():
-                                self.db.force_set(owner, key, val)
-                    await self.db.force_save()
-
-                    # ── Восстановление модулей ─────────────────────────────
-                    if "mods.zip" in names:
-                        mods_zip_bytes = zf.open("mods.zip").read()
-                        await self._restore_mods_from_zip(mods_zip_bytes)
-
-            except Exception:
-                logger.exception("restoreall: ошибка")
-                await prog.done(self.strings("all_bad_file"))
-                return
-
             await prog.done(self.strings("all_restored"))
+
+    # ── Кнопочный callback восстановления ─────────────────────────────────────
+
+    async def _cb_restore(self, call, chat_id: int, msg_id: int, kind: str) -> None:
+        """
+        Обработчик кнопки «🔄 Восстановить» из формы под файлом.
+        kind ∈ {"db", "mods", "all"}.
+        """
+        try:
+            await call.answer(self.strings("restore_alert"))
+        except Exception:
+            pass
+
+        inline = self._inline()
+        ts     = self._ts()
+
+        # Достаём оригинальное сообщение с файлом
+        try:
+            msg = await self.client.get_messages(chat_id, ids=int(msg_id))
+        except Exception as exc:
+            logger.warning("backup: get_messages failed: %s", exc)
+            msg = None
+
+        if not msg or not getattr(msg, "media", None):
+            if inline:
+                try:
+                    await inline.edit(call, self.strings("restore_lost"), [])
+                except Exception:
+                    pass
+            return
+
+        # Качаем содержимое
+        try:
+            raw = await hydro_download(self.client, msg)
+        except Exception as exc:
+            logger.exception("backup: download failed")
+            if inline:
+                try:
+                    await inline.edit(
+                        call,
+                        self.strings("restore_fail").format(err=str(exc)[:200]),
+                        [],
+                    )
+                except Exception:
+                    pass
+            return
+
+        # Делаем restore по типу
+        try:
+            if kind == "db":
+                ok = await self._do_restore_db(raw)
+                if not ok:
+                    raise RuntimeError("bad DB format")
+                final = self.strings("restore_done_db").format(ts=ts)
+            elif kind == "mods":
+                count = await self._do_restore_mods(raw)
+                if count is None:
+                    raise RuntimeError("bad mods format")
+                final = self.strings("restore_done_mods").format(ts=ts, count=count)
+            else:
+                count = await self._do_restore_all(raw)
+                if count is None:
+                    raise RuntimeError("bad backup format")
+                final = self.strings("restore_done_all").format(ts=ts, count=count)
+        except Exception as exc:
+            logger.exception("backup: restore via button failed")
+            if inline:
+                try:
+                    await inline.edit(
+                        call,
+                        self.strings("restore_fail").format(err=str(exc)[:200]),
+                        [],
+                    )
+                except Exception:
+                    pass
+            return
+
+        # Финальный экран — без кнопок (восстановление уже выполнено)
+        if inline:
+            try:
+                await inline.edit(call, final, [])
+            except Exception:
+                pass
 
     # ── setbackupinterval ─────────────────────────────────────────────────────
 
@@ -708,32 +982,30 @@ class BackupModule(KitsuneModule):
                 fts = self._fname_ts()
 
                 # ── 1. db.json ────────────────────────────────────────────────
-                db_buf = io.BytesIO(self._db_bytes())
-                db_buf.name = f"kitsune-db-{fts}.json"
-                await hydro_send_file(
-                    self.client, dest, db_buf,
-                    caption=self.strings("db_caption").format(ts=ts),
-                    parse_mode="html",
+                db_data = self._db_bytes()
+                await self._send_backup(
+                    dest, db_data,
+                    f"kitsune-db-{fts}.json",
+                    self.strings("db_caption").format(ts=ts),
+                    "db", ts,
                 )
 
                 # ── 2. mods.zip ───────────────────────────────────────────────
                 mods_data, count = self._make_mods_zip()
-                mods_buf = io.BytesIO(mods_data)
-                mods_buf.name = f"kitsune-mods-{fts}.zip"
-                await hydro_send_file(
-                    self.client, dest, mods_buf,
-                    caption=self.strings("mods_caption").format(ts=ts, count=count),
-                    parse_mode="html",
+                await self._send_backup(
+                    dest, mods_data,
+                    f"kitsune-mods-{fts}.zip",
+                    self.strings("mods_caption").format(ts=ts, count=count),
+                    "mods", ts, count,
                 )
 
                 # ── 3. .backup (полный архив db + mods) ───────────────────────
                 full_data, count = self._make_full_backup()
-                full_buf = io.BytesIO(full_data)
-                full_buf.name = f"kitsune-{fts}.backup"
-                await hydro_send_file(
-                    self.client, dest, full_buf,
-                    caption=self.strings("all_caption").format(ts=ts, count=count),
-                    parse_mode="html",
+                await self._send_backup(
+                    dest, full_data,
+                    f"kitsune-{fts}.backup",
+                    self.strings("all_caption").format(ts=ts, count=count),
+                    "all", ts, count,
                 )
 
                 await self.db.set(_DB_OWNER, "last_backup", int(time.time()))
