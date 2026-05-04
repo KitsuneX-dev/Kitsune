@@ -349,6 +349,11 @@ async def _startup(args: argparse.Namespace) -> None:
     await loader.load_all_builtin()
     await loader.load_all_user()
 
+    # ── Авто-запуск BotRunner + InlineManager ─────────────────────────────────
+    # Без этого inline-кнопки в .help, .cfg и других командах не работают,
+    # потому что client._kitsune_inline никогда не устанавливается.
+    asyncio.ensure_future(_start_bot_runner(client, db, cfg))
+
     translator = Translator(db)
     lang = db.get("kitsune.core", "lang", "ru")
     translator.set_language(lang)
@@ -461,6 +466,29 @@ async def _keepalive(client: Any) -> None:
                 logger.info("keepalive: reconnected after %d attempt(s)", _fail_count + 1)
             except Exception as exc2:
                 logger.debug("keepalive: reconnect failed (%s)", type(exc2).__name__)
+
+async def _start_bot_runner(client: Any, db: Any, cfg: dict) -> None:
+    """Запускает BotRunner + InlineManager если в config.toml или БД есть bot_token.
+
+    Вызывается через asyncio.ensure_future — не блокирует основной старт.
+    Ждёт 3 секунды чтобы все модули успели загрузиться до инициализации бота.
+    """
+    await asyncio.sleep(3)
+    # Берём токен из config.toml первым делом, потом из БД
+    bot_token = cfg.get("bot_token") or db.get("kitsune.notifier", "bot_token", None)
+    if not bot_token:
+        logger.debug("main: bot_token не найден — InlineManager не запущен")
+        return
+    try:
+        from .modules.notifier.bot_runner import BotRunner as _BotRunner
+        runner = _BotRunner(client, db)
+        await runner.start(str(bot_token))
+        # Сохраняем runner на клиенте для доступа из других модулей
+        client._kitsune_bot_runner = runner
+        logger.info("main: BotRunner запущен, InlineManager инициализирован")
+    except Exception as _be:
+        logger.warning("main: не удалось запустить BotRunner: %s", _be)
+
 
 async def _setup_kitsune_folder(client: Any, db: Any) -> None:
     """Создаёт папку Kitsune в Telegram после старта."""
