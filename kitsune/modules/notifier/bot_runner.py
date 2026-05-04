@@ -147,6 +147,20 @@ class BotRunner:
             )
             logger.info("BotRunner: polling started (first_run=%s)", first_run)
 
+            # ── Инициализируем InlineManager ──────────────────────────────────
+            # Подключаем InlineManager к уже запущенному polling этого BotRunner-а.
+            # Благодаря этому .help, .cfg и другие команды получают рабочие
+            # inline-кнопки без необходимости дополнительной настройки.
+            try:
+                from ...inline.core import InlineManager as _InlineMgr
+                _me_info = await self.bot.get_me()
+                _inline = _InlineMgr(self._client, self._db, token)
+                _inline.attach(self.bot, self.dp, router, bot_username=_me_info.username)
+                self._client._kitsune_inline = _inline
+                logger.info("BotRunner: InlineManager подключён (@%s)", _me_info.username)
+            except Exception as _ie:
+                logger.warning("BotRunner: InlineManager не удалось подключить: %s", _ie)
+
             # Проверяем и устанавливаем аватарки при каждом старте.
             # Если все флаги уже стоят — функция завершится за долю секунды.
             # Если что-то не установлено — тихо исправит и сохранит флаг в БД.
