@@ -19,7 +19,7 @@ class SettingsModule(KitsuneModule):
     strings_ru = {
         "prefix_set":    "✅ Префикс изменён на <code>{p}</code>",
         "prefix_same":   "ℹ️ Префикс уже <code>{p}</code>",
-        "prefix_usage":  "Использование: <code>.prefix &lt;символ&gt;</code>",
+        "prefix_usage":  "Использование: <code>{pfx}prefix &lt;символ&gt;</code> или <code>{pfx}setprefix &lt;символ&gt;</code>",
         "lang_set":      "✅ Язык изменён на <code>{lang}</code>",
         "lang_usage":    "Использование: <code>.lang &lt;ru|en|de|...&gt;</code>",
         "info_header":   "🦊 <b>Kitsune Userbot</b>\n\n",
@@ -32,7 +32,10 @@ class SettingsModule(KitsuneModule):
         current_prefix = dispatcher._prefix if dispatcher else "."
         raw = event.message.text[len(current_prefix):].split(maxsplit=1)
         if len(raw) < 2 or not raw[1].strip():
-            await event.reply(self.strings("prefix_usage"), parse_mode="html")
+            await event.reply(
+                self.strings("prefix_usage").format(pfx=current_prefix),
+                parse_mode="html",
+            )
             return
 
         new_prefix = raw[1].strip()[:3]
@@ -62,6 +65,25 @@ class SettingsModule(KitsuneModule):
             pass
 
         await event.reply(self.strings("prefix_set").format(p=new_prefix), parse_mode="html")
+
+    # ── Фикс #6: алиас setprefix ─────────────────────────────────────────────────
+    @command("setprefix", required=OWNER)
+    async def setprefix_cmd(self, event) -> None:
+        """Алиас для команды prefix — обратная совместимость."""
+        await self.prefix_cmd(event)
+
+    @command("assetcheck", required=OWNER)
+    async def assetcheck_cmd(self, event) -> None:
+        """Диагностика аватарок — показывает что найдено и что установлено."""
+        try:
+            from ..assets import diagnose, setup_all_avatars
+            report = await diagnose(self.client, self.db)
+            await event.reply(report, parse_mode="html")
+            # Принудительно запускаем установку
+            await setup_all_avatars(self.client, self.db)
+            await event.reply("✅ Установка аватарок запущена. Смотри логи.", parse_mode="html")
+        except Exception as exc:
+            await event.reply(f"❌ Ошибка: <code>{exc}</code>", parse_mode="html")
 
     @command("lang", required=OWNER)
     async def lang_cmd(self, event) -> None:

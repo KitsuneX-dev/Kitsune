@@ -112,7 +112,7 @@ def _resolve_bot_username(client: "TelegramClient", db) -> str | None:
     if inline:
         u = getattr(inline, "_bot_username", None)
         if u:
-            logger.debug("assets: bot_username взят из inline-объекта: %s", u)
+            logger.info("assets: bot_username взят из inline-объекта: %s", u)
             try:
                 db.set_sync("kitsune.notifier", "bot_username", u)
             except Exception:
@@ -148,7 +148,7 @@ async def ensure_channel_photo(
         # Вступаем если не состоим
         try:
             await client(JoinChannelRequest(entity))
-            logger.debug("assets: вступили в %s", channel_id)
+            logger.info("assets: вступили в %s", channel_id)
         except Exception:
             pass
 
@@ -161,7 +161,7 @@ async def ensure_channel_photo(
         except Exception:
             pass
 
-        logger.debug("assets: аватарка установлена для %s (%s)", channel_id, photo_path.name)
+        logger.info("assets: аватарка установлена для %s (%s)", channel_id, photo_path.name)
         return True
     except Exception as exc:
         logger.warning("assets: не удалось установить аватарку для %s: %s", channel_id, exc)
@@ -170,9 +170,9 @@ async def ensure_channel_photo(
 
 # ── Установка аватарки бота ───────────────────────────────────────────────────
 
-async def ensure_bot_photo(client: "TelegramClient", db, bot_username: str, *, force: bool = False) -> bool:
+async def ensure_bot_photo(client: "TelegramClient", db, bot_username: str) -> bool:
     flag_key = f"bot_photo_{bot_username.lstrip('@').lower()}"
-    if not force and db.get(_DB_NS, flag_key, False):
+    if db.get(_DB_NS, flag_key, False):
         return True
 
     if not BOT_AVATAR.exists():
@@ -194,7 +194,7 @@ async def ensure_bot_photo(client: "TelegramClient", db, bot_username: str, *, f
                         await db.force_save()
                     except Exception:
                         pass
-                    logger.debug("assets: аватарка бота @%s установлена", bot_username)
+                    logger.info("assets: аватарка бота @%s установлена", bot_username)
                     return True
     except Exception as exc:
         logger.warning("assets: не удалось установить аватарку бота @%s: %s", bot_username, exc)
@@ -203,51 +203,15 @@ async def ensure_bot_photo(client: "TelegramClient", db, bot_username: str, *, f
 
 # ── Главная функция — вызывается при каждом старте ───────────────────────────
 
-async def reset_avatar_flags(db) -> list[str]:
-    """
-    Сбрасывает все флаги установки аватарок (photo_*, bot_photo_*, all_avatars_checked)
-    из неймспейса kitsune.assets. Возвращает список сброшенных ключей.
-    """
-    cleared: list[str] = []
-    try:
-        ns_data = db._data.get(_DB_NS, {})
-        keys_to_clear = [
-            k for k in list(ns_data.keys())
-            if k.startswith("photo_") or k.startswith("bot_photo_") or k == "all_avatars_checked"
-        ]
-        for key in keys_to_clear:
-            await db.delete(_DB_NS, key)
-            cleared.append(key)
-        if cleared:
-            try:
-                await db.force_save()
-            except Exception:
-                pass
-            logger.info("assets: сброшено %d флагов: %s", len(cleared), cleared)
-    except Exception as e:
-        logger.warning("assets: не удалось сбросить флаги: %s", e)
-    return cleared
-
-
-async def setup_all_avatars(client: "TelegramClient", db, *, force: bool = False) -> None:
+async def setup_all_avatars(client: "TelegramClient", db) -> None:
     """
     Устанавливает аватарки для всех каналов/групп/бота если ещё не установлены.
 
-    Стратегия:
-      1. Проверяем глобальный флаг "all_avatars_checked" в БД
-      2. Если флаг True и force=False — сразу выходим (всё уже проверено)
-      3. Иначе — собираем ID, проверяем/устанавливаем аватарки
-      4. После успешной проверки всех — ставим флаг "all_avatars_checked" = True
-
-    force=True — игнорирует все флаги и переустанавливает аватарки принудительно.
+    Стратегия поиска ID каналов:
+      1. Ищем в БД по всем известным ключам
+      2. Если не нашли — сканируем диалоги по названию (так работает log.py)
+      3. Если нашли через диалоги — сохраняем ID в БД для будущих запусков
     """
-    # ── Быстрый выход если всё уже проверено ─────────────────────────────────
-    if not force and db.get(_DB_NS, "all_avatars_checked", False):
-        logger.debug("assets: все аватарки уже проверены ранее, пропускаем")
-        return
-
-    logger.debug("assets: начинаем проверку/установку аватарок...")
-
     # ── Шаг 1: собираем ID из БД ─────────────────────────────────────────────
     id_map: dict[str, int | None] = {
         "KitsuneBackup": (
@@ -270,22 +234,22 @@ async def setup_all_avatars(client: "TelegramClient", db, *, force: bool = False
         ),
     }
 
-    logger.debug("assets: ID из БД: %s", {k: v for k, v in id_map.items()})
+    logger.info("assets: ID из БД: %s", {k: v for k, v in id_map.items()})
 
     # ── Шаг 2: сканируем диалоги для тех у кого ID = None ───────────────────
     missing_titles = {t for t, cid in id_map.items() if not cid}
     if missing_titles:
-        logger.debug("assets: ищем в диалогах: %s", missing_titles)
+        logger.info("assets: ищем в диалогах: %s", missing_titles)
         found = await _find_channels_by_title(client, missing_titles)
         for title, cid in found.items():
-            logger.debug("assets: нашли '%s' в диалогах: id=%s", title, cid)
+            logger.info("assets: нашли '%s' в диалогах: id=%s", title, cid)
             id_map[title] = cid
             # Сохраняем в БД — следующий запуск не будет сканировать диалоги
             _db_key = title.replace("-", "_").lower()
             try:
                 db.set_sync("kitsune.assets", f"known_{_db_key}", cid)
                 await db.force_save()
-                logger.debug("assets: сохранили id '%s'=%s в БД", title, cid)
+                logger.info("assets: сохранили id '%s'=%s в БД", title, cid)
             except Exception as _e:
                 logger.debug("assets: не удалось сохранить id '%s': %s", title, _e)
 
@@ -295,7 +259,7 @@ async def setup_all_avatars(client: "TelegramClient", db, *, force: bool = False
             from telethon.tl.functions.channels import CreateChannelRequest
             from telethon.tl.functions.account import UpdateNotifySettingsRequest
             from telethon.tl.types import InputNotifyPeer, InputPeerNotifySettings
-            logger.debug("assets: создаём канал kitsune-assets...")
+            logger.info("assets: создаём канал kitsune-assets...")
             result = await client(CreateChannelRequest(
                 title="kitsune-assets",
                 about="🦊 Kitsune Userbot — ассеты и медиафайлы",
@@ -333,51 +297,28 @@ async def setup_all_avatars(client: "TelegramClient", db, *, force: bool = False
             logger.warning("assets: не удалось создать kitsune-assets: %s", e)
 
     # ── Шаг 3: устанавливаем аватарки ─────────────────────────────────────────
-    all_ok = True
     for title, cid in id_map.items():
         if not cid:
-            logger.debug("assets: канал '%s' не найден — пропускаем", title)
-            all_ok = False
+            logger.info("assets: канал '%s' не найден — пропускаем", title)
             continue
         photo = _CHANNEL_AVATARS[title]
         flag  = f"photo_{abs(int(cid))}"
-        if not force and db.get(_DB_NS, flag, False):
-            logger.debug("assets: '%s' — аватарка уже установлена", title)
+        if db.get(_DB_NS, flag, False):
+            logger.info("assets: '%s' — аватарка уже стоит, пропускаем", title)
             continue
-        if force:
-            logger.debug("assets: force-режим, переустанавливаем '%s' (id=%s)...", title, cid)
-        else:
-            logger.debug("assets: устанавливаем аватарку для '%s' (id=%s)...", title, cid)
-        result = await ensure_channel_photo(client, db, int(cid), photo, force=force)
-        if not result:
-            all_ok = False
+        logger.info("assets: устанавливаем аватарку для '%s' (id=%s)...", title, cid)
+        await ensure_channel_photo(client, db, int(cid), photo)
 
     # ── Шаг 4: аватарка бота ──────────────────────────────────────────────────
     bot_username = _resolve_bot_username(client, db)
-    logger.debug("assets: bot_username = %s", bot_username)
+    logger.info("assets: bot_username = %s", bot_username)
     if bot_username:
         flag = f"bot_photo_{bot_username.lstrip('@').lower()}"
-        if force or not db.get(_DB_NS, flag, False):
-            logger.debug("assets: устанавливаем аватарку бота @%s...", bot_username)
-            result = await ensure_bot_photo(client, db, bot_username, force=force)
-            if not result:
-                all_ok = False
+        if not db.get(_DB_NS, flag, False):
+            logger.info("assets: устанавливаем аватарку бота @%s...", bot_username)
+            await ensure_bot_photo(client, db, bot_username)
         else:
-            logger.debug("assets: аватарка бота уже установлена")
-    else:
-        logger.debug("assets: bot_username не найден, пропускаем аватарку бота")
-        all_ok = False
-
-    # ── Шаг 5: ставим глобальный флаг если всё ОК ────────────────────────────
-    if all_ok and not force:
-        db.set_sync(_DB_NS, "all_avatars_checked", True)
-        try:
-            await db.force_save()
-        except Exception:
-            pass
-        logger.debug("assets: все аватарки проверены и установлены, флаг сохранён")
-    elif not all_ok:
-        logger.debug("assets: не все аватарки установлены, повторная проверка при следующем запуске")
+            logger.info("assets: аватарка бота уже стоит")
 
 
 # ── Диагностика ───────────────────────────────────────────────────────────────
