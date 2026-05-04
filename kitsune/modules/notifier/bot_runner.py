@@ -108,7 +108,7 @@ async def _run_asset_setup(client, db) -> None:
     import asyncio as _asyncio
     await _asyncio.sleep(5)  # ждём полную готовность бота
     try:
-        from ..assets import setup_all_avatars
+        from ...assets import setup_all_avatars
         logger.info("BotRunner: auto asset setup starting...")
         await setup_all_avatars(client, db)
         logger.info("BotRunner: auto asset setup done")
