@@ -58,24 +58,39 @@ class BotSetup:
                 await conv.send_message("/mybots")
                 resp = await conv.get_response()
 
-                text = resp.text or ""
-                pattern = rf"kitsune_{tg_id}[a-z0-9_]*_bot"
-                candidates: list[str] = []
-                match = re.search(pattern, text, re.IGNORECASE)
-                if match:
-                    candidates.append(match.group(0))
-
+                text    = resp.text or ""
                 buttons = _extract_buttons(resp)
+                pattern = re.compile(rf"kitsune_{tg_id}[a-z0-9_]*_bot", re.IGNORECASE)
+
+                # Собираем кандидатов из текста и кнопок
+                raw_candidates: list[str] = []
+                for m in pattern.finditer(text):
+                    uname = m.group(0).lstrip("@")
+                    if uname not in raw_candidates:
+                        raw_candidates.append(uname)
                 for b in buttons:
                     b_clean = b.lstrip("@").lower()
                     if f"kitsune_{tg_id}" in b_clean or "kitsune" in b_clean:
                         uname = b.lstrip("@")
-                        if uname not in candidates:
-                            candidates.append(uname)
+                        if uname not in raw_candidates:
+                            raw_candidates.append(uname)
+
+                # Сортируем: сначала точное совпадение kitsune_{tg_id}_bot,
+                # потом остальные по длине (короче = приоритетнее).
+                # Это исключает ситуацию когда kitsune_ID_2036_bot выбирается
+                # вместо kitsune_ID_bot.
+                exact = f"kitsune_{tg_id}_bot"
+                def _sort_key(u: str) -> tuple:
+                    u_low = u.lower()
+                    return (0 if u_low == exact else 1, len(u_low))
+
+                candidates = sorted(raw_candidates, key=_sort_key)
+                logger.debug("BotSetup: find_existing_bot candidates: %s", candidates)
 
                 for username in candidates:
                     token = await self._get_token_via_conv(conv, username, buttons)
                     if token:
+                        logger.info("BotSetup: found existing bot @%s", username)
                         return token, username
 
         except Exception as exc:
@@ -100,7 +115,23 @@ class BotSetup:
                     m = re.search(r"(\d{8,}:[A-Za-z0-9_-]{35,})", text)
                     if m:
                         await self.enable_inline_mode(uname)
-                        return m.group(1), uname
+                        token = m.group(1)
+                        # Устанавливаем аватарку бота
+                        try:
+                            from ..assets import BOT_AVATAR, _DB_NS
+                            if BOT_AVATAR.exists():
+                                await conv.send_message("/setuserpic")
+                                await conv.get_response()
+                                await conv.send_message(f"@{uname}")
+                                _r = await conv.get_response()
+                                if any(w in (_r.text or "").lower() for w in ("photo","фото","pic","send")):
+                                    await conv.send_file(str(BOT_AVATAR))
+                                    await conv.get_response()
+                                    self._db.force_set(_DB_NS, f"bot_photo_{uname.lower()}", True)
+                                    logger.info("BotSetup: аватарка бота @%s установлена", uname)
+                        except Exception as _ae:
+                            logger.warning("BotSetup: аватарка бота не установлена: %s", _ae)
+                        return token, uname
                     if any(w in text.lower() for w in ("sorry", "invalid", "try", "занят")):
                         continue
                     break

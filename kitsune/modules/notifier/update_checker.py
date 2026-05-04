@@ -172,53 +172,10 @@ class UpdateChecker:
 
     async def _find_kitsune_group(self) -> tuple[int | None, str | None]:
         """
-        Ищет группу Kitsune «Kitsune <имя_пользователя>» среди диалогов.
-        Приоритет: Kitsune <ник> > любая группа с «Kitsune» (НЕ KitsuneBackup).
-        Возвращает (chat_id, title) или (None, None).
+        Группа Kitsune {first_name} была убрана — она больше не нужна.
+        Метод оставлен для обратной совместимости, всегда возвращает (None, None).
         """
-                                                          
-        owner_name: str | None = None
-        try:
-            me = await self._client.get_me()
-            owner_name = me.first_name or ""
-            if me.last_name:
-                owner_name = f"{owner_name} {me.last_name}".strip()
-        except Exception:
-            pass
-
-        candidates: list[tuple[int, str, int]] = []                         
-        try:
-            async for dialog in self._client.iter_dialogs(limit=500):
-                if not (dialog.is_group or (dialog.is_channel and dialog.is_group)):
-                    continue
-                t = dialog.title or ""
-                if "kitsune" not in t.lower():
-                    continue
-                                                                     
-                if t == "KitsuneBackup":
-                    continue
-                entity = dialog.entity
-                cid    = getattr(entity, "id", None)
-                if cid is None:
-                    continue
-                chat_id = int(f"-100{cid}") if getattr(entity, "megagroup", False) or getattr(entity, "broadcast", False) else -cid
-
-                                                                 
-                if owner_name and t == f"Kitsune {owner_name}":
-                    candidates.append((chat_id, t, 0))
-                elif t.startswith("Kitsune"):
-                    candidates.append((chat_id, t, 1))
-                else:
-                    candidates.append((chat_id, t, 2))
-        except Exception:
-            logger.exception("UpdateChecker: error while searching for Kitsune group")
-            return None, None
-
-        if not candidates:
-            return None, None
-
-        candidates.sort(key=lambda x: x[2])
-        return candidates[0][0], candidates[0][1]
+        return None, None
 
     async def _ensure_bot_in_group(self, chat_id: int, token: str) -> None:
         """Добавляет бота в группу через Telethon если его там нет."""
@@ -448,8 +405,14 @@ class UpdateChecker:
                 )
                 await bot.session.close()
                 logger.info("UpdateChecker: update done sent as new DM message")
-            except Exception:
-                logger.exception("UpdateChecker: failed to send update_done message")
+            except Exception as _exc2:
+                if "Forbidden" in type(_exc2).__name__ or "forbidden" in str(_exc2).lower():
+                    logger.warning(
+                        "UpdateChecker: бот не может начать диалог. "
+                        "Напиши /start боту в Telegram. (%s)", _exc2,
+                    )
+                else:
+                    logger.exception("UpdateChecker: failed to send update_done message")
 
     async def send_restart_report(self, restart_time: str, total_time: str, mod_count: int) -> None:
         token    = self._db.get(_DB_KEY, "bot_token", None)
@@ -469,8 +432,16 @@ class UpdateChecker:
                 ),
             )
             await bot.session.close()
-        except Exception:
-            logger.exception("UpdateChecker: failed to send restart report")
+        except Exception as _exc:
+            # ── Фикс #5: если бот не может написать — просто предупреждаем ──
+            if "Forbidden" in type(_exc).__name__ or "forbidden" in str(_exc).lower():
+                logger.warning(
+                    "UpdateChecker: бот не может начать диалог с пользователем. "
+                    "Напиши /start боту в Telegram — и уведомления о рестарте заработают. (%s)",
+                    _exc,
+                )
+            else:
+                logger.exception("UpdateChecker: failed to send restart report")
 
 
 def _fmt_time(seconds: float) -> str:
