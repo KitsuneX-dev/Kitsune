@@ -454,14 +454,8 @@ class BackupModule(KitsuneModule):
         count: int = 0,
     ) -> None:
         """
-        Под отправленным файлом-бэкапом публикует мини-форму с кнопкой
-        «🔄 Восстановить». Реализация — через inline.form, как в команде
-        config/cfg: пользовательский бот публикует сообщение с инлайн-кнопкой,
-        привязанное reply_to к файлу с бэкапом.
-
-        Если бот недоступен или что-то падает — просто молча пропускаем,
-        текстовая команда (.restoredb / .restoremods / .restoreall) всегда
-        остаётся как fallback.
+        Добавляет кнопку «🔄 Восстановить» ПРЯМО к сообщению с файлом
+        через bot.edit_message_reply_markup — никаких отдельных сообщений.
         """
         inline = self._inline()
         if not inline or not getattr(inline, "_bot", None):
@@ -470,47 +464,31 @@ class BackupModule(KitsuneModule):
         sent_chat_id, sent_msg_id = _extract_msg_ids(sent)
         if not sent_msg_id:
             return
-        # Если в sent не нашлось chat_id — используем тот, в который отправляли.
         if not sent_chat_id:
             sent_chat_id = chat_id
 
+        # Регистрируем callback в InlineManager
+        cb_id = inline._register_callback(
+            self._cb_restore,
+            args=(int(sent_chat_id), int(sent_msg_id), kind),
+        )
+
         try:
-            placeholder = await self.client.send_message(
-                chat_id,
-                "🔄 <i>Загружаю кнопки управления...</i>",
-                parse_mode="html",
-                reply_to=sent_msg_id,
+            from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+            markup = InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(
+                    text=self.strings("restore_btn"),
+                    callback_data=cb_id,
+                ),
+            ]])
+            # Редактируем само сообщение с файлом — кнопка появляется под файлом
+            await inline._bot.edit_message_reply_markup(
+                chat_id=int(sent_chat_id),
+                message_id=int(sent_msg_id),
+                reply_markup=markup,
             )
         except Exception as exc:
-            logger.debug("backup: send_message placeholder failed (%s)", exc)
-            return
-
-        if kind == "db":
-            text = self.strings("restore_form_db").format(ts=ts)
-            cb   = self._cb_restore
-        elif kind == "mods":
-            text = self.strings("restore_form_mods").format(ts=ts, count=count)
-            cb   = self._cb_restore
-        else:  # all
-            text = self.strings("restore_form_all").format(ts=ts, count=count)
-            cb   = self._cb_restore
-
-        markup = [[
-            {
-                "text":     self.strings("restore_btn"),
-                "callback": cb,
-                "args":     (int(sent_chat_id), int(sent_msg_id), kind),
-            },
-        ]]
-
-        try:
-            await inline.form(text, placeholder, markup)
-        except Exception as exc:
-            logger.debug("backup: inline.form failed (%s)", exc)
-            try:
-                await placeholder.delete()
-            except Exception:
-                pass
+            logger.debug("backup: edit_message_reply_markup failed (%s)", exc)
 
     async def _send_backup(
         self,
@@ -523,22 +501,37 @@ class BackupModule(KitsuneModule):
         count: int = 0,
     ) -> None:
         """
-        Отправка бэкапа только в KitsuneBackup с кнопкой «🔄 Восстановить».
-        В «Избранное» не отправляется.
+        Универсальная отправка бэкапа: в KitsuneBackup (если есть) и в «Избранное».
+        После каждой отправки прицепляет кнопку «🔄 Восстановить» через inline.form.
         """
-        if not dest:
-            logger.warning("backup: нет dest — файл не отправлен")
-            return
+        # → группа KitsuneBackup
+        if dest:
+            buf = io.BytesIO(data)
+            buf.name = fname
+            try:
+                sent = await hydro_send_file(
+                    self.client, dest, buf, caption=caption, parse_mode="html",
+                )
+                await self._attach_restore_button(dest, sent, kind, ts, count)
+            except Exception:
+                logger.exception("backup: send to dest failed")
 
-        buf = io.BytesIO(data)
-        buf.name = fname
+        # → Saved Messages
         try:
-            sent = await hydro_send_file(
-                self.client, dest, buf, caption=caption, parse_mode="html",
+            buf2 = io.BytesIO(data)
+            buf2.name = fname
+            sent_me = await hydro_send_file(
+                self.client, "me", buf2, caption=caption, parse_mode="html",
             )
-            await self._attach_restore_button(dest, sent, kind, ts, count)
+            # У "me" chat_id == self.client.tg_id
+            try:
+                me_id = int(self.client.tg_id)
+            except Exception:
+                me_id = None
+            if me_id:
+                await self._attach_restore_button(me_id, sent_me, kind, ts, count)
         except Exception:
-            logger.exception("backup: send to KitsuneBackup failed")
+            logger.exception("backup: send to Saved Messages failed")
 
     # ── backupdb ──────────────────────────────────────────────────────────────
 
