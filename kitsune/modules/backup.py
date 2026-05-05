@@ -371,6 +371,7 @@ class BackupModule(KitsuneModule):
                 await asyncio.wait_for(
                     self.client.get_entity(int(chat_id)), timeout=20
                 )
+                await self._ensure_bot_in_channel(int(chat_id))
                 return int(chat_id)
             except Exception:
                 logger.debug("backup: сохранённый group_id %s недоступен — ищем заново", chat_id)
