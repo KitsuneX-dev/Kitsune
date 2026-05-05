@@ -512,36 +512,142 @@ async def _startup(args: argparse.Namespace) -> None:
         encrypt_session_file()
         logger.info("main: goodbye 🦊")
 
+
+async def _safe_force_reconnect(client: Any) -> bool:
+    """
+    Безопасный «жёсткий» reconnect.
+
+    Старый код делал ``await client.disconnect()`` и сразу же
+    ``await client.connect()``. Из-за этого:
+
+      1) ``_recv_loop`` ещё не успевал завершиться → asyncio ругался
+         ``RuntimeError: readexactly() called while another coroutine
+         is already waiting for incoming data``;
+      2) Telethon обнулял ``_sender._connection = None``, а на следующей
+         итерации сам же звал ``self._connection.connect(...)`` →
+         ``AttributeError: 'NoneType' object has no attribute 'connect'``;
+      3) старый и новый сокеты ненадолго работали параллельно с одним
+         auth_key → сервер бил ``Server replied with a wrong session ID``.
+
+    Здесь мы делаем «дисконнект → ждём ОЧИСТКИ всех внутренних задач →
+    только потом connect». При любых вспомогательных ошибках полагаемся
+    на встроенный ``auto_reconnect=True``.
+    """
+    # 1. Просим Telethon штатно закрыть соединение.
+    with contextlib.suppress(Exception):
+        await client.disconnect()
+
+    # 2. Дожидаемся, пока recv-loop / send-loop / disconnect_coro реально
+    #    завершатся. Без этого старт нового connect() пересечётся со старым
+    #    StreamReader и asyncio упадёт.
+    sender = getattr(client, "_sender", None)
+    pending = []
+    for attr in ("_recv_loop_handle", "_send_loop_handle", "_disconnected"):
+        t = getattr(sender, attr, None) if sender is not None else None
+        if t is None:
+            continue
+        # _disconnected — это Future, остальные — Task; await работает на обоих.
+        pending.append(t)
+    for t in pending:
+        with contextlib.suppress(Exception):
+            await asyncio.wait_for(asyncio.shield(t), timeout=5.0)
+
+    # 3. На всякий случай дадим event loop тик, чтобы коллбеки .done() отработали.
+    await asyncio.sleep(0.1)
+
+    # 4. Connect. Если Telethon внутри себя оставил _connection=None
+    #    (это и было корнем AttributeError), он сам пересоздаст connection
+    #    из ``client._connection`` (класса) при следующем connect().
+    try:
+        await asyncio.wait_for(client.connect(), timeout=30.0)
+        return True
+    except Exception as exc:
+        logger.debug("keepalive: forced reconnect failed (%s: %s)",
+                     type(exc).__name__, exc)
+        return False
+
+
 async def _keepalive(client: Any) -> None:
-    import contextlib
-    _fail_count = 0
+    """
+    Лёгкий мониторинг подключения.
+
+    Раньше keepalive при ЛЮБОЙ ошибке сам делал ``disconnect()`` +
+    ``connect()`` — и провоцировал гонку с ``_recv_loop`` (см. подробный
+    разбор в ``_safe_force_reconnect``). Теперь схема такая:
+
+      • Каждые 30s пингуем ``get_me()`` с таймаутом.
+      • На временные сбои НЕ дёргаем сокет — у Telethon уже включён
+        ``auto_reconnect=True``, он сам разрулит короткие обрывы.
+      • Только если сбои идут подряд достаточно долго (≥ 5 минут),
+        разово делаем «жёсткий» безопасный reconnect через
+        ``_safe_force_reconnect``.
+    """
+    HARD_RECONNECT_AFTER_S = 300   # 5 минут подряд неудач до hard reconnect
+    PING_INTERVAL_S        = 30
+    PING_TIMEOUT_S         = 15
+
+    fail_streak_started: float | None = None
+    attempts: int = 0
 
     while True:
-        await asyncio.sleep(30)
+        try:
+            await asyncio.sleep(PING_INTERVAL_S)
+        except asyncio.CancelledError:
+            break
+
         try:
             if not client.is_connected():
                 raise ConnectionError("client disconnected")
-            await asyncio.wait_for(client.get_me(), timeout=15)
-            _fail_count = 0                                      
+            await asyncio.wait_for(client.get_me(), timeout=PING_TIMEOUT_S)
+
+            # Успех — сбрасываем серию.
+            if fail_streak_started is not None:
+                logger.info(
+                    "keepalive: соединение восстановлено (после %d попыт(ок))",
+                    attempts,
+                )
+            fail_streak_started = None
+            attempts = 0
+
         except asyncio.CancelledError:
             break
+
         except Exception as exc:
-            _fail_count += 1
-                                                                     
-            backoff = min(5 * (2 ** (_fail_count - 1)), 60)
+            import time as _time
+            now = _time.monotonic()
+            if fail_streak_started is None:
+                fail_streak_started = now
+            attempts += 1
+
+            elapsed = now - fail_streak_started
             logger.debug(
-                "keepalive: attempt %d failed (%s) — retry in %ds",
-                _fail_count, type(exc).__name__, backoff,
+                "keepalive: ping failed (%s: %s) — попытка %d, серия %.0fs",
+                type(exc).__name__, exc, attempts, elapsed,
             )
-            with contextlib.suppress(Exception):
-                await client.disconnect()
-            await asyncio.sleep(backoff)
-            try:
-                await client.connect()
-                _fail_count = 0
-                logger.info("keepalive: reconnected after %d attempt(s)", _fail_count + 1)
-            except Exception as exc2:
-                logger.debug("keepalive: reconnect failed (%s)", type(exc2).__name__)
+
+            # Доверяем встроенному auto_reconnect — пока серия короче
+            # порога, ничего сами не дёргаем.
+            if elapsed < HARD_RECONNECT_AFTER_S:
+                continue
+
+            # Серия сбоев слишком длинная → делаем безопасный hard reconnect.
+            logger.warning(
+                "keepalive: %d неудачных пингов за ~%.0fs — жёсткий reconnect",
+                attempts, elapsed,
+            )
+            ok = await _safe_force_reconnect(client)
+            if ok:
+                logger.info(
+                    "keepalive: hard reconnect успешен (после %d попыт(ок))",
+                    attempts,
+                )
+                fail_streak_started = None
+                attempts = 0
+            else:
+                # Не получилось — сдвигаем «начало серии», чтобы
+                # следующая попытка hard reconnect случилась снова
+                # через HARD_RECONNECT_AFTER_S, а не каждые 30s.
+                fail_streak_started = now
 
 async def _setup_kitsune_folder(client: Any, db: Any) -> None:
     await asyncio.sleep(8)                                  
