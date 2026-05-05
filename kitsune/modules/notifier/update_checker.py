@@ -286,16 +286,50 @@ class UpdateChecker:
             config_path   = os.path.join(self._repo_path, "config.toml")
             config_backup = None
             if os.path.exists(config_path):
-                tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".toml")
-                shutil.copy2(config_path, tmp.name)
-                config_backup = tmp.name
-                tmp.close()
+                                                                                          
+                                                                                          
+                                                                                          
+                backup_dir = os.path.join(self._repo_path, ".kitsune_update_backup")
+                try:
+                    os.makedirs(backup_dir, exist_ok=True)
+                    config_backup = os.path.join(backup_dir, "config.toml")
+                except OSError:
+                                                                                  
+                    fd, config_backup = tempfile.mkstemp(suffix=".toml")
+                    os.close(fd)
+
+                try:
+                    with open(config_path, "rb") as _src, open(config_backup, "wb") as _dst:
+                        _dst.write(_src.read())
+                except OSError as _e:
+                    logger.warning(
+                        "UpdateChecker: failed to backup config.toml (%s) \u2014 skipping backup",
+                        _e,
+                    )
+                    config_backup = None
 
             repo.git.reset("--hard", f"origin/{branch}")
 
             if config_backup and os.path.exists(config_backup):
-                shutil.copy2(config_backup, config_path)
-                os.unlink(config_backup)
+                try:
+                    with open(config_backup, "rb") as _src, open(config_path, "wb") as _dst:
+                        _dst.write(_src.read())
+                except OSError as _e:
+                    logger.warning(
+                        "UpdateChecker: failed to restore config.toml (%s)",
+                        _e,
+                    )
+                finally:
+                    try:
+                        os.unlink(config_backup)
+                    except OSError:
+                        pass
+                    backup_dir = os.path.join(self._repo_path, ".kitsune_update_backup")
+                    if os.path.isdir(backup_dir):
+                        try:
+                            os.rmdir(backup_dir)
+                        except OSError:
+                            pass
 
         except Exception as exc:
             raise RuntimeError(f"Git update failed: {exc}") from exc
