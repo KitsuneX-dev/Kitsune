@@ -1,14 +1,3 @@
-"""
-kitsune/assets — менеджер встроенных ассетов (аватарки, баннеры).
-
-Структура папки:
-    kitsune/assets/
-        kitsune.jpeg        — аватарка бота Kitsune {first_name}
-        kitsune_assets.png  — аватарка канала kitsune-assets
-        kitsune_backup.png  — аватарка группы KitsuneBackup
-        kitsune_logs.png    — аватарка канала kitsune-logs
-        kitsune_info.png    — баннер welcome-сообщения
-"""
 from __future__ import annotations
 
 import logging
