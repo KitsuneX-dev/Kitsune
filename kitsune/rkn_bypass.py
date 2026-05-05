@@ -179,16 +179,66 @@ def get_aiohttp_connector():
     return aiohttp.TCPConnector(ssl=make_ssl_ctx_no_verify())
 
 
+def _build_socks_url_from_cfg() -> str | None:
+    """
+    Читает [proxy_socks] из config.toml и собирает URL вида
+    ``socks5://user:pass@host:port``. Возвращает None, если SOCKS5
+    не настроен.
+
+    Используется aiogram (notifier-бот, update_checker), потому что
+    aiogram MTPROTO НЕ умеет — ему нужен HTTP/SOCKS5 для api.telegram.org.
+    """
+    try:
+        from .main import _load_raw_config
+        cfg = _load_raw_config() or {}
+    except Exception:
+        return None
+
+    sp = cfg.get("proxy_socks") or {}
+    if not isinstance(sp, dict):
+        return None
+    host = sp.get("host")
+    port = sp.get("port")
+    if not host or not port:
+        return None
+
+    user = sp.get("username") or sp.get("user")
+    pwd  = sp.get("password") or sp.get("pass")
+    auth = f"{user}:{pwd}@" if (user and pwd) else ""
+
+    scheme = str(sp.get("type", "socks5")).lower()
+    if scheme not in ("socks5", "socks4", "http", "https"):
+        scheme = "socks5"
+
+    return f"{scheme}://{auth}{host}:{int(port)}"
+
+
 def get_aiogram_session(timeout: int = 30):
     try:
         from aiogram.client.session.aiohttp import AiohttpSession
         import aiohttp
 
         ssl_ctx = make_ssl_ctx_no_verify()
+        proxy_url = _build_socks_url_from_cfg()
+
+        socks_connector_cls = None
+        if proxy_url:
+            try:
+                from aiohttp_socks import ProxyConnector  # type: ignore
+                socks_connector_cls = ProxyConnector
+            except ImportError:
+                logger.warning(
+                    "rkn_bypass: SOCKS5 настроен (%s), но aiohttp_socks "
+                    "не установлен. Установи: pip install 'aiohttp-socks>=0.9.0'",
+                    proxy_url,
+                )
 
         class _RKNBypassSession(AiohttpSession):
             async def create_connector(self, _bot=None):
-                connector = aiohttp.TCPConnector(ssl=ssl_ctx)
+                if socks_connector_cls is not None and proxy_url:
+                    connector = socks_connector_cls.from_url(proxy_url, ssl=ssl_ctx)
+                else:
+                    connector = aiohttp.TCPConnector(ssl=ssl_ctx)
                 self._should_reset_connector = False
                 return connector
 
