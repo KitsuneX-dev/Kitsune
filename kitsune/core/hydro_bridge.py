@@ -117,7 +117,6 @@ class HydrogramBridge:
     _rl_times: list = []
 
     def _rate_limit_ok(self) -> bool:
-        """Возвращает True если запрос разрешён, False если надо притормозить."""
         if not self._rl_enabled:
             return True
         now = time.monotonic()

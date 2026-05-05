@@ -285,8 +285,6 @@ class InfoModule(KitsuneModule):
 
     @command("cdn", required=OWNER)
     async def cdn_cmd(self, event) -> None:
-        """Конвертирует GitHub ссылку в jsDelivr CDN.
-        Использование: .cdn https://github.com/user/repo/blob/main/file.mp4"""
         args = self.get_args(event).strip()
         if not args:
             await event.message.edit(

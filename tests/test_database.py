@@ -1,4 +1,3 @@
-"""Smoke-тесты для kitsune/database/manager.py"""
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -46,7 +45,6 @@ def test_empty_save(backend):
     assert loaded == {}
 
 def test_persistent_connection(backend):
-    """Соединение переиспользуется, не падает при повторных вызовах."""
     for i in range(5):
         run(backend.save({"o": {"k": str(i)}}))
     loaded = run(backend.load())

@@ -418,11 +418,6 @@ async def _startup(args: argparse.Namespace) -> None:
         logger.info("main: goodbye 🦊")
 
 async def _keepalive(client: Any) -> None:
-    """
-    Поддерживает соединение с Telegram.
-    При переключении VPN / смене локации — ждёт стабилизации сети
-    и переподключается с экспоненциальной задержкой.
-    """
     import contextlib
     _fail_count = 0
 
@@ -454,7 +449,6 @@ async def _keepalive(client: Any) -> None:
                 logger.debug("keepalive: reconnect failed (%s)", type(exc2).__name__)
 
 async def _setup_kitsune_folder(client: Any, db: Any) -> None:
-    """Создаёт папку Kitsune в Telegram после старта."""
     await asyncio.sleep(8)                                  
     try:
         from .utils import ensure_kitsune_folder

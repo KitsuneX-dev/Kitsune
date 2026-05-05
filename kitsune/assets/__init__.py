@@ -36,11 +36,6 @@ async def _find_channels_by_title(
     client: "TelegramClient",
     titles: set[str],
 ) -> dict[str, int]:
-    """
-    Сканирует диалоги (включая архивные) и возвращает {title: channel_id}.
-    Нужно потому что log.py создаёт Kitsune-logs без сохранения ID в БД.
-    Ищем в folder=0 (обычные) И folder=1 (архив) — каналы часто туда попадают.
-    """
     found: dict[str, int] = {}
 
     def _extract(dialog) -> None:
@@ -73,12 +68,6 @@ async def _find_channels_by_title(
     return found
 
 def _resolve_bot_username(client: "TelegramClient", db) -> str | None:
-    """
-    Ищет username бота в порядке приоритета:
-    1. DB: kitsune.notifier / bot_username  (где реально хранит notifier)
-    2. DB: kitsune.inline / bot_username    (старый ключ)
-    3. Живой объект: client._kitsune_inline._bot_username
-    """
     for ns in ("kitsune.notifier", "kitsune.inline"):
         u = db.get(ns, "bot_username", None)
         if u:
@@ -170,17 +159,6 @@ async def ensure_bot_photo(client: "TelegramClient", db, bot_username: str) -> b
     return False
 
 async def setup_all_avatars(client: "TelegramClient", db) -> None:
-    """
-    Устанавливает аватарки для всех каналов/групп/бота если ещё не установлены.
-
-    Стратегия поиска ID каналов:
-      1. Ищем в БД по всем известным ключам
-      2. Если не нашли — сканируем диалоги по названию (так работает log.py)
-      3. Если нашли через диалоги — сохраняем ID в БД для будущих запусков
-
-    Оптимизация: если в БД стоит флаг setup_done — выходим мгновенно
-    без каких-либо логов и проверок.
-    """
     if db.get(_DB_NS, "setup_done", False):
         return
 

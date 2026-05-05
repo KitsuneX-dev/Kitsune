@@ -33,7 +33,6 @@ def _make_bot(token: str) -> typing.Any:
     )
 
 def _get_platform() -> str:
-    """Определяет платформу где запущен бот."""
     import sys, os
     if os.path.exists("/data/data/tech.ula") or "com.termux" in os.environ.get("PREFIX", ""):
         return "📱 Android (UserLand)"
@@ -58,7 +57,6 @@ def _get_platform() -> str:
     return f"❓ {sys.platform}"
 
 def _build_welcome_text(db) -> str:
-    """Строит welcome-сообщение для /start в боте."""
     prefix       = db.get("kitsune.core", "prefix", ".")
     interval_set = db.get("kitsune.backup", "interval_h", None)
     backup_str   = f"каждые <b>{interval_set} ч</b>" if interval_set else "не настроен"
@@ -91,11 +89,6 @@ def _build_welcome_text(db) -> str:
     )
 
 async def _run_asset_setup(client, db) -> None:
-    """
-    Запускает setup_all_avatars с небольшой задержкой чтобы дать боту
-    полностью инициализироваться (inline, токены и т.д.).
-    Если все аватарки уже стоят — выполняется мгновенно.
-    """
     import asyncio as _asyncio
     if db.get("kitsune.assets", "setup_done", False):
         return

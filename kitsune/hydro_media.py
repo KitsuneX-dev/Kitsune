@@ -101,11 +101,6 @@ async def send_file(
     progress_msg_id: int | None = None,
     reply_to: int | None = None,
 ) -> typing.Any:
-    """
-    Отправляет файл через Hydrogram (основной путь).
-    Для файлов >10 МБ показывает прогресс-бар если передан progress_msg_id.
-    Fallback на Telethon только при ошибке.
-    """
     hydro = _hydro(client)
 
     buf_start: int = 0
@@ -170,7 +165,6 @@ async def send_photo(
     force_telethon: bool = False,
     reply_to: int | None = None,
 ) -> typing.Any:
-    """Отправляет фото через Hydrogram (сжатое), fallback на Telethon."""
     hydro = _hydro(client)
 
     buf_start: int = 0
@@ -215,11 +209,6 @@ async def download_media(
     force_telethon: bool = False,
     progress_msg_id: int | None = None,
 ) -> bytes:
-    """
-    Скачивает медиа через Hydrogram (основной путь).
-    Для больших файлов показывает прогресс если передан progress_msg_id.
-    Fallback на Telethon при ошибке.
-    """
     hydro = _hydro(client)
 
     if hydro and not force_telethon:

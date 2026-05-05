@@ -102,7 +102,6 @@ class HelpModule(KitsuneModule):
         await self._full_help(event, loader, page=0)
 
     def _collect_visible_modules(self, loader) -> list[tuple[str, "KitsuneModule"]]:
-        """Возвращает упорядоченный список (имя, модуль), который попадёт в .help."""
         hidden: list[str] = self.db.get("kitsune.help", "hidden", []) if self.db else []
         visible: list[tuple[str, KitsuneModule]] = []
         for name, mod in sorted(loader.modules.items(), key=lambda x: x[0].lower()):
@@ -114,10 +113,6 @@ class HelpModule(KitsuneModule):
         return visible
 
     def _build_page_body(self, loader, page: int) -> tuple[str, int, int]:
-        """Собирает HTML-тело для нужной страницы.
-
-        Возвращает (body_html, page, total_pages).
-        """
         prefix = self._prefix()
         hidden: list[str] = self.db.get("kitsune.help", "hidden", []) if self.db else []
         visible = self._collect_visible_modules(loader)
@@ -166,7 +161,6 @@ class HelpModule(KitsuneModule):
         return body, page, total_pages
 
     def _build_nav_kb(self, page: int, total_pages: int) -> list:
-        """Создаёт клавиатуру навигации. Если страница одна — пустой список."""
         if total_pages <= 1:
             return []
 

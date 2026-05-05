@@ -110,7 +110,6 @@ class RKNBypassModule(KitsuneModule):
         self._monitor_task: asyncio.Task | None = None
 
     async def on_load(self) -> None:
-        """Запускаем мониторинг, если он был включён ранее."""
         if self.db.get(_DB_OWNER, "monitor_enabled", False):
             self._start_monitor()
 
@@ -138,7 +137,6 @@ class RKNBypassModule(KitsuneModule):
             logger.warning("RKNBypass: could not save config — %s", exc)
 
     def _current_proxy(self) -> dict | None:
-        """Возвращает текущий прокси из config.toml или None."""
         cfg = self._load_config()
         proxy = cfg.get("proxy")
         if proxy and proxy.get("host"):
@@ -146,7 +144,6 @@ class RKNBypassModule(KitsuneModule):
         return None
 
     def _get_interval(self) -> int:
-        """Берёт интервал из ModuleConfig, минимум 60 секунд."""
         try:
             return max(60, int(self.config["check_interval"]))
         except Exception:
@@ -163,7 +160,6 @@ class RKNBypassModule(KitsuneModule):
         self._monitor_task = None
 
     async def _monitor_loop(self) -> None:
-        """Периодически проверяет текущий прокси и переключает при падении."""
         from ..rkn_bypass import test_connection, find_working_proxy, find_proxy_from_web
 
         while True:
@@ -245,7 +241,6 @@ class RKNBypassModule(KitsuneModule):
                 logger.exception("RKNBypass [monitor]: ошибка — %s", exc)
 
     async def _notify(self, text: str) -> None:
-        """Отправляет сообщение в Избранное (Saved Messages)."""
         try:
             await self.client.send_message("me", text, parse_mode="html")
         except Exception as exc:
@@ -253,7 +248,6 @@ class RKNBypassModule(KitsuneModule):
 
     @command("rkn", required=OWNER)
     async def rkn_cmd(self, event) -> None:
-        """Проверяет соединение и ищет прокси из встроенного списка."""
         await event.message.edit(self.strings("checking"), parse_mode="html")
 
         from ..rkn_bypass import test_connection, find_working_proxy
@@ -280,7 +274,6 @@ class RKNBypassModule(KitsuneModule):
 
     @command("findproxy", required=OWNER)
     async def findproxy_cmd(self, event) -> None:
-        """Активно ищет рабочие прокси в интернете (каналы + API)."""
         await event.message.edit(self.strings("findproxy_start"), parse_mode="html")
 
         from ..rkn_bypass import find_proxy_from_web, find_working_proxy
@@ -396,10 +389,6 @@ class RKNBypassModule(KitsuneModule):
 
     @command("proxymon", required=OWNER)
     async def proxymon_cmd(self, event) -> None:
-        """
-        .proxymon on  — запустить мониторинг
-        .proxymon off — остановить мониторинг
-        """
         arg = self.get_args(event).strip().lower()
 
         if arg == "off":

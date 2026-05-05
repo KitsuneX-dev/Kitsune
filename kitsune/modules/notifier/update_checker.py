@@ -113,10 +113,6 @@ class UpdateChecker:
                                                                         
 
     async def notify_update(self, current: str, new: str, changes: str = "") -> str | None:
-        """
-        Отправляет уведомление об обновлении через inline-бот в группу Kitsune.
-        Возвращает название группы куда отправили, или None если не удалось.
-        """
         token    = self._db.get(_DB_KEY, "bot_token", None)
         owner_id = self._db.get(_DB_KEY, "owner_id", None)
         if not token or not owner_id:
@@ -170,14 +166,9 @@ class UpdateChecker:
                                                                         
 
     async def _find_kitsune_group(self) -> tuple[int | None, str | None]:
-        """
-        Группа Kitsune {first_name} была убрана — она больше не нужна.
-        Метод оставлен для обратной совместимости, всегда возвращает (None, None).
-        """
         return None, None
 
     async def _ensure_bot_in_group(self, chat_id: int, token: str) -> None:
-        """Добавляет бота в группу через Telethon если его там нет."""
         try:
             import aiohttp
                                        

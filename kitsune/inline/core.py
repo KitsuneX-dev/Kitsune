@@ -136,11 +136,6 @@ class InlineManager:
         args: tuple = (),
         kwargs: dict | None = None,
     ) -> str:
-        """
-        Регистрирует callback-функцию и возвращает callback_data (cb_id).
-        Используется чтобы прикрепить кнопку напрямую к любому сообщению
-        через bot.edit_message_reply_markup без создания inline-формы.
-        """
         cb_id = str(uuid.uuid4())[:12]
         self._callbacks[cb_id] = (func, args, kwargs or {})
         return cb_id

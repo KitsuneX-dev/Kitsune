@@ -253,7 +253,6 @@ import io as _io
 import typing as _typing
 
 def is_serializable(value: _typing.Any) -> bool:
-    """Return True if *value* can be serialised to JSON."""
     import json as _json
     try:
         _json.dumps(value)
@@ -262,7 +261,6 @@ def is_serializable(value: _typing.Any) -> bool:
         return False
 
 def get_chat_id(message: _typing.Any) -> _typing.Optional[int]:
-    """Return the chat/peer id from a Telethon message object."""
     if isinstance(message, int):
         return message
 
@@ -290,7 +288,6 @@ async def answer(
     link_preview: bool = False,
     **kwargs: _typing.Any,
 ) -> _typing.Any:
-    """Edit the caller's own message or respond to someone else's."""
     if isinstance(message, int):
         client = kwargs.pop("client", None)
         if client is None:
@@ -332,7 +329,6 @@ async def answer_file(
     force_document: bool = False,
     **kwargs: _typing.Any,
 ) -> _typing.Any:
-    """Send a file as a reply, deleting the original outgoing message."""
     import contextlib as _ctx
 
     client = message.client
@@ -365,7 +361,6 @@ async def answer_file(
     return result
 
 def progress_bar(current: _typing.Union[int, float], total: _typing.Union[int, float], width: int = 12) -> str:
-    """Return a Unicode progress bar string with percentage."""
     if total <= 0:
         pct = 0.0
     else:

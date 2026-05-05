@@ -99,11 +99,6 @@ class WebCore:
         })
 
     async def _handle_health(self, request):
-        """
-        Лёгкий health-check: отвечает 200 OK если бот жив.
-        Используется мониторингом / watchdog-скриптами.
-        GET /health → {"ok": true, "uptime_s": 123, "connected": true}
-        """
         import time
         start = self._db.get("kitsune.ping", "start_time", None)
         uptime = int(time.time() - float(start)) if start else 0

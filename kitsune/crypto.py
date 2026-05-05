@@ -27,11 +27,6 @@ except ImportError:
     pass
 
 def _derive_key_from_credentials() -> bytes | None:
-    """
-    Выводит ключ детерминировано из api_id + api_hash из config.toml.
-    После переустановки бота с теми же данными ключ будет ОДИНАКОВЫМ —
-    поэтому бэкап можно расшифровать без сохранённого kitsune.key.
-    """
     try:
         import toml
         cfg_path = Path(__file__).parent.parent / "config.toml"

@@ -299,7 +299,6 @@ class UpdaterModule(KitsuneModule):
             await self._do_update(repo_path=repo_path, chat_id=chat_id, msg_id=msg_id)
 
     async def _cb_cancel_update(self, call) -> None:
-        """Колбэк кнопки «Отмена»."""
         await self.db.delete(_DB_OWNER, "pending_update")
         inline = getattr(self.client, "_kitsune_inline", None)
         if inline:
