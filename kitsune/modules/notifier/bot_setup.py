@@ -62,7 +62,6 @@ class BotSetup:
                 buttons = _extract_buttons(resp)
                 pattern = re.compile(rf"kitsune_{tg_id}[a-z0-9_]*_bot", re.IGNORECASE)
 
-                # Собираем кандидатов из текста и кнопок
                 raw_candidates: list[str] = []
                 for m in pattern.finditer(text):
                     uname = m.group(0).lstrip("@")
@@ -75,10 +74,6 @@ class BotSetup:
                         if uname not in raw_candidates:
                             raw_candidates.append(uname)
 
-                # Сортируем: сначала точное совпадение kitsune_{tg_id}_bot,
-                # потом остальные по длине (короче = приоритетнее).
-                # Это исключает ситуацию когда kitsune_ID_2036_bot выбирается
-                # вместо kitsune_ID_bot.
                 exact = f"kitsune_{tg_id}_bot"
                 def _sort_key(u: str) -> tuple:
                     u_low = u.lower()
@@ -116,7 +111,6 @@ class BotSetup:
                     if m:
                         await self.enable_inline_mode(uname)
                         token = m.group(1)
-                        # Устанавливаем аватарку бота
                         try:
                             from ..assets import BOT_AVATAR, _DB_NS
                             if BOT_AVATAR.exists():

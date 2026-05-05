@@ -17,7 +17,6 @@ _CHECK_INTERVAL = 3600
                                             
 _FIRST_CHECK_DELAY = 300
 
-
 class UpdateChecker:
 
     def __init__(self, client, db) -> None:
@@ -325,7 +324,6 @@ class UpdateChecker:
         await asyncio.sleep(1)
         os.execl(sys.executable, sys.executable, "-m", "kitsune")
 
-
     async def notify_update_done(self) -> None:
         chat_id    = self._db.get(_DB_KEY, "update_msg_chat",  None)
         msg_id     = self._db.get(_DB_KEY, "update_msg_id",    None)
@@ -358,7 +356,6 @@ class UpdateChecker:
         token    = self._db.get(_DB_KEY, "bot_token", None)
         owner_id = self._db.get(_DB_KEY, "owner_id",  None)
 
-        # Сначала пробуем отредактировать сообщение через бота (знает msg_id напрямую)
         if token and chat_id and msg_id:
             try:
                 from kitsune.modules.notifier.bot_runner import _make_bot
@@ -375,10 +372,8 @@ class UpdateChecker:
             except Exception as _bot_edit_exc:
                 logger.debug("UpdateChecker: bot edit failed (%s), trying Telethon", _bot_edit_exc)
 
-        # Fallback 1: Telethon edit
         if not edited and via_telethon and chat_id and msg_id:
             try:
-                # Bot API chat_id (-100XXXX) → Telethon peer_id
                 tl_chat = int(chat_id)
                 if str(tl_chat).startswith("-100"):
                     tl_chat = int(str(tl_chat)[4:])
@@ -393,7 +388,6 @@ class UpdateChecker:
             except Exception as _tl_exc:
                 logger.debug("UpdateChecker: Telethon edit failed (%s)", _tl_exc)
 
-        # Fallback 2: новое сообщение в DM
         if not edited and token and owner_id:
             try:
                 from kitsune.modules.notifier.bot_runner import _make_bot
@@ -433,7 +427,6 @@ class UpdateChecker:
             )
             await bot.session.close()
         except Exception as _exc:
-            # ── Фикс #5: если бот не может написать — просто предупреждаем ──
             if "Forbidden" in type(_exc).__name__ or "forbidden" in str(_exc).lower():
                 logger.warning(
                     "UpdateChecker: бот не может начать диалог с пользователем. "
@@ -442,7 +435,6 @@ class UpdateChecker:
                 )
             else:
                 logger.exception("UpdateChecker: failed to send restart report")
-
 
 def _fmt_time(seconds: float) -> str:
     if seconds < 1:

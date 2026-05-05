@@ -112,8 +112,6 @@ class SQLiteBackend:
                 "ON CONFLICT(owner, key) DO UPDATE SET value=excluded.value",
                 rows,
             )
-            # Удаляем только то чего нет в текущем снимке — через временную таблицу
-            # чтобы избежать огромного IN-списка
             conn.execute(
                 "CREATE TEMP TABLE IF NOT EXISTS _ks_keep "
                 "(owner TEXT NOT NULL, key TEXT NOT NULL, PRIMARY KEY(owner, key))"
@@ -175,7 +173,6 @@ class DatabaseManager:
         self._next_revision_at: float = 0.0
         self._pending_save: asyncio.Task | None = None
         self._assets_channel: int | None = None
-        # Dirty tracking: только изменённые ключи идут в SQLite upsert
         self._dirty: set[tuple[str, str]] = set()
         self._deleted: list[tuple[str, str]] = []
 
@@ -353,7 +350,6 @@ class DatabaseManager:
         await asyncio.sleep(1)
         if not self._backend:
             return
-        # Используем dirty-флаги: пишем только изменённые записи
         if isinstance(self._backend, SQLiteBackend):
             async with self._lock:
                 dirty = list(self._dirty)
@@ -372,7 +368,6 @@ class DatabaseManager:
                 None, self._backend.upsert_sync, upsert_rows, deleted
             )
         else:
-            # Redis: полный снимок как раньше
             async with self._lock:
                 snapshot = {o: dict(s) for o, s in self._data.items()}
                 self._dirty.clear()

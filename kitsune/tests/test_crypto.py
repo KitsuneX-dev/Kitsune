@@ -5,7 +5,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import pytest
 import os as _os
 
-# Патчим KEY_PATH чтобы не трогать реальный ~/.kitsune/kitsune.key
 import tempfile, pathlib
 
 @pytest.fixture(autouse=True)
@@ -37,7 +36,6 @@ def test_different_ciphertexts():
     data = b"same plaintext"
     enc1 = c.encrypt(data)
     enc2 = c.encrypt(data)
-    # Если используется AES-GCM — шифртексты разные из-за nonce
     if b"AESGCM1:" in enc1:
         assert enc1 != enc2
 

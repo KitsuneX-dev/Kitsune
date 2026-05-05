@@ -9,8 +9,7 @@ from ..core.security import OWNER
 logger = logging.getLogger(__name__)
 
 _DB_OWNER = "kitsune.rkn"
-_DEFAULT_CHECK_INTERVAL = 600   # 10 минут
-
+_DEFAULT_CHECK_INTERVAL = 600
 
 class RKNBypassModule(KitsuneModule):
 
@@ -45,14 +44,12 @@ class RKNBypassModule(KitsuneModule):
     )
 
     strings_ru = {
-        # ── статус соединения ──────────────────────────────────────────────
         "checking":     "🔍 Проверяю подключение к Telegram...",
         "ok":           "✅ Прямое подключение работает нормально.",
         "blocked":      (
             "🚫 Прямое подключение к Telegram заблокировано.\n\n"
             "🔍 Ищу рабочий MTProto прокси..."
         ),
-        # ── прокси найден ─────────────────────────────────────────────────
         "proxy_found":  (
             "✅ Найден рабочий прокси!\n\n"
             "🌐 <code>{host}:{port}</code>\n\n"
@@ -70,7 +67,6 @@ class RKNBypassModule(KitsuneModule):
             "или <a href=\"https://t.me/MTProxyT\">@MTProxyT</a>\n\n"
             "Затем: <code>.setproxy host port secret</code>"
         ),
-        # ── управление ────────────────────────────────────────────────────
         "proxy_set":    (
             "✅ Прокси сохранён в <code>config.toml</code>.\n"
             "Перезапусти Kitsune: <code>.restart</code>"
@@ -85,13 +81,11 @@ class RKNBypassModule(KitsuneModule):
         "no_proxy":     "ℹ️ Прокси не настроен — используется прямое подключение.",
         "set_usage":    "Использование: <code>.setproxy host port secret</code>",
         "ssl_enabled":  "✅ Обход SSL РКН-фильтрации для Bot API — <b>уже включён по умолчанию</b>.",
-        # ── поиск прокси ──────────────────────────────────────────────────
         "findproxy_start": (
             "🔎 Ищу рабочие MTProto прокси в сети...\n"
             "<i>Это может занять несколько секунд.</i>"
         ),
         "findproxy_testing": "🧪 Проверяю {count} прокси из веб-источников...",
-        # ── мониторинг ────────────────────────────────────────────────────
         "monitor_started":  "✅ Мониторинг прокси запущен (интервал: {interval} сек).",
         "monitor_stopped":  "🛑 Мониторинг прокси остановлен.",
         "monitor_ok":       "✅ Прокси <code>{host}:{port}</code> — работает.",
@@ -111,10 +105,6 @@ class RKNBypassModule(KitsuneModule):
         ),
     }
 
-    # ════════════════════════════════════════════════════════════════════════
-    # Инициализация и жизненный цикл
-    # ════════════════════════════════════════════════════════════════════════
-
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self._monitor_task: asyncio.Task | None = None
@@ -126,10 +116,6 @@ class RKNBypassModule(KitsuneModule):
 
     async def on_unload(self) -> None:
         self._stop_monitor()
-
-    # ════════════════════════════════════════════════════════════════════════
-    # Вспомогательные методы
-    # ════════════════════════════════════════════════════════════════════════
 
     def _load_config(self) -> dict:
         from pathlib import Path
@@ -166,10 +152,6 @@ class RKNBypassModule(KitsuneModule):
         except Exception:
             return _DEFAULT_CHECK_INTERVAL
 
-    # ════════════════════════════════════════════════════════════════════════
-    # Мониторинг (фоновая задача)
-    # ════════════════════════════════════════════════════════════════════════
-
     def _start_monitor(self) -> None:
         self._stop_monitor()
         self._monitor_task = asyncio.ensure_future(self._monitor_loop())
@@ -192,7 +174,6 @@ class RKNBypassModule(KitsuneModule):
                 proxy = self._current_proxy()
 
                 if proxy is None:
-                    # Прокси не настроен — проверяем прямое соединение
                     ok = await test_connection("api.telegram.org", 443, timeout=5.0)
                     if not ok:
                         logger.warning("RKNBypass [monitor]: прямое соединение недоступно")
@@ -206,7 +187,6 @@ class RKNBypassModule(KitsuneModule):
                     logger.debug("RKNBypass [monitor]: прокси %s:%d — OK", host, port)
                     continue
 
-                # ── прокси упал ─────────────────────────────────────────────
                 logger.warning("RKNBypass [monitor]: прокси %s:%d недоступен!", host, port)
 
                 auto_switch = bool(self.config.get("auto_switch", True)) \
@@ -224,13 +204,11 @@ class RKNBypassModule(KitsuneModule):
                     )
                     continue
 
-                # Пробуем найти замену
                 web_proxies = await find_proxy_from_web()
                 new_proxy = await find_working_proxy(extra_proxies=web_proxies)
 
                 if new_proxy:
                     new_host, new_port, new_secret = new_proxy
-                    # Сохраняем новый прокси в config.toml
                     cfg = self._load_config()
                     from ..rkn_bypass import normalize_secret
                     cfg["proxy"] = {
@@ -272,10 +250,6 @@ class RKNBypassModule(KitsuneModule):
             await self.client.send_message("me", text, parse_mode="html")
         except Exception as exc:
             logger.warning("RKNBypass: не удалось отправить уведомление — %s", exc)
-
-    # ════════════════════════════════════════════════════════════════════════
-    # Команды
-    # ════════════════════════════════════════════════════════════════════════
 
     @command("rkn", required=OWNER)
     async def rkn_cmd(self, event) -> None:
@@ -333,8 +307,6 @@ class RKNBypassModule(KitsuneModule):
             )
             return
 
-        # TCP-тест не прошёл ни один, но прокси найдены из каналов.
-        # MTProto-прокси часто блокируют plain-TCP, но работают для Telegram.
         lines = []
         for h, p, s in web_proxies[:3]:
             lines.append(
@@ -347,7 +319,6 @@ class RKNBypassModule(KitsuneModule):
             + "\n\n".join(lines)
         )
         await event.message.edit(text, parse_mode="html", link_preview=False)
-
 
     @command("setproxy", required=OWNER)
     async def setproxy_cmd(self, event) -> None:

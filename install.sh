@@ -1,9 +1,4 @@
 #!/usr/bin/env bash
-# ============================================================
-#  Kitsune Userbot — Universal Installer
-#  Developer: Yushi (@Mikasu32)
-#  Supports: Ubuntu / Debian / Termux / UserLand (Android)
-# ============================================================
 set -uo pipefail
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
@@ -23,7 +18,6 @@ IS_UBUNTU=false
 IS_USERLAND=false
 SUDO="sudo"
 
-# ── Определяем среду ──────────────────────────────────────────────────────────
 if [[ -n "${PREFIX:-}" && "$PREFIX" == *"com.termux"* ]]; then
     IS_TERMUX=true
 elif [[ -d "/data/user/0/tech.ula" \
@@ -39,7 +33,6 @@ elif command -v apt-get &>/dev/null; then
     IS_UBUNTU=true
 fi
 
-# Очистка экрана только если не в UserLand (чтобы не терять вывод установщика)
 if ! $IS_USERLAND; then
     clear 2>/dev/null || true
 fi
@@ -60,12 +53,10 @@ elif $IS_USERLAND; then info "Среда: UserLand (Ubuntu on Android)"
 elif $IS_UBUNTU;   then info "Среда: Ubuntu / Debian"
 else warn "Неизвестная среда — попытка продолжить..."; fi
 
-# ── Определяем sudo ───────────────────────────────────────────────────────────
 if [[ "$(id -u)" == "0" ]]; then
     SUDO=""
     info "Запущен от root — sudo не нужен"
 elif $IS_USERLAND; then
-    # UserLand: пробуем стандартный sudo, затем /usr/local/bin/sudo, затем proot
     if command -v sudo &>/dev/null && sudo -n true 2>/dev/null; then
         SUDO="sudo"
         info "UserLand: используем sudo"
@@ -73,7 +64,6 @@ elif $IS_USERLAND; then
         SUDO="/usr/local/bin/sudo"
         info "UserLand: используем /usr/local/bin/sudo"
     else
-        # Последняя попытка: запустить с proot (если есть)
         if command -v proot &>/dev/null; then
             SUDO="proot -0"
             info "UserLand: используем proot -0 вместо sudo"
@@ -87,7 +77,6 @@ elif ! command -v sudo &>/dev/null; then
     warn "sudo не найден — попытка без него"
 fi
 
-# ── Хелпер: безопасный apt-get ───────────────────────────────────────────────
 apt_install() {
     if [[ -z "$SUDO" && "$(id -u)" != "0" ]]; then
         warn "Нет прав root для apt-get. Попробуй: sudo apt install $*"
@@ -99,7 +88,6 @@ apt_install() {
         || { warn "Не удалось установить: $* — попробуй вручную: sudo apt install $*"; return 1; }
 }
 
-# ── Git ───────────────────────────────────────────────────────────────────────
 if ! command -v git &>/dev/null; then
     warn "git не найден — устанавливаю..."
     if $IS_TERMUX; then
@@ -111,7 +99,6 @@ if ! command -v git &>/dev/null; then
         || err "git не найден. Установи вручную и перезапусти скрипт."
 fi
 
-# ── Python ────────────────────────────────────────────────────────────────────
 step "Проверка Python"
 PYTHON=""
 for cmd in python3.12 python3.11 python3.10 python3; do
@@ -139,7 +126,6 @@ if [[ -z "$PYTHON" ]]; then
     ok "Python: $PYTHON"
 fi
 
-# ── Системные зависимости (включая python3-venv — всегда явно) ───────────────
 step "Системные зависимости"
 if $IS_TERMUX; then
     pkg install -y git libjpeg-turbo openssl libffi 2>/dev/null || true
@@ -148,7 +134,6 @@ if $IS_TERMUX; then
     export CFLAGS="-I${PREFIX}/include/"
     ok "Termux-пакеты готовы"
 elif $IS_UBUNTU; then
-    # Определяем точную версию Python чтобы поставить правильный пакет venv
     PYVER=$($PYTHON -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
     apt_install git curl build-essential libssl-dev libffi-dev \
         libjpeg-dev zlib1g-dev libpq-dev \
@@ -156,9 +141,7 @@ elif $IS_UBUNTU; then
         && ok "Системные пакеты — готово" || true
 fi
 
-# ── Финальная проверка venv (защитная сетка) ──────────────────────────────────
 if $IS_UBUNTU; then
-    # Проверяем реальным созданием тестового venv, а не --help (--help врёт)
     _VENV_TEST=$(mktemp -d)
     if ! $PYTHON -m venv "$_VENV_TEST" --without-pip &>/dev/null 2>&1; then
         warn "python${PYVER}-venv всё ещё недоступен — пробую ещё раз..."
@@ -171,7 +154,6 @@ if $IS_UBUNTU; then
     ok "python${PYVER}-venv: готов"
 fi
 
-# ── Исходный код ──────────────────────────────────────────────────────────────
 step "Исходный код"
 INSTALL_DIR="$HOME/Kitsune"
 
@@ -188,7 +170,6 @@ else
     ok "Репозиторий склонирован: $INSTALL_DIR"
 fi
 
-# ── Виртуальное окружение ─────────────────────────────────────────────────────
 step "Виртуальное окружение"
 VENV_DIR="$INSTALL_DIR/venv"
 if [[ ! -d "$VENV_DIR" ]]; then
@@ -207,7 +188,6 @@ PIP="$VENV_DIR/bin/pip"
 PYTHON_VENV="$VENV_DIR/bin/python"
 
 step "Python зависимости"
-# UserLand/aarch64: /tmp имеет ограниченные права при сборке wheel из исходников
 if $IS_USERLAND || [[ ! -w /tmp ]]; then
     mkdir -p "$HOME/tmp"
     export TMPDIR="$HOME/tmp"
@@ -215,8 +195,6 @@ if $IS_USERLAND || [[ ! -w /tmp ]]; then
 fi
 "$PIP" install --upgrade pip wheel setuptools --quiet
 
-# UserLand/proot: патчим setuptools — отключаем backup egg-info.__bkp__
-# (shutil.move/copytree на proot-fs возвращает EPERM для любого source-пакета)
 _DIST_INFO_PY=$("$PYTHON_VENV" -c "
 import setuptools, os
 print(os.path.join(os.path.dirname(setuptools.__file__), 'command', 'dist_info.py'))
@@ -242,7 +220,6 @@ old = '''    @contextmanager
             yield'''
 new = '''    @contextmanager
     def _maybe_bkp_dir(self, dir_path: str, requires_bkp: bool):
-        # patched: backup disabled (rename/proot EPERM on Android/UserLand)
         yield'''
 if old in src:
     with open(path, 'w') as f:
@@ -253,7 +230,6 @@ else
     warn "setuptools dist_info.py не найден — пропускаю патч"
 fi
 
-# grapheme устанавливается вручную (на случай если setuptools патч не поможет первой итерации)
 _GRAPHEME_TMP="$HOME/tmp/grapheme_install"
 mkdir -p "$_GRAPHEME_TMP"
 curl -sSL "https://files.pythonhosted.org/packages/source/g/grapheme/grapheme-0.6.0.tar.gz" \
@@ -265,10 +241,6 @@ cp -r "$_GRAPHEME_TMP/grapheme-0.6.0/grapheme" "$_SITE_PACKAGES/"
 rm -rf "$_GRAPHEME_TMP"
 ok "grapheme установлен"
 
-# pyaes: транзитивная зависимость telethon. Падает на proot/UserLand:
-# pip при сборке метадаты переименовывает pyaes.egg-info -> pyaes-X.dist-info
-# через shutil.move — это код самого pip, патч setuptools не помогает.
-# Решение: ставим вручную + создаём dist-info, чтобы pip считал пакет уже установленным.
 _PYAES_VER="1.6.1"
 _PYAES_TMP="$HOME/tmp/pyaes_install"
 mkdir -p "$_PYAES_TMP"
@@ -289,22 +261,17 @@ else
     ok "pyaes уже установлен — пропускаю"
 fi
 rm -rf "$_PYAES_TMP"
-# --no-build-isolation: pip использует setuptools из venv (уже пропатчен выше)
-# вместо создания изолированных pip-build-env-*/pip-modern-metadata-* окружений
-# с чистым setuptools — именно там возникал EPERM на .egg-info.__bkp__ в UserLand
 "$PIP" install --no-cache-dir -r requirements.txt \
     --no-warn-script-location --disable-pip-version-check --quiet \
     --no-build-isolation \
     || err "Не удалось установить зависимости. Проверь requirements.txt"
 ok "Зависимости установлены"
 
-# tgcrypto уже покрыт TgCrypto-pyrofork из requirements.txt — устанавливаем только hydrogram
 "$PIP" install --no-cache-dir hydrogram --no-build-isolation \
     --no-warn-script-location --disable-pip-version-check --quiet \
     && ok "Hydrogram установлен" \
     || warn "Hydrogram не установлен (необязательный пакет)"
 
-# ── Директории ────────────────────────────────────────────────────────────────
 step "Директории и права"
 mkdir -p "$HOME/.kitsune/modules" "$HOME/.kitsune/logs"
 chmod 755 "$HOME/.kitsune" "$HOME/.kitsune/modules" "$HOME/.kitsune/logs"
@@ -312,9 +279,6 @@ chmod 755 "$HOME/.kitsune" "$HOME/.kitsune/modules" "$HOME/.kitsune/logs"
 [[ -f "$HOME/.kitsune/kitsune.session.enc" ]] && chmod 600 "$HOME/.kitsune/kitsune.session.enc" || true
 ok "Директории: ~/.kitsune/"
 
-# ── Фикс #4: PATH — добавляем ~/.local/bin в .bashrc/.profile ────────────────
-# pip3 install --user кладёт скрипты в ~/.local/bin, которого нет в PATH
-# по умолчанию в UserLand/Ubuntu. Добавляем один раз, если ещё не добавлено.
 step "Настройка PATH"
 _PATH_LINE='export PATH="$HOME/.local/bin:$PATH"'
 for _RC in "$HOME/.bashrc" "$HOME/.profile"; do
@@ -325,15 +289,12 @@ for _RC in "$HOME/.bashrc" "$HOME/.profile"; do
         ok "PATH: добавлено ~/.local/bin → $_RC"
     fi
 done
-# Применяем для текущего процесса прямо сейчас
 export PATH="$HOME/.local/bin:$PATH"
 
-# ── Скрипт запуска ────────────────────────────────────────────────────────────
 step "Скрипт запуска"
 if $IS_TERMUX; then
     if [[ -z "${NO_AUTOSTART:-}" ]]; then
         cat > "$HOME/.bash_profile" << PROFILE
-# Kitsune autostart
 clear
 echo -e "\033[1;35mKitsune Userbot\033[0m"
 cd "$INSTALL_DIR" && "$PYTHON_VENV" -m kitsune
@@ -342,7 +303,6 @@ PROFILE
     fi
 elif $IS_USERLAND; then
     cat > "$HOME/start_kitsune.sh" << ULSCRIPT
-#!/usr/bin/env bash
 cd "$INSTALL_DIR"
 exec "$PYTHON_VENV" -m kitsune
 ULSCRIPT
@@ -371,7 +331,6 @@ SERVICE
     ok "systemd сервис создан"
 fi
 
-# ── Итог и автозапуск ────────────────────────────────────────────────────────
 echo ""
 echo -e "${MAGENTA}${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
 echo -e "  ${GREEN}${BOLD}🦊 Kitsune успешно установлен!${RESET}"
@@ -379,6 +338,5 @@ echo -e "  ${CYAN}Директория:${RESET} $INSTALL_DIR"
 echo -e "${MAGENTA}${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
 echo ""
 
-# Запускаем Kitsune сразу — пользователь идёт на 127.0.0.1:8080 и настраивает
 cd "$INSTALL_DIR"
 exec "$PYTHON_VENV" -m kitsune

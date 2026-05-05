@@ -260,7 +260,7 @@ class CommandDispatcher:
                             try:
                                 await message.delete()
                             except Exception:
-                                pass  # удалить не вышло — не критично
+                                pass
                             return  
                 except Exception:
                     logger.warning("Dispatcher: config-edit handler failed", exc_info=True)
@@ -293,7 +293,7 @@ class CommandDispatcher:
                     pass
                 return
 
-            raw = text[len(self._prefix):].lstrip()  # фикс: .help и . help — одно и то же
+            raw = text[len(self._prefix):].lstrip()
             parts = raw.split(maxsplit=1)
             if not parts:
                 return

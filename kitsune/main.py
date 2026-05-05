@@ -227,12 +227,8 @@ async def _startup(args: argparse.Namespace) -> None:
         await setup.start(host="0.0.0.0", port=web_port)
         await setup.wait_done()
         client = setup.get_client()
-        # ── Фикс #1: после регистрации через веб правим права на сессию ──────
-        # Иначе Telethon падает с «sqlite3.OperationalError: attempt to write a
-        # readonly database» потому что SetupServer создаёт файл с 0o444 / 0o400.
         _fix_session_permissions()
         _fix_db_readonly()
-        # ─────────────────────────────────────────────────────────────────────
         cfg      = _load_raw_config()
         api_id   = int(cfg.get("api_id", 0))
         api_hash = str(cfg.get("api_hash", ""))
@@ -384,12 +380,8 @@ async def _startup(args: argparse.Namespace) -> None:
         with contextlib.suppress(OSError):
             asyncio.get_event_loop().add_signal_handler(sig, _shutdown)
 
-    # ── Event loop watchdog ────────────────────────────────────────────
-    # Отдельный поток пингует event loop каждые 10 сек.
-    # Если loop молчит >45 сек — значит завис. Убиваем процесс → systemd перезапустит.
     import threading, time as _time
     _wdog_last_tick = [_time.monotonic()]
-    # Захватываем loop в основном потоке — до создания watchdog-треда
     _wdog_loop = asyncio.get_event_loop()
 
     async def _wdog_tick() -> None:
@@ -411,7 +403,6 @@ async def _startup(args: argparse.Namespace) -> None:
     _wt = threading.Thread(target=_watchdog_thread, name="kitsune-watchdog", daemon=True)
     _wt.start()
     logger.info("main: watchdog started (threshold=45s)")
-    # ──────────────────────────────────────────────────────────────────
 
     try:
         await stop_event.wait()
@@ -470,7 +461,6 @@ async def _setup_kitsune_folder(client: Any, db: Any) -> None:
         await ensure_kitsune_folder(client, db)
     except Exception:
         pass               
-
 
 def _print_banner(me: Any) -> None:
     from .version import __version_str__

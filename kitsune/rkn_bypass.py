@@ -7,7 +7,6 @@ import typing
 
 logger = logging.getLogger(__name__)
 
-
 def _patch_telethon_mtproxy() -> None:
     """
     Патч для совместимости Telethon MTProxy с Python 3.13.
@@ -37,9 +36,7 @@ def _patch_telethon_mtproxy() -> None:
     except Exception as exc:
         logger.debug("rkn_bypass: MTProxy patch failed — %s", exc)
 
-
 _patch_telethon_mtproxy()
-
 
 def normalize_secret(secret: str) -> str:
     """
@@ -56,21 +53,18 @@ def normalize_secret(secret: str) -> str:
 
     s = secret.strip()
 
-    # Валидный hex чётной длины — всё хорошо
     is_hex = all(c in '0123456789abcdefABCDEF' for c in s)
     if is_hex and len(s) % 2 == 0:
         return s.lower()
 
-    # Hex нечётной длины — это ОШИБКА, не пытаемся угадать недостающий байт
     if is_hex and len(s) % 2 == 1:
         logger.warning(
             "normalize_secret: секрет имеет нечётную длину (%d символов). "
             "Используй секрет из tg://proxy ссылки (кнопка «Поделиться» в Telegram).",
             len(s),
         )
-        return s  # отдаём как есть, Telethon выдаст понятную ошибку
+        return s
 
-    # base64url (секрет из tg://proxy ссылки) → hex
     try:
         padded = s + '=' * (-len(s) % 4)
         decoded = base64.b64decode(padded.encode(), altchars=b'-_')
@@ -78,11 +72,7 @@ def normalize_secret(secret: str) -> str:
     except Exception:
         pass
 
-    # Отдаём как есть
     return s
-
-
-# ─────────────────────── встроенный список прокси ───────────────────────────
 
 _PUBLIC_PROXIES: list[tuple[str, int, str]] = [
     ("149.154.175.100", 443, "ee9000000000000000000000000000003900000000000000"),
@@ -91,9 +81,8 @@ _PUBLIC_PROXIES: list[tuple[str, int, str]] = [
     ("mtproto.telegram.org", 443, "ee0000000000000000000000000000003900000000000000"),
 ]
 
-# Публичные источники MTProto-прокси
 _TG_PROXY_CHANNELS: list[str] = [
-    "https://t.me/s/mtp4tg",          # основной — много рабочих прокси
+    "https://t.me/s/mtp4tg",
     "https://t.me/s/proxyme",
     "https://t.me/s/MTProxyT",
     "https://t.me/s/tg_proxy_mtproto",
@@ -101,7 +90,6 @@ _TG_PROXY_CHANNELS: list[str] = [
 
 _MTPRO_XYZ_URL = "https://mtpro.xyz/api/?type=mtproto"
 
-# Секрет MTProto может быть hex, hex с префиксом dd/ee, или base64
 _SECRET_PAT = r'([0-9a-zA-Z+/=_-]{16,})'
 
 _RE_TG_PROXY = re.compile(
@@ -112,8 +100,6 @@ _RE_TG_PROXY_ALT = re.compile(
     r'https://t\.me/proxy\?server=([^&"\'<>\s]+)&port=(\d+)&secret=' + _SECRET_PAT,
     re.IGNORECASE,
 )
-
-# ─────────────────────── SSL-хелперы ────────────────────────────────────────
 
 def make_ssl_ctx_no_verify() -> ssl.SSLContext:
     ctx = ssl.create_default_context()
@@ -152,8 +138,6 @@ def get_connection_class(use_proxy: bool = False):
         return ConnectionTcpMTProxyRandomizedIntermediate
     return ConnectionTcpFull
 
-# ─────────────────────── проверка соединения ────────────────────────────────
-
 async def test_connection(
     host: str = "api.telegram.org",
     port: int = 443,
@@ -173,8 +157,6 @@ async def test_connection(
         return True
     except Exception:
         return False
-
-# ─────────────────────── веб-поиск прокси ───────────────────────────────────
 
 async def _fetch_from_tg_channel(url: str) -> list[tuple[str, int, str]]:
     """Парсит tg://proxy?... ссылки с публичной страницы Telegram-канала."""
@@ -257,8 +239,6 @@ async def find_proxy_from_web() -> list[tuple[str, int, str]]:
     logger.info("rkn_bypass: найдено %d прокси из веб-источников", len(proxies))
     return proxies
 
-# ─────────────────────── основной поиск ─────────────────────────────────────
-
 async def find_working_proxy(
     extra_proxies: list[tuple[str, int, str]] | None = None,
 ) -> tuple[str, int, str] | None:
@@ -281,8 +261,6 @@ async def find_working_proxy(
 
     logger.warning("rkn_bypass: рабочий прокси не найден")
     return None
-
-# ─────────────────────── применение к конфигу ───────────────────────────────
 
 def apply_bypass_to_config(cfg: dict) -> dict:
     import asyncio

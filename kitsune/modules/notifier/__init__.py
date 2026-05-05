@@ -14,7 +14,6 @@ logger = logging.getLogger(__name__)
 
 _DB_KEY = "kitsune.notifier"
 
-
 class NotifierModule(KitsuneModule):
     name        = "notifier"
     description = "Авто-создание бота и уведомления"

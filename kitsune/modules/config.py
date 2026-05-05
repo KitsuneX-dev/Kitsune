@@ -411,7 +411,6 @@ class ConfigModule(KitsuneModule):
 
         args = self.get_args(event).strip()
 
-        # cfg <module_name> — сразу открываем нужный модуль одним вызовом form
         if args:
             loader = getattr(self.client, "_kitsune_loader", None)
             if loader:
@@ -425,7 +424,6 @@ class ConfigModule(KitsuneModule):
                     mod = loader.modules[mod_name]
                     is_builtin = getattr(mod, "_is_builtin", False) or getattr(mod, "_builtin", False)
 
-                    # Строим контент экрана модуля и сразу открываем form — один round-trip
                     text = self.strings("configuring_mod").format(
                         _esc(mod_name),
                         self._rows_text(mod),

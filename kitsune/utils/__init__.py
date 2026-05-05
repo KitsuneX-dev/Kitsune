@@ -261,7 +261,6 @@ def is_serializable(value: _typing.Any) -> bool:
     except (TypeError, ValueError):
         return False
 
-
 def get_chat_id(message: _typing.Any) -> _typing.Optional[int]:
     """Return the chat/peer id from a Telethon message object."""
     if isinstance(message, int):
@@ -282,7 +281,6 @@ def get_chat_id(message: _typing.Any) -> _typing.Optional[int]:
         return getattr(chat, "id", None)
 
     return getattr(message, "chat_id", None)
-
 
 async def answer(
     message: _typing.Any,
@@ -326,7 +324,6 @@ async def answer(
         response, parse_mode=parse_mode, link_preview=link_preview, **kwargs
     )
 
-
 async def answer_file(
     message: _typing.Any,
     file: _typing.Union[str, bytes, _io.IOBase],
@@ -367,7 +364,6 @@ async def answer_file(
 
     return result
 
-
 def progress_bar(current: _typing.Union[int, float], total: _typing.Union[int, float], width: int = 12) -> str:
     """Return a Unicode progress bar string with percentage."""
     if total <= 0:
@@ -380,7 +376,6 @@ def progress_bar(current: _typing.Union[int, float], total: _typing.Union[int, f
     bar = "█" * filled + "░" * empty
     percent = int(pct * 100)
     return f"{bar}  {percent}%"
-
 
 __all__ += [
     "is_serializable", "get_chat_id",

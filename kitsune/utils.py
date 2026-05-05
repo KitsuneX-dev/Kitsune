@@ -205,7 +205,6 @@ async def asset_channel(
     from telethon.tl.types import InputNotifyPeer, InputPeerNotifySettings
     from telethon.errors import ChannelsTooMuchError
 
-    # Сначала ищем существующую группу/канал с таким названием
     async for dialog in client.iter_dialogs():
         if (dialog.is_channel or dialog.is_group) and dialog.title == title:
             return dialog.id, False
@@ -265,7 +264,6 @@ async def ensure_kitsune_folder(client: typing.Any, db: typing.Any) -> None:
         _FOLDER_TITLE = "🦊 Kitsune"
         _ASSET_TITLES = {"KitsuneBackup", "Kitsune-logs", "kitsune-assets"}
 
-        # Ищем ID нужных групп
         peer_inputs = []
         async for dialog in client.iter_dialogs():
             if dialog.title in _ASSET_TITLES:
@@ -278,12 +276,10 @@ async def ensure_kitsune_folder(client: typing.Any, db: typing.Any) -> None:
             logger.debug("ensure_kitsune_folder: no asset channels found yet")
             return
 
-        # Получаем существующие папки
         existing_filters = await client(GetDialogFiltersRequest())
         existing: typing.Any = None
-        existing_id: int = 2  # 0 = All, 1 = Archived, 2+ — пользовательские
+        existing_id: int = 2
 
-        # Ищем нашу папку
         for f in existing_filters.filters:
             if getattr(f, "title", None) == _FOLDER_TITLE:
                 existing = f
@@ -293,7 +289,6 @@ async def ensure_kitsune_folder(client: typing.Any, db: typing.Any) -> None:
                 existing_id = max(existing_id, f.id + 1)
 
         if existing is not None:
-            # Добавляем недостающих
             current_peers = list(getattr(existing, "include_peers", []))
             existing_ids = {getattr(p, "channel_id", None) for p in current_peers}
             for p in peer_inputs:
@@ -337,7 +332,6 @@ async def ensure_kitsune_folder(client: typing.Any, db: typing.Any) -> None:
 
     except Exception as exc:
         logger.debug("ensure_kitsune_folder: failed — %s", exc)
-
 
 def find_caller(stack: list[inspect.FrameInfo]) -> typing.Callable | None:
     for frame_info in stack:

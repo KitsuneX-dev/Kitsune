@@ -18,7 +18,6 @@ def is_termux() -> bool:
     try:
         return Path("/data/data/com.termux").exists()
     except PermissionError:
-        # UserLand/proot: путь существует, но нет прав — значит это не Termux
         return False
 
 def is_heroku() -> bool:

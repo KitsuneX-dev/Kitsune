@@ -111,11 +111,9 @@ class HydrogramBridge:
         self._dispatcher = dispatcher
         self._db = db
 
-    # ── Rate limiter ──────────────────────────────────────────────────────────
-    # Значения по умолчанию — переопределяются через APILimiter конфиг
     _RL_MAX      = 20
     _RL_WINDOW   = 60.0
-    _rl_enabled  = True   # управляется через APILimiter.config["hydro_enabled"]
+    _rl_enabled  = True
     _rl_times: list = []
 
     def _rate_limit_ok(self) -> bool:
@@ -157,8 +155,6 @@ class HydrogramBridge:
             me_id = self._tl.tg_id
             is_own = sender_id == me_id
 
-            # Собственные исходящие сообщения уже обрабатывает Telethon через
-            # _on_out_message — пропускаем их здесь, чтобы не было дублей.
             if is_own:
                 return
 

@@ -21,10 +21,7 @@ _DB_OWNER         = "kitsune.backup"
 _DB_LOADER        = "kitsune.loader_mod"
 _INTERVAL_OPTIONS = [2, 4, 6, 8, 12, 24, 48]
 
-# Папка с пользовательскими модулями (dlmod + lm)
 _USER_MODULES_DIR = Path.home() / ".kitsune" / "modules"
-
-
 
 async def _ensure_kitsune_folder(client, *peer_ids: int) -> None:
     """
@@ -43,10 +40,9 @@ async def _ensure_kitsune_folder(client, *peer_ids: int) -> None:
 
     FOLDER_NAME = "Kitsune"
 
-    # Получаем текущие папки
     filters = await client(GetDialogFiltersRequest())
     existing: DialogFilter | None = None
-    max_id = 2  # id=1 зарезервирован Telegram, наши папки начинаются с 2
+    max_id = 2
 
     for f in filters.filters:
         fid = getattr(f, "id", 0)
@@ -57,7 +53,6 @@ async def _ensure_kitsune_folder(client, *peer_ids: int) -> None:
             existing = f
             break
 
-    # Конвертируем peer_ids → InputPeer
     new_peers = []
     for pid in peer_ids:
         try:
@@ -70,7 +65,6 @@ async def _ensure_kitsune_folder(client, *peer_ids: int) -> None:
             pass
 
     if existing:
-        # Добавляем в существующую папку если peer ещё не там
         current_ids = {
             getattr(p, "channel_id", None) or getattr(p, "chat_id", None)
             for p in getattr(existing, "include_peers", [])
@@ -80,12 +74,11 @@ async def _ensure_kitsune_folder(client, *peer_ids: int) -> None:
             if (getattr(p, "channel_id", None) or getattr(p, "chat_id", None)) not in current_ids
         ]
         if not to_add:
-            return  # уже есть
+            return
         existing.include_peers = list(getattr(existing, "include_peers", [])) + to_add
         await client(UpdateDialogFilterRequest(id=existing.id, filter=existing))
         logger.debug("_ensure_kitsune_folder: добавлено %d чатов в папку Kitsune", len(to_add))
     else:
-        # Создаём папку заново
         new_filter = DialogFilter(
             id=max_id + 1,
             title=FOLDER_NAME,
@@ -104,7 +97,6 @@ async def _ensure_kitsune_folder(client, *peer_ids: int) -> None:
         )
         await client(UpdateDialogFilterRequest(id=new_filter.id, filter=new_filter))
         logger.debug("_ensure_kitsune_folder: создана папка Kitsune с %d чатами", len(new_peers))
-
 
 def _to_bot_chat_id(chat_id) -> int | None:
     """
@@ -127,25 +119,17 @@ def _to_bot_chat_id(chat_id) -> int | None:
     except (TypeError, ValueError):
         return None
 
-    # Уже в bot-формате
     if cid < 0:
         return cid
 
     s = str(cid)
-    # Уже содержит префикс 100 в положительном виде (редкий кейс)
     if s.startswith("100") and len(s) >= 13:
         return -cid
 
-    # Эвристика: всё, что > 1_000_000_000 и не похоже на user_id, считаем
-    # «голым» channel_id из Telethon → дописываем -100.
-    # Современные user_id тоже могут перевалить за 1e9, поэтому ориентируемся
-    # на типичную длину channel_id (обычно 10 цифр и больше).
     if cid > 1_000_000_000:
         return int(f"-100{cid}")
 
-    # user_id — отдаём как есть
     return cid
-
 
 def _extract_msg_ids(sent) -> tuple[int | None, int | None]:
     """
@@ -160,12 +144,12 @@ def _extract_msg_ids(sent) -> tuple[int | None, int | None]:
     msg_id = getattr(sent, "id", None)
 
     chat_id = None
-    chat_obj = getattr(sent, "chat", None)  # Hydrogram
+    chat_obj = getattr(sent, "chat", None)
     if chat_obj is not None:
         chat_id = getattr(chat_obj, "id", None)
 
     if chat_id is None:
-        chat_id = getattr(sent, "chat_id", None)  # Telethon
+        chat_id = getattr(sent, "chat_id", None)
 
     if chat_id is None:
         peer = getattr(sent, "peer_id", None)
@@ -175,14 +159,11 @@ def _extract_msg_ids(sent) -> tuple[int | None, int | None]:
                 or getattr(peer, "chat_id", None)
                 or getattr(peer, "user_id", None)
             )
-            # Каналы в Telethon отдают «голый» id — приводим к -100…
             if chat_id and getattr(peer, "channel_id", None):
                 chat_id = int(f"-100{chat_id}")
 
-    # Финальная нормализация (на случай если пришло «голое» положительное)
     chat_id = _to_bot_chat_id(chat_id)
     return chat_id, msg_id
-
 
 class BackupModule(KitsuneModule):
     name        = "backup"
@@ -190,28 +171,22 @@ class BackupModule(KitsuneModule):
     author      = "Yushi"
 
     strings_ru = {
-        # backupdb
         "creating":       "⏳ Создаю резервную копию базы данных...",
         "done":           "✅ Бэкап базы данных отправлен.",
-        # restoredb
         "restoring":      "⏳ Восстанавливаю базу данных...",
         "restored":       "✅ База данных восстановлена. Перезапустите бота.",
         "bad_file":       "❌ Неверный формат. Ожидается .json или .backup",
-        # backupmods
         "mods_creating":  "⏳ Собираю файлы модулей...",
         "mods_done":      "✅ Бэкап модулей отправлен ({count} файлов).",
         "mods_no_mods":   "❌ Нет установленных пользовательских модулей.",
-        # restoremods
         "mods_restoring": "⏳ Восстанавливаю модули...",
         "mods_restored":  "✅ Модули восстановлены: {count} шт. Перезапустите бота.",
         "mods_bad_file":  "❌ Неверный формат. Ожидается .zip или .backup",
-        # backupall / restoreall
         "all_creating":   "⏳ Создаю полный бэкап (БД + все модули)...",
         "all_done":       "✅ Полный бэкап отправлен.",
         "all_restoring":  "⏳ Восстанавливаю всё из бэкапа...",
         "all_restored":   "✅ База данных и модули восстановлены. Перезапустите бота.",
         "all_bad_file":   "❌ Неверный формат .backup",
-        # group / interval
         "no_dest":        "⚠️ Нет группы для бэкапа. Создаю...",
         "group_created":  "✅ Группа <b>KitsuneBackup</b> создана.",
         "setup_interval": (
@@ -227,7 +202,6 @@ class BackupModule(KitsuneModule):
             "Пример: <code>.setbackupinterval 6</code>"
         ),
         "interval_bad":   "❌ Неверное значение. Доступно: 2 4 6 8 12 24 48 или off",
-        # captions (в сообщении Telegram)
         "db_caption": (
             "🦊 <b>Kitsune DB Backup</b>\n"
             "🕐 {ts}\n"
@@ -245,7 +219,6 @@ class BackupModule(KitsuneModule):
             "📦 Файлов: {count}\n"
             "📋 Ответь: <code>.restoreall</code>"
         ),
-        # restore button
         "restore_btn":     "🔄 Восстановить",
         "restore_form_db": (
             "🦊 <b>Управление бэкапом БД</b>\n"
@@ -321,8 +294,6 @@ class BackupModule(KitsuneModule):
             val = interval_h if interval_h == "1m" else int(interval_h)
             self._start_auto(val)
 
-    # ── Хелперы ───────────────────────────────────────────────────────────────
-
     def _ts(self) -> str:
         return datetime.datetime.now().strftime("%d-%m-%Y %H:%M")
 
@@ -334,8 +305,6 @@ class BackupModule(KitsuneModule):
         Plain JSON дамп всей базы данных.
         Формат совместим с Hikka и Heroku — можно восстановить любым из них.
         """
-        # Фикс: dict(self.db) вызывает __getitem__ с int-ключами → KeyError.
-        # export_data() возвращает правильный dict {owner: {key: value}}.
         if hasattr(self.db, "export_data"):
             data = self.db.export_data()
         else:
@@ -369,15 +338,12 @@ class BackupModule(KitsuneModule):
         """
         module_files = self._collect_module_files()
 
-        # URL-список из dlmod (для переустановки через URL)
         url_map: dict = self.db.get(_DB_LOADER, "user_modules", {})
 
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-            # Сохраняем каждый .py файл
             for fname, content in module_files:
                 zf.writestr(f"mods/{fname}", content)
-            # Сохраняем маппинг URL (нужен для восстановления через URL если файл протух)
             zf.writestr(
                 "urls.json",
                 json.dumps(url_map, ensure_ascii=False, indent=2),
@@ -409,19 +375,13 @@ class BackupModule(KitsuneModule):
           3. Только если не нашли — создаём новую
           4. Добавляем группу в папку Kitsune (создаём папку если нет)
         """
-        # ── 1. Проверяем сохранённый ID ───────────────────────────────────────
         chat_id = self.db.get(_DB_OWNER, "group_id", None)
         if chat_id:
             try:
-                # get_entity Telethon принимает любой формат — bot и raw.
                 entity = await asyncio.wait_for(
                     self.client.get_entity(int(chat_id)), timeout=20
                 )
-                # Нормализуем к bot-формату (-100…) — это и есть тот ID,
-                # который потом уйдёт в aiogram-бота.
                 normalized = _to_bot_chat_id(int(chat_id))
-                # Если в БД лежит «голый» raw-id, перезаписываем актуальным,
-                # иначе bot.send_document будет падать с chat not found.
                 if normalized is not None and normalized != int(chat_id):
                     try:
                         await self.db.set(_DB_OWNER, "group_id", int(normalized))
@@ -437,7 +397,6 @@ class BackupModule(KitsuneModule):
             except Exception:
                 logger.debug("backup: сохранённый group_id %s недоступен — ищем заново", chat_id)
 
-        # ── 2. Ищем KitsuneBackup в диалогах ─────────────────────────────────
         found_id: int | None = None
         try:
             async for dialog in self.client.iter_dialogs(limit=500):
@@ -459,7 +418,6 @@ class BackupModule(KitsuneModule):
             await self._ensure_bot_in_channel(found_id)
             return found_id
 
-        # ── 3. Создаём новую группу ───────────────────────────────────────────
         if event:
             await event.reply(self.strings("no_dest"), parse_mode="html")
 
@@ -481,7 +439,6 @@ class BackupModule(KitsuneModule):
             logger.error("backup: не удалось создать KitsuneBackup: %s", exc)
             return None
 
-        # ── 4. Бот в канале + Аватарка + папка Kitsune ───────────────────────
         if new_id:
             await self._ensure_bot_in_channel(new_id)
             try:
@@ -514,13 +471,11 @@ class BackupModule(KitsuneModule):
 
             entity = await self.client.get_entity(channel_id)
 
-            # Приглашаем (игнорируем если уже в чате)
             try:
                 await self.client(InviteToChannelRequest(channel=entity, users=[bot_username]))
             except Exception:
                 pass
 
-            # Даём права на публикацию и редактирование
             await self.client(EditAdminRequest(
                 channel=entity,
                 user_id=bot_username,
@@ -543,8 +498,6 @@ class BackupModule(KitsuneModule):
                 db_data.get(ns, {}).pop("bot_token", None)
             except Exception:
                 pass
-
-    # ── Кнопка «Восстановить» под бэкапом ─────────────────────────────────────
 
     def _inline(self):
         return getattr(self.client, "_kitsune_inline", None)
@@ -608,13 +561,9 @@ class BackupModule(KitsuneModule):
             logger.warning("backup: aiogram недоступен (%s)", exc)
             return False
 
-        # Регистрируем callback заранее — реальные chat/msg id подставим после
-        # получения ответа от Telegram.
         cb_id = self._register_restore_cb(0, 0, kind)
         markup = self._build_restore_markup(cb_id)
 
-        # Нормализуем dest к bot-формату: aiogram падает с
-        # «chat not found», если ему передать «голый» raw-id канала.
         bot_dest = _to_bot_chat_id(dest)
         if bot_dest is None:
             logger.warning("backup: невалидный dest=%s — кнопка не будет добавлена", dest)
@@ -631,7 +580,6 @@ class BackupModule(KitsuneModule):
                 reply_markup=markup,
             )
         except Exception as exc:
-            # Бот не в чате / нет прав / другая ошибка → fallback (с видимым логом).
             logger.warning(
                 "backup: bot.send_document(chat=%s, normalized=%s) упал: %s — пробую fallback",
                 dest, bot_dest, exc,
@@ -639,7 +587,6 @@ class BackupModule(KitsuneModule):
             inline._callbacks.pop(cb_id, None)
             return False
 
-        # Обновляем args колбэка реальным chat_id / message_id
         try:
             sent_chat_id = _to_bot_chat_id(sent.chat.id) or sent.chat.id
             sent_msg_id  = sent.message_id
@@ -679,8 +626,6 @@ class BackupModule(KitsuneModule):
             logger.warning("backup: не смог извлечь chat/msg id — кнопка не будет добавлена")
             return False
 
-        # _extract_msg_ids уже нормализует, но дублируем явно — на случай
-        # если объект пришёл из неожиданного источника.
         bot_chat_id = _to_bot_chat_id(chat_id)
         if bot_chat_id is None:
             logger.warning("backup: chat_id=%s не нормализуется — кнопка пропущена", chat_id)
@@ -731,13 +676,11 @@ class BackupModule(KitsuneModule):
             logger.warning("backup: нет KitsuneBackup — отправка пропущена")
             return
 
-        # ── 1. Основной путь — через бота, файл+текст+кнопка одним сообщением.
         if await self._send_with_button_via_bot(
             dest, data, fname, caption, kind, ts, count,
         ):
             return
 
-        # ── 2. Fallback: юзербот шлёт файл, бот пристёгивает кнопку.
         sent = None
         try:
             buf = io.BytesIO(data)
@@ -758,8 +701,6 @@ class BackupModule(KitsuneModule):
                     kind,
                 )
 
-    # ── backupdb ──────────────────────────────────────────────────────────────
-
     @command("backupdb", required=OWNER)
     async def backupdb_cmd(self, event) -> None:
         """Отправить дамп базы данных как .json (plain, без шифрования)."""
@@ -772,8 +713,6 @@ class BackupModule(KitsuneModule):
 
             await self._send_backup(dest, data, fname, caption, "db", ts)
             await prog.done(self.strings("done"))
-
-    # ── restoredb ─────────────────────────────────────────────────────────────
 
     async def _do_restore_db(self, raw: bytes) -> bool:
         """
@@ -831,8 +770,6 @@ class BackupModule(KitsuneModule):
                 return
             await prog.done(self.strings("restored"))
 
-    # ── backupmods ────────────────────────────────────────────────────────────
-
     @command("backupmods", required=OWNER)
     async def backupmods_cmd(self, event) -> None:
         """
@@ -852,8 +789,6 @@ class BackupModule(KitsuneModule):
 
             await self._send_backup(dest, mods_zip, fname, caption, "mods", ts, count)
             await prog.done(self.strings("mods_done").format(count=count))
-
-    # ── restoremods ───────────────────────────────────────────────────────────
 
     async def _do_restore_mods(self, raw: bytes) -> int | None:
         """
@@ -901,8 +836,6 @@ class BackupModule(KitsuneModule):
                 return
             await prog.done(self.strings("mods_restored").format(count=count))
 
-    # ── backupall ─────────────────────────────────────────────────────────────
-
     @command("backupall", required=OWNER)
     async def backupall_cmd(self, event) -> None:
         """
@@ -920,8 +853,6 @@ class BackupModule(KitsuneModule):
 
             await self._send_backup(dest, archive_bytes, fname, caption, "all", ts, count)
             await prog.done(self.strings("all_done"))
-
-    # ── restoreall ────────────────────────────────────────────────────────────
 
     async def _do_restore_all(self, raw: bytes) -> int | None:
         """
@@ -978,8 +909,6 @@ class BackupModule(KitsuneModule):
                 return
             await prog.done(self.strings("all_restored"))
 
-    # ── Кнопочный callback восстановления ─────────────────────────────────────
-
     async def _cb_restore(self, call, chat_id: int, msg_id: int, kind: str) -> None:
         """
         Обработчик кнопки «🔄 Восстановить» из формы под файлом.
@@ -993,7 +922,6 @@ class BackupModule(KitsuneModule):
         inline = self._inline()
         ts     = self._ts()
 
-        # Достаём оригинальное сообщение с файлом
         try:
             msg = await self.client.get_messages(chat_id, ids=int(msg_id))
         except Exception as exc:
@@ -1008,7 +936,6 @@ class BackupModule(KitsuneModule):
                     pass
             return
 
-        # Качаем содержимое
         try:
             raw = await hydro_download(self.client, msg)
         except Exception as exc:
@@ -1024,7 +951,6 @@ class BackupModule(KitsuneModule):
                     pass
             return
 
-        # Делаем restore по типу
         try:
             if kind == "db":
                 ok = await self._do_restore_db(raw)
@@ -1054,14 +980,11 @@ class BackupModule(KitsuneModule):
                     pass
             return
 
-        # Финальный экран — без кнопок (восстановление уже выполнено)
         if inline:
             try:
                 await inline.edit(call, final, [])
             except Exception:
                 pass
-
-    # ── setbackupinterval ─────────────────────────────────────────────────────
 
     @command("setbackupinterval", required=OWNER)
     async def setbackupinterval_cmd(self, event) -> None:
@@ -1086,7 +1009,6 @@ class BackupModule(KitsuneModule):
             )
             return
 
-        # Отключение
         if arg in ("off", "0", "no", "disable", "выкл", "отключить"):
             if self._auto_task and not self._auto_task.done():
                 self._auto_task.cancel()
@@ -1094,7 +1016,6 @@ class BackupModule(KitsuneModule):
             await event.reply(self.strings("interval_off"), parse_mode="html")
             return
 
-        # 1m — специальный тестовый режим (отключён)
         if False and arg == "1m":
             await self.db.set(_DB_OWNER, "interval_h", "1m")
             await self.db.set(_DB_OWNER, "last_backup", int(time.time()))
@@ -1102,7 +1023,6 @@ class BackupModule(KitsuneModule):
             await event.reply("✅ Авто-бэкап каждые <b>1 мин</b> (тест).", parse_mode="html")
             return
 
-        # Числовое значение (часы)
         try:
             h = int(arg)
         except ValueError:
@@ -1118,8 +1038,6 @@ class BackupModule(KitsuneModule):
         self._start_auto(h)
         await event.reply(self.strings("interval_set").format(h=h), parse_mode="html")
 
-        # ── Внутренний restore модулей ────────────────────────────────────────────
-
     async def _restore_mods_from_zip(self, mods_zip_bytes: bytes) -> int:
         """
         Записывает .py файлы в ~/.kitsune/modules/ и перезагружает их.
@@ -1133,7 +1051,6 @@ class BackupModule(KitsuneModule):
             with zipfile.ZipFile(io.BytesIO(mods_zip_bytes)) as zf:
                 names = zf.namelist()
 
-                # Обновляем url_map в БД если есть urls.json
                 if "urls.json" in names:
                     try:
                         url_map = json.loads(zf.open("urls.json").read().decode("utf-8"))
@@ -1142,12 +1059,10 @@ class BackupModule(KitsuneModule):
                     except Exception as e:
                         logger.warning("restoremods: urls.json: %s", e)
 
-                # Записываем .py файлы
                 for name in names:
                     if not name.endswith(".py"):
                         continue
 
-                    # Поддерживаем оба формата: mods/file.py и просто file.py
                     fname = Path(name).name
                     dest_path = _USER_MODULES_DIR / fname
 
@@ -1158,7 +1073,6 @@ class BackupModule(KitsuneModule):
                         logger.error("restoremods: запись %s: %s", fname, e)
                         continue
 
-                    # Перезагружаем модуль если лоадер доступен
                     if loader_inst:
                         try:
                             await loader_inst.load_from_file(dest_path)
@@ -1169,8 +1083,6 @@ class BackupModule(KitsuneModule):
             logger.exception("restoremods: ошибка при разборе mods.zip")
 
         return count
-
-    # ── Авто-бэкап ────────────────────────────────────────────────────────────
 
     def _start_auto(self, interval_h) -> None:
         if self._auto_task and not self._auto_task.done():
@@ -1192,7 +1104,6 @@ class BackupModule(KitsuneModule):
                 ts  = self._ts()
                 fts = self._fname_ts()
 
-                # ── 1. db.json ────────────────────────────────────────────────
                 db_data = self._db_bytes()
                 await self._send_backup(
                     dest, db_data,
@@ -1201,7 +1112,6 @@ class BackupModule(KitsuneModule):
                     "db", ts,
                 )
 
-                # ── 2. mods.zip ───────────────────────────────────────────────
                 mods_data, count = self._make_mods_zip()
                 await self._send_backup(
                     dest, mods_data,
@@ -1210,7 +1120,6 @@ class BackupModule(KitsuneModule):
                     "mods", ts, count,
                 )
 
-                # ── 3. .backup (полный архив db + mods) ───────────────────────
                 full_data, count = self._make_full_backup()
                 await self._send_backup(
                     dest, full_data,
@@ -1224,8 +1133,6 @@ class BackupModule(KitsuneModule):
             except Exception:
                 logger.exception("backup: авто-бэкап упал")
                 await asyncio.sleep(60)
-
-    # ── Настройка интервала (вызывается из bot_setup) ─────────────────────────
 
     async def show_interval_setup(self, bot, owner_id: int) -> None:
         try:

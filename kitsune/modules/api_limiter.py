@@ -62,7 +62,6 @@ class APILimiterModule(KitsuneModule):
         self._old_call: typing.Any = None
 
         self.config = ModuleConfig(
-            # ── Telethon лимиты ───────────────────────────────────────────────
             ConfigValue(
                 "enabled",
                 default=True,
@@ -88,7 +87,6 @@ class APILimiterModule(KitsuneModule):
                 default=60,
                 doc="[Telethon] Авто-ожидание FloodWait до этого значения секунд (0 = не ждать)",
             ),
-            # ── Hydrogram лимиты ──────────────────────────────────────────────
             ConfigValue(
                 "hydro_enabled",
                 default=True,
@@ -117,7 +115,6 @@ class APILimiterModule(KitsuneModule):
         try:
             bridge = getattr(self.client, "_kitsune_hydro_bridge", None)
             if bridge is None:
-                # ищем через loader
                 loader = getattr(self.client, "_kitsune_loader", None)
                 if loader:
                     from ..core.hydro_bridge import HydrogramBridge

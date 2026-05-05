@@ -429,7 +429,6 @@ class _ConsoleStartupFilter(logging.Filter):
                 return False
         return True
 
-
 rotating_handler = RotatingFileHandler(
     filename=str(LOG_FILE),
     mode="a",
@@ -444,7 +443,7 @@ _tg_channel_handler: TelegramChannelHandler | None = None
 
 async def _get_aiogram_bot(client: typing.Any) -> typing.Any:
     """Ждёт запуска aiogram-бота и возвращает его (или None). Таймаут — 20 секунд."""
-    for _ in range(100):   # 100 × 0.2s = 20 секунд максимум, выходим сразу как нашли
+    for _ in range(100):
         try:
             loader = getattr(client, "_kitsune_loader", None)
             if loader:
@@ -456,14 +455,13 @@ async def _get_aiogram_bot(client: typing.Any) -> typing.Any:
         await asyncio.sleep(0.2)
     return None
 
-
 async def _ensure_bot_in_group(client: typing.Any, group_id: int) -> bool:
     """Ждёт bot_username до 90 секунд, затем добавляет бота в группу/канал Kitsune-logs."""
     log = logging.getLogger(__name__)
 
                                                   
     bot_username: str | None = None
-    for _ in range(100):   # 100 × 0.2s = 20 секунд максимум, выходим сразу как нашли
+    for _ in range(100):
         try:
             db = getattr(client, "_kitsune_db", None)
             if db:
@@ -516,7 +514,6 @@ async def _ensure_bot_in_group(client: typing.Any, group_id: int) -> bool:
         log.warning("log: ошибка при добавлении бота — %s", exc)
         return False
 
-
 def _to_bot_api_id(telethon_id: int) -> int:
     """Конвертирует Telethon channel/megagroup ID в Bot API формат (-100xxxxxxx)."""
     peer_id = abs(telethon_id)
@@ -524,7 +521,6 @@ def _to_bot_api_id(telethon_id: int) -> int:
     if peer_id >= 1_000_000_000_000:
         return -peer_id
     return int(f"-100{peer_id}")
-
 
 async def setup_tg_logging(client: typing.Any) -> None:
     global _tg_channel_handler
@@ -560,7 +556,6 @@ async def setup_tg_logging(client: typing.Any) -> None:
     except Exception:
         logging.getLogger(__name__).exception("log: failed to set up TG channel logging")
 
-
 async def _setup_bot_and_banner(client: typing.Any, group_id: int) -> None:
     """Отправляет стартовый баннер.
 
@@ -581,7 +576,7 @@ async def _setup_bot_and_banner(client: typing.Any, group_id: int) -> None:
             await _send_startup_banner_via_bot(client, group_id, bot=bot, bot_added=True)
 
     async def _try_via_hydro() -> None:
-        await asyncio.sleep(5)          # гарантированная задержка 5 секунд
+        await asyncio.sleep(5)
         if not _sent[0]:
             _sent[0] = True
             await _send_startup_banner_via_bot(client, group_id, bot=None, bot_added=False)
@@ -690,7 +685,6 @@ async def _send_startup_banner_via_bot(
 
     except Exception:
         log.exception("log: не удалось отправить стартовый баннер")
-
 
 async def _send_startup_banner(client: typing.Any, channel_id: int) -> None:
     """Устаревший метод — перенаправляет на новый."""

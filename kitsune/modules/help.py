@@ -10,7 +10,6 @@ from ..core.security import OWNER
 
 PAGE_SIZE = 30
 
-
 class HelpModule(KitsuneModule):
 
     name        = "help"
@@ -124,7 +123,7 @@ class HelpModule(KitsuneModule):
         visible = self._collect_visible_modules(loader)
 
         total_modules_with_cmds = len(visible)
-        total_pages = max(1, -(-total_modules_with_cmds // PAGE_SIZE))  # ceil
+        total_pages = max(1, -(-total_modules_with_cmds // PAGE_SIZE))
         page = max(0, min(page, total_pages - 1))
 
         start = page * PAGE_SIZE
@@ -196,7 +195,6 @@ class HelpModule(KitsuneModule):
     async def _full_help(self, event, loader, page: int = 0) -> None:
         body, page, total_pages = self._build_page_body(loader, page)
 
-        # Если страниц больше одной — выводим через inline-форму с кнопками.
         if total_pages > 1:
             inline = self._inline()
             if inline is not None and getattr(inline, "_bot", None):
@@ -209,11 +207,8 @@ class HelpModule(KitsuneModule):
                     await inline.form(body, event.message, kb)
                     return
                 except Exception:
-                    # Если по какой-то причине inline-форма не отправилась —
-                    # падаем в обычный fallback и редактируем сообщение текстом.
                     pass
 
-        # Фолбэк: нет inline-менеджера или страница всего одна — обычное редактирование.
         await self._edit_collapsed(event.message, body)
 
     async def _cb_help_page(self, call, page: int) -> None:
@@ -233,7 +228,6 @@ class HelpModule(KitsuneModule):
         await inline.edit(call, body, kb)
 
     async def _cb_help_noop(self, call) -> None:
-        # Кнопка-индикатор страницы — просто закрываем «часики».
         try:
             await call.answer("")
         except Exception:
