@@ -123,22 +123,27 @@ class BotRunner:
         await self.stop()
 
         # Pre-check: если SOCKS5 настроен — проверим, что он вообще ходит до
-        # api.telegram.org. Без этого polling падает в бесконечном цикле без
-        # понятного сообщения. Результат выводим в лог и всё равно двигаемся
-        # вперёд — polling сам перезапустится по watchdog’у.
+        # Telegram. Результат выводим в лог и всё равно двигаемся вперёд —
+        # polling сам перезапустится по watchdog’у. Если pre-check упал по
+        # сети/таймауту — это некритично (часто прокси живой, просто первый
+        # TLS-handshake медленный), поэтому логаем в INFO, а не WARNING.
         try:
             from kitsune.rkn_bypass import (
                 get_socks_proxy_url,
                 test_socks_proxy,
             )
             if get_socks_proxy_url():
-                ok, msg = await test_socks_proxy(timeout=8.0)
+                ok, msg = await test_socks_proxy(timeout=15.0)
                 if ok:
                     logger.info("BotRunner: SOCKS5 pre-check OK — %s", msg)
                 else:
-                    logger.warning(
-                        "BotRunner: SOCKS5 pre-check FAILED — %s. "
-                        "polling всё равно будет запущен, но api.telegram.org может быть недоступен.",
+                    _soft = ("timeout", "reset", "refused", "unreachable",
+                             "closed", "eof")
+                    _level = (logger.info if any(k in msg.lower() for k in _soft)
+                              else logger.warning)
+                    _level(
+                        "BotRunner: SOCKS5 pre-check soft-fail — %s. "
+                        "polling всё равно будет запущен.",
                         msg,
                     )
         except Exception as _pre_exc:

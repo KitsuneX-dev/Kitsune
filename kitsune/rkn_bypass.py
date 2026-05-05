@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 import ssl
@@ -285,11 +286,32 @@ def get_aiohttp_connector_with_proxy():
     return aiohttp.TCPConnector(ssl=ssl_ctx)
 
 
-async def test_socks_proxy(timeout: float = 8.0) -> tuple[bool, str]:
+def _fmt_exc(exc: BaseException, timeout: float | None = None) -> str:
+    """Форматирует исключение для лога — у asyncio.TimeoutError str() пустой."""
+    name = type(exc).__name__
+    msg = str(exc).strip(". ")
+    if not msg:
+        if isinstance(exc, asyncio.TimeoutError) and timeout is not None:
+            msg = f"timeout {timeout:.1f}s"
+        else:
+            msg = "no message"
+    return f"{name}: {msg}"
+
+
+async def test_socks_proxy(timeout: float = 15.0) -> tuple[bool, str]:
     """
-    Проверяет, что SOCKS5 из config.toml действительно ходит до api.telegram.org.
+    Проверяет, что SOCKS5 из config.toml действительно ходит до Telegram.
+
+    Двухступенчатая проверка:
+      1) лёгкий TCP-CONNECT через SOCKS5 до 149.154.167.220:443 (Telegram DC4) —
+         быстро отсекает мёртвый/неавторизованный прокси.
+      2) если TCP ОК — пробуем HTTPS до api.telegram.org для финальной
+         проверки TLS через прокси.
+
     Возвращает (ok, message). Используется при старте и командой .testsocks.
     """
+    import asyncio as _asyncio
+
     proxy_url = _build_socks_url_from_cfg()
     if not proxy_url:
         return False, "SOCKS5 не настроен (.setsocks <host> <port>)."
@@ -299,6 +321,26 @@ async def test_socks_proxy(timeout: float = 8.0) -> tuple[bool, str]:
             "aiohttp_socks не установлен. Установи: "
             "pip install 'aiohttp-socks>=0.9.0'"
         )
+
+    # Этап 1: TCP-CONNECT через SOCKS5 до Telegram DC.
+    try:
+        from python_socks.async_.asyncio import Proxy as _PSProxy  # type: ignore
+        proxy = _PSProxy.from_url(proxy_url)
+        sock = await _asyncio.wait_for(
+            proxy.connect(dest_host="149.154.167.220", dest_port=443),
+            timeout=timeout,
+        )
+        try:
+            sock.close()
+        except Exception:
+            pass
+    except ImportError:
+        # python_socks нет — пропускаем этап 1, идём сразу на HTTPS.
+        pass
+    except Exception as exc:
+        return False, f"{_fmt_exc(exc, timeout)} (TCP via SOCKS5 → 149.154.167.220:443)"
+
+    # Этап 2: HTTPS до api.telegram.org через тот же SOCKS5.
     import aiohttp
     try:
         connector = cls.from_url(proxy_url, ssl=make_ssl_ctx_no_verify())
@@ -312,7 +354,7 @@ async def test_socks_proxy(timeout: float = 8.0) -> tuple[bool, str]:
                 # TCP+TLS отработал через прокси.
                 return True, f"SOCKS5 OK (HTTP {resp.status}) → {proxy_url}"
     except Exception as exc:
-        return False, f"{type(exc).__name__}: {exc}"
+        return False, f"{_fmt_exc(exc, timeout)} (HTTPS via SOCKS5 → api.telegram.org)"
 
 
 def get_aiogram_session(timeout: int = 30):
