@@ -106,14 +106,18 @@ async def _run_asset_setup(client, db) -> None:
     Если все аватарки уже стоят — выполняется мгновенно.
     """
     import asyncio as _asyncio
+    # Быстрый выход — всё уже было установлено раньше,
+    # не логируем вообще ничего в консоль.
+    if db.get("kitsune.assets", "setup_done", False):
+        return
     await _asyncio.sleep(5)  # ждём полную готовность бота
     try:
         from ...assets import setup_all_avatars
-        logger.info("BotRunner: auto asset setup starting...")
+        logger.debug("BotRunner: auto asset setup starting...")
         await setup_all_avatars(client, db)
-        logger.info("BotRunner: auto asset setup done")
+        logger.debug("BotRunner: auto asset setup done")
     except Exception as _e:
-        logger.warning("BotRunner: asset setup error: %s", _e, exc_info=True)
+        logger.debug("BotRunner: asset setup error: %s", _e, exc_info=True)
 
 
 class BotRunner:
