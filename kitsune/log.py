@@ -407,10 +407,6 @@ class _NetworkNoiseFilter(logging.Filter):
         return True
 
 class _ConsoleStartupFilter(logging.Filter):
-    """
-    Подавляет в консоли INFO-сообщения о запуске внутренних служб (web/log),
-    которые засоряют вывод. Они по-прежнему пишутся в файл лога.
-    """
     _SUPPRESS = (
         "WebCore: listening on",
         "log: TG logging active",
@@ -442,7 +438,6 @@ rotating_handler.setFormatter(_main_formatter)
 _tg_channel_handler: TelegramChannelHandler | None = None
 
 async def _get_aiogram_bot(client: typing.Any) -> typing.Any:
-    """Ждёт запуска aiogram-бота и возвращает его (или None). Таймаут — 20 секунд."""
     for _ in range(100):
         try:
             loader = getattr(client, "_kitsune_loader", None)
@@ -456,7 +451,6 @@ async def _get_aiogram_bot(client: typing.Any) -> typing.Any:
     return None
 
 async def _ensure_bot_in_group(client: typing.Any, group_id: int) -> bool:
-    """Ждёт bot_username до 90 секунд, затем добавляет бота в группу/канал Kitsune-logs."""
     log = logging.getLogger(__name__)
 
                                                   
@@ -515,7 +509,6 @@ async def _ensure_bot_in_group(client: typing.Any, group_id: int) -> bool:
         return False
 
 def _to_bot_api_id(telethon_id: int) -> int:
-    """Конвертирует Telethon channel/megagroup ID в Bot API формат (-100xxxxxxx)."""
     peer_id = abs(telethon_id)
                                                                            
     if peer_id >= 1_000_000_000_000:
@@ -557,13 +550,6 @@ async def setup_tg_logging(client: typing.Any) -> None:
         logging.getLogger(__name__).exception("log: failed to set up TG channel logging")
 
 async def _setup_bot_and_banner(client: typing.Any, group_id: int) -> None:
-    """Отправляет стартовый баннер.
-
-    Стратегия:
-    - Через 5 секунд после старта гарантированно отправляем баннер (через Hydrogram).
-    - Параллельно ждём бота до 10 секунд — если успел, отправим через него (с GIF).
-    - Кто первый — тот и отправляет, дубля нет.
-    """
     _sent = [False]
 
     async def _try_via_bot() -> None:
@@ -593,7 +579,6 @@ async def _send_startup_banner_via_bot(
     bot: typing.Any = None,
     bot_added: bool = False,
 ) -> None:
-    """Отправляет стартовый баннер через бота (не от имени пользователя)."""
     import contextlib
     import os
 
@@ -687,7 +672,6 @@ async def _send_startup_banner_via_bot(
         log.exception("log: не удалось отправить стартовый баннер")
 
 async def _send_startup_banner(client: typing.Any, channel_id: int) -> None:
-    """Устаревший метод — перенаправляет на новый."""
     await _send_startup_banner_via_bot(client, channel_id)
 
 def init() -> None:

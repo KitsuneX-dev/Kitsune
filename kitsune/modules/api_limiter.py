@@ -111,7 +111,6 @@ class APILimiterModule(KitsuneModule):
         self._apply_telethon_flood_threshold()
 
     def _apply_hydro_limits(self) -> None:
-        """Применяет настройки rate limiter к HydrogramBridge."""
         try:
             bridge = getattr(self.client, "_kitsune_hydro_bridge", None)
             if bridge is None:
@@ -134,7 +133,6 @@ class APILimiterModule(KitsuneModule):
             logger.warning("APILimiter: could not apply Hydrogram limits — %s", exc)
 
     def _apply_telethon_flood_threshold(self) -> None:
-        """Применяет flood_sleep_threshold к Telethon клиенту."""
         try:
             threshold = int(self.config["flood_sleep_threshold"])
             self.client.flood_sleep_threshold = threshold

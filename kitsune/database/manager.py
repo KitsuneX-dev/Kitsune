@@ -78,7 +78,6 @@ class SQLiteBackend:
         return await loop.run_in_executor(None, self._save_sync, data)
 
     def upsert_sync(self, rows: list[tuple[str, str, str]], deleted: list[tuple[str, str]]) -> bool:
-        """Записывает только изменённые ключи, удаляет только удалённые — без полного DELETE."""
         try:
             conn = self._get_conn()
             if rows:
@@ -99,7 +98,6 @@ class SQLiteBackend:
             return False
 
     def _save_sync(self, data: dict[str, dict[str, JSONValue]]) -> bool:
-        """Полный пересинк — используется только для force_save."""
         try:
             conn = self._get_conn()
             rows = [
@@ -328,7 +326,6 @@ class DatabaseManager:
         return msgs[0] if msgs else None
 
     def export_data(self) -> dict:
-        """Возвращает безопасную копию всей БД для резервного копирования."""
         return {owner: dict(sub) for owner, sub in self._data.items()}
 
     def _maybe_snapshot(self) -> None:

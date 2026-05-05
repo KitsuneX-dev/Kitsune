@@ -1,4 +1,3 @@
-"""Smoke-тесты для kitsune/crypto.py"""
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -31,7 +30,6 @@ def test_encrypt_has_magic():
     assert enc.startswith(c.MAGIC)
 
 def test_different_ciphertexts():
-    """AES-GCM должен давать разный шифртекст при каждом вызове (случайный nonce)."""
     c = _crypto()
     data = b"same plaintext"
     enc1 = c.encrypt(data)
@@ -45,7 +43,6 @@ def test_decrypt_wrong_data():
         c.decrypt(b"not a valid backup")
 
 def test_xor_backward_compat(monkeypatch, tmp_path):
-    """XOR-бэкапы старых версий должны расшифровываться."""
     import kitsune.crypto as crypto
     monkeypatch.setattr(crypto, "KEY_PATH", tmp_path / "test.key")
     data = b"old xor backup data"

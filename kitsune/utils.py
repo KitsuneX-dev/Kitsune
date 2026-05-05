@@ -248,11 +248,6 @@ async def asset_channel(
         raise RuntimeError(f"Could not create asset channel {title!r}: {exc}") from exc
 
 async def ensure_kitsune_folder(client: typing.Any, db: typing.Any) -> None:
-    """
-    Создаёт папку '🦊 Kitsune' в Telegram и добавляет туда
-    все служебные группы: KitsuneBackup, Kitsune-logs, kitsune-assets.
-    Если папка уже есть — только обновляет её состав.
-    """
     import contextlib
     try:
         from telethon.tl.functions.messages import (

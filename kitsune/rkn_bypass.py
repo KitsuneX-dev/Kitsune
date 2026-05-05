@@ -8,10 +8,6 @@ import typing
 logger = logging.getLogger(__name__)
 
 def _patch_telethon_mtproxy() -> None:
-    """
-    Патч для совместимости Telethon MTProxy с Python 3.13.
-    В Python 3.13 asyncio.readexactly(0) бросает ValueError вместо b''.
-    """
     import sys
     if sys.version_info < (3, 13):
         return
@@ -39,16 +35,6 @@ def _patch_telethon_mtproxy() -> None:
 _patch_telethon_mtproxy()
 
 def normalize_secret(secret: str) -> str:
-    """
-    Нормализует секрет MTProto-прокси для совместимости с Telethon.
-
-    Принимает:
-    - hex чётной длины:      a1b2c3... (32–48 символов)
-    - base64url без padding: секрет из tg://proxy?...&secret=XXXX ссылки
-
-    ⚠️  Hex нечётной длины исправить нельзя без искажения ключа.
-        Используй секрет из tg://proxy ссылки («Поделиться» в настройках прокси).
-    """
     import base64
 
     s = secret.strip()
@@ -159,7 +145,6 @@ async def test_connection(
         return False
 
 async def _fetch_from_tg_channel(url: str) -> list[tuple[str, int, str]]:
-    """Парсит tg://proxy?... ссылки с публичной страницы Telegram-канала."""
     try:
         import aiohttp
         ssl_ctx = make_ssl_ctx_no_verify()
@@ -184,7 +169,6 @@ async def _fetch_from_tg_channel(url: str) -> list[tuple[str, int, str]]:
         return []
 
 async def _fetch_from_mtpro_xyz() -> list[tuple[str, int, str]]:
-    """JSON-список прокси с mtpro.xyz."""
     try:
         import aiohttp
         ssl_ctx = make_ssl_ctx_no_verify()
@@ -214,11 +198,6 @@ async def _fetch_from_mtpro_xyz() -> list[tuple[str, int, str]]:
         return []
 
 async def find_proxy_from_web() -> list[tuple[str, int, str]]:
-    """
-    Активно ищет MTProto-прокси в интернете:
-    сначала из Telegram-каналов, потом из JSON-API.
-    Возвращает все найденные (без проверки доступности).
-    """
     import asyncio
 
     tasks = [_fetch_from_tg_channel(u) for u in _TG_PROXY_CHANNELS]
@@ -242,10 +221,6 @@ async def find_proxy_from_web() -> list[tuple[str, int, str]]:
 async def find_working_proxy(
     extra_proxies: list[tuple[str, int, str]] | None = None,
 ) -> tuple[str, int, str] | None:
-    """
-    Ищет первый рабочий прокси.
-    Порядок: встроенные → extra_proxies (из веб, если переданы).
-    """
     candidates = list(_PUBLIC_PROXIES)
     if extra_proxies:
         seen = {(h, p) for h, p, _ in candidates}

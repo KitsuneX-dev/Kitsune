@@ -68,12 +68,10 @@ class SettingsModule(KitsuneModule):
 
     @command("setprefix", required=OWNER)
     async def setprefix_cmd(self, event) -> None:
-        """Алиас для команды prefix — обратная совместимость."""
         await self.prefix_cmd(event)
 
     @command("assetcheck", required=OWNER)
     async def assetcheck_cmd(self, event) -> None:
-        """Диагностика аватарок — показывает что найдено и что установлено."""
         try:
             from ..assets import diagnose, setup_all_avatars
             report = await diagnose(self.client, self.db)

@@ -1,10 +1,3 @@
-"""
-Точка входа: python3 -m kitsune
-
-Фикс #2: если telethon не найден в текущем окружении (пользователь запустил
-системным python3 вместо venv), автоматически перезапускаемся через
-<INSTALL_DIR>/venv/bin/python3, где зависимости уже установлены.
-"""
 from __future__ import annotations
 
 import os
@@ -12,7 +5,6 @@ import sys
 from pathlib import Path
 
 def _auto_venv() -> None:
-    """Перезапускает процесс через venv-python, если telethon недоступен."""
     try:
         import telethon
         return

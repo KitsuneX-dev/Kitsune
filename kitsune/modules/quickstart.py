@@ -19,11 +19,6 @@ _KITSUNE_CHATS = [
 ]
 
 def _make_filter_title(text: str):
-    """
-    В новых версиях Telethon (schema layer 180+) DialogFilter.title
-    должен быть TextWithEntities, а не str.
-    Пробуем импортировать — если нет, возвращаем строку (старые версии).
-    """
     try:
         from telethon.tl.types import TextWithEntities
         return TextWithEntities(text=text, entities=[])
@@ -31,7 +26,6 @@ def _make_filter_title(text: str):
         return text
 
 def _peer_id(peer) -> int | None:
-    """Возвращает числовой id пира вне зависимости от его типа."""
     return (
         getattr(peer, "channel_id", None)
         or getattr(peer, "chat_id", None)
@@ -76,12 +70,6 @@ class QuickstartModule(KitsuneModule):
                                                                         
 
     async def _sync_kitsune_folder(self) -> dict:
-        """
-        1. Сканирует все диалоги один раз.
-        2. Для каждого чата из _KITSUNE_CHATS: находит существующий или создаёт.
-        3. Ищет папку «Kitsune»: если есть — добавляет недостающие, если нет — создаёт.
-        4. Добавляет самого себя в папку.
-        """
         import asyncio as _asyncio
         from telethon.tl.functions.messages import (
             GetDialogFiltersRequest,
@@ -218,7 +206,6 @@ class QuickstartModule(KitsuneModule):
 
     @staticmethod
     def _find_in_dialogs(dialogs, title: str, chat_type: str):
-        """Ищет диалог по названию и типу (channel / group)."""
         for d in dialogs:
             if d.title != title:
                 continue
@@ -230,7 +217,6 @@ class QuickstartModule(KitsuneModule):
         return None
 
     async def _create_chat(self, cfg: dict):
-        """Создаёт канал или мегагруппу по описанию из _KITSUNE_CHATS."""
         import asyncio as _asyncio
         from telethon.tl.functions.channels import CreateChannelRequest
         from telethon.errors import FloodWaitError
@@ -362,7 +348,6 @@ class QuickstartModule(KitsuneModule):
                                                                     
 
 def _filter_title_str(f) -> str:
-    """Достаёт строку из title вне зависимости от того str это или TextWithEntities."""
     t = getattr(f, "title", "")
     if isinstance(t, str):
         return t
