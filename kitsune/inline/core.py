@@ -51,10 +51,19 @@ class InlineManager:
             return
         if self._started:
             return
-        self._bot    = Bot(
-            token=self._token,
-            default=DefaultBotProperties(parse_mode=ParseMode.HTML),
-        )
+        # Используем единую фабрику ботов — она на ходу подхватывает SOCKS5 из
+        # config.toml. Без этого inline-бот ходил напрямую на api.telegram.org
+        # и падал под РКН с ClientConnectorError, из-за чего ломался backup
+        # (send_document / edit_message_reply_markup).
+        try:
+            from ..rkn_bypass import make_aiogram_bot
+            self._bot = make_aiogram_bot(self._token, parse_mode="HTML")
+        except Exception as _exc:
+            logger.debug("InlineManager: make_aiogram_bot fallback (%s)", _exc)
+            self._bot = Bot(
+                token=self._token,
+                default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+            )
         self._dp     = Dispatcher()
         self._router = Router()
         self._dp.include_router(self._router)

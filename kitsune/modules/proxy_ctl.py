@@ -116,12 +116,13 @@ class ProxyCtl(KitsuneModule):
             await event.reply(
                 "❌ Использование:\n"
                 "<code>.setsocks &lt;host&gt; &lt;port&gt; [user] [pass]</code>\n\n"
-                "Пример без авторизации:\n"
-                "<code>.setsocks germany.tgproxy11.online 443</code>\n\n"
+                "Пример без авторизации (типичный порт SOCKS5 — 1080):\n"
+                "<code>.setsocks germany.tgproxy11.online 1080</code>\n\n"
                 "Пример с авторизацией:\n"
                 "<code>.setsocks germany.tgproxy11.online 1080 myuser mypass</code>\n\n"
-                "<i>Используется aiogram-ботом (notifier) для api.telegram.org. "
-                "Секрет MTPROTO здесь НЕ нужен.</i>",
+                "<i>Используется aiogram-ботом (notifier + inline) для api.telegram.org. "
+                "Секрет MTPROTO здесь НЕ нужен — это обычный SOCKS5.</i>\n\n"
+                "🔎 Проверить после настройки: <code>.testsocks</code>",
                 parse_mode="html",
             )
             return
@@ -129,12 +130,26 @@ class ProxyCtl(KitsuneModule):
         host, port = args[0], args[1]
         try:
             port = int(port)
+            if not (0 < port < 65536):
+                raise ValueError
         except ValueError:
-            await event.reply("❌ Порт должен быть числом.", parse_mode="html")
+            await event.reply(
+                "❌ Порт должен быть числом 1–65535. "
+                "Для SOCKS5 типично <code>1080</code>.",
+                parse_mode="html",
+            )
             return
 
         user = args[2] if len(args) > 2 else None
         pwd  = args[3] if len(args) > 3 else None
+
+        if (user and not pwd) or (pwd and not user):
+            await event.reply(
+                "⚠️ Для SOCKS5 авторизации нужны <b>ОБА</b> аргумента — user и pass.\n"
+                "Если прокси без авторизации — не указывай ни одного.",
+                parse_mode="html",
+            )
+            return
 
         cfg = _load_cfg()
         block = {
@@ -154,7 +169,8 @@ class ProxyCtl(KitsuneModule):
             f"• host: <code>{_esc(host)}</code>\n"
             f"• port: <code>{port}</code>\n"
             f"• auth: <code>{_esc(auth_str)}</code>\n\n"
-            "🔁 Перезапусти Kitsune, чтобы aiogram подхватил прокси.\n"
+            "🔎 Проверь сейчас: <code>.testsocks</code>\n"
+            "🔁 После этого перезапусти Kitsune, чтобы aiogram подхватил прокси.\n"
             "ℹ️ Если ещё не установлен — запусти:\n"
             "<code>pip install 'aiohttp-socks&gt;=0.9.0'</code>",
             parse_mode="html",
@@ -175,6 +191,32 @@ class ProxyCtl(KitsuneModule):
             await event.reply("ℹ️ SOCKS5-прокси не был задан.", parse_mode="html")
 
     # ── Информация ────────────────────────────────────────────────────
+
+    @command("testsocks", required=OWNER)
+    async def testsocks_cmd(self, event) -> None:
+        """.testsocks — проверить, что SOCKS5 доходит до api.telegram.org."""
+        m = await event.reply("⏳ Проверяю SOCKS5 → api.telegram.org…", parse_mode="html")
+        try:
+            from ..rkn_bypass import test_socks_proxy
+            ok, msg = await test_socks_proxy(timeout=10.0)
+        except Exception as exc:
+            await m.edit(f"❌ Ошибка проверки: <code>{_esc(exc)}</code>", parse_mode="html")
+            return
+
+        if ok:
+            await m.edit(
+                "✅ <b>SOCKS5 работает</b>\n"
+                f"<code>{_esc(msg)}</code>\n\n"
+                "aiogram-бот (notifier + inline) пойдёт через этот прокси.",
+                parse_mode="html",
+            )
+        else:
+            await m.edit(
+                "❌ <b>SOCKS5 НЕ работает</b>\n"
+                f"<code>{_esc(msg)}</code>\n\n"
+                "Проверь host/port командой <code>.proxyinfo</code> и переставь через аргументы <code>.setsocks</code>.",
+                parse_mode="html",
+            )
 
     @command("proxyinfo", required=OWNER, aliases=["proxystatus"])
     async def proxyinfo_cmd(self, event) -> None:

@@ -171,8 +171,13 @@ class UpdateChecker:
     async def _ensure_bot_in_group(self, chat_id: int, token: str) -> None:
         try:
             import aiohttp
-                                       
-            async with aiohttp.ClientSession() as sess:
+            # Без SOCKS5-коннектора эти запросы падают под РКН
+            # (Cannot connect to host api.telegram.org). Берём коннектор
+            # из rkn_bypass — он подхватывает [proxy_socks] из config.toml.
+            from kitsune.rkn_bypass import get_aiohttp_connector_with_proxy
+            async with aiohttp.ClientSession(
+                connector=get_aiohttp_connector_with_proxy(),
+            ) as sess:
                 async with sess.get(
                     f"https://api.telegram.org/bot{token}/getMe",
                     timeout=aiohttp.ClientTimeout(total=8),
@@ -183,8 +188,9 @@ class UpdateChecker:
             bot_username = data["result"]["username"]
             bot_id       = data["result"]["id"]
 
-                                            
-            async with aiohttp.ClientSession() as sess:
+            async with aiohttp.ClientSession(
+                connector=get_aiohttp_connector_with_proxy(),
+            ) as sess:
                 async with sess.get(
                     f"https://api.telegram.org/bot{token}/getChatMember",
                     params={"chat_id": chat_id, "user_id": bot_id},

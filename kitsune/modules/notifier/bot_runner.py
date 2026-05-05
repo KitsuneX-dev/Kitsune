@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import ssl
 import typing
 
 logger = logging.getLogger(__name__)
@@ -11,89 +10,29 @@ _DB_KEY = "kitsune.notifier"
 
 
 def _load_socks_proxy_url() -> str | None:
-    """
-    Читает SOCKS5-прокси из config.toml (секция [proxy_socks]) и формирует
-    URL вида ``socks5://user:pass@host:port`` (или без auth — ``socks5://host:port``).
-
-    Возвращает None, если SOCKS5 не настроен — тогда aiogram пойдёт напрямую
-    через aiohttp (что в РФ под РКН не работает, поэтому пользователю стоит
-    настроить SOCKS5 командой ``.setsocks <host> <port>``).
-
-    aiogram сам по себе MTPROXY НЕ умеет — поэтому мы для aiogram используем
-    отдельный SOCKS5, а для Telethon — отдельный MTPROTO. Так и работают
-    оба клиента одновременно.
-    """
+    """Обёртка над rkn_bypass.get_socks_proxy_url() — оставлена для обратной
+    совместимости: раньше логика жила здесь, теперь — в единой точке."""
     try:
-        from kitsune.main import _load_raw_config
-        cfg = _load_raw_config() or {}
+        from kitsune.rkn_bypass import get_socks_proxy_url
+        return get_socks_proxy_url()
     except Exception:
         return None
 
-    sp = cfg.get("proxy_socks") or {}
-    if not isinstance(sp, dict):
-        return None
-    host = sp.get("host")
-    port = sp.get("port")
-    if not host or not port:
-        return None
-
-    user = sp.get("username") or sp.get("user")
-    pwd  = sp.get("password") or sp.get("pass")
-    auth = ""
-    if user and pwd:
-        auth = f"{user}:{pwd}@"
-
-    scheme = str(sp.get("type", "socks5")).lower()
-    if scheme not in ("socks5", "socks4", "http", "https"):
-        scheme = "socks5"
-
-    return f"{scheme}://{auth}{host}:{int(port)}"
-
 
 def _make_bot(token: str) -> typing.Any:
-    from aiogram import Bot
-    from aiogram.client.default import DefaultBotProperties
-    from aiogram.enums import ParseMode
-    import aiohttp
-    from aiogram.client.session.aiohttp import AiohttpSession
+    """
+    Создаёт aiogram.Bot через единую фабрику rkn_bypass.make_aiogram_bot.
+    Фабрика сама:
+      • читает [proxy_socks] из config.toml;
+      • поднимает SOCKS5-коннектор через aiohttp_socks (если установлен);
+      • выключает SSL-verify (под РКН бывает MITM от провайдера);
+      • fallback на обычный TCPConnector, если SOCKS5 не настроен.
 
-    ssl_ctx = ssl.create_default_context()
-    ssl_ctx.check_hostname = False
-    ssl_ctx.verify_mode = ssl.CERT_NONE
-
-    proxy_url = _load_socks_proxy_url()
-
-    # Если SOCKS5 настроен — поднимаем коннектор через aiohttp_socks,
-    # иначе обычный TCPConnector. Импорт делаем лениво — пакет ставится
-    # только при необходимости.
-    socks_connector_cls = None
-    if proxy_url:
-        try:
-            from aiohttp_socks import ProxyConnector  # type: ignore
-            socks_connector_cls = ProxyConnector
-        except ImportError:
-            logger.warning(
-                "BotRunner: SOCKS5 настроен (%s), но aiohttp_socks не установлен. "
-                "Установи: pip install 'aiohttp-socks>=0.9.0' — иначе aiogram "
-                "пойдёт напрямую и упадёт на api.telegram.org.",
-                proxy_url,
-            )
-
-    class _NoSSLSession(AiohttpSession):
-        async def create_connector(self, _bot=None):
-            if socks_connector_cls is not None and proxy_url:
-                connector = socks_connector_cls.from_url(proxy_url, ssl=ssl_ctx)
-                logger.info("BotRunner: aiogram использует SOCKS5 → %s", proxy_url)
-            else:
-                connector = aiohttp.TCPConnector(ssl=ssl_ctx)
-            self._should_reset_connector = False
-            return connector
-
-    return Bot(
-        token=str(token),
-        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
-        session=_NoSSLSession(timeout=60),
-    )
+    aiogram MTPROXY НЕ умеет — для api.telegram.org нужен HTTP/SOCKS5.
+    Для Telethon этот бот не используется, там отдельный [proxy] на MTPROTO.
+    """
+    from kitsune.rkn_bypass import make_aiogram_bot
+    return make_aiogram_bot(str(token), parse_mode="HTML", timeout=60)
 
 
 def _get_platform() -> str:
@@ -182,6 +121,28 @@ class BotRunner:
             return
 
         await self.stop()
+
+        # Pre-check: если SOCKS5 настроен — проверим, что он вообще ходит до
+        # api.telegram.org. Без этого polling падает в бесконечном цикле без
+        # понятного сообщения. Результат выводим в лог и всё равно двигаемся
+        # вперёд — polling сам перезапустится по watchdog’у.
+        try:
+            from kitsune.rkn_bypass import (
+                get_socks_proxy_url,
+                test_socks_proxy,
+            )
+            if get_socks_proxy_url():
+                ok, msg = await test_socks_proxy(timeout=8.0)
+                if ok:
+                    logger.info("BotRunner: SOCKS5 pre-check OK — %s", msg)
+                else:
+                    logger.warning(
+                        "BotRunner: SOCKS5 pre-check FAILED — %s. "
+                        "polling всё равно будет запущен, но api.telegram.org может быть недоступен.",
+                        msg,
+                    )
+        except Exception as _pre_exc:
+            logger.debug("BotRunner: SOCKS5 pre-check skipped — %s", _pre_exc)
 
         try:
             self.bot = _make_bot(token)

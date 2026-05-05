@@ -115,7 +115,12 @@ class NotifierModule(KitsuneModule):
             m = await event.reply("🔍 Проверяю токен...", parse_mode="html")
             try:
                 import aiohttp
-                async with aiohttp.ClientSession() as sess:
+                # Через SOCKS5 из config.toml — иначе в РФ под РКН запрос
+                # к api.telegram.org падает ClientConnectorError.
+                from ...rkn_bypass import get_aiohttp_connector_with_proxy
+                async with aiohttp.ClientSession(
+                    connector=get_aiohttp_connector_with_proxy(),
+                ) as sess:
                     async with sess.get(
                         f"https://api.telegram.org/bot{token}/getMe",
                         timeout=aiohttp.ClientTimeout(total=10),
