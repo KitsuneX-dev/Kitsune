@@ -326,14 +326,15 @@ class SetupServer:
                 elif ptype == "MTPROTO":
                     secret = proxy_cfg.get("secret", "00000000000000000000000000000000")
                     try:
-                        from ..rkn_bypass import normalize_secret
+                        from ..rkn_bypass import get_mtproto_connection_class, normalize_secret
                         secret = normalize_secret(str(secret))
+                        conn_cls = get_mtproto_connection_class(secret)
                     except Exception:
-                        pass
+                        conn_cls = None
                     proxy = (str(proxy_cfg["host"]), int(proxy_cfg["port"]), secret)
-                    from telethon.network import connection as tl_conn
-                    extra["connection"] = tl_conn.ConnectionTcpMTProxyRandomizedIntermediate
-                    logger.info("setup: using MTProto proxy → %s:%s", proxy_cfg["host"], proxy_cfg["port"])
+                    if conn_cls is not None:
+                        extra["connection"] = conn_cls
+                    logger.info("setup: using MTProto proxy → %s:%s (%s)", proxy_cfg["host"], proxy_cfg["port"], (conn_cls.__name__ if conn_cls else "auto"))
                 else:
                     try:
                         import socks as _socks
