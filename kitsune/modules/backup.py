@@ -106,10 +106,53 @@ async def _ensure_kitsune_folder(client, *peer_ids: int) -> None:
         logger.debug("_ensure_kitsune_folder: создана папка Kitsune с %d чатами", len(new_peers))
 
 
+def _to_bot_chat_id(chat_id) -> int | None:
+    """
+    Нормализует chat_id к формату, который понимает Telegram Bot API
+    (aiogram / pyrogram-bot).
+
+    Правила:
+      • -100XXXXXXXXXX  — уже супергруппа/канал в bot-формате → как есть.
+      • отрицательное «короткое» (-XXXXXXXXX) — обычный chat (legacy) → как есть.
+      • положительное < 1_000_000_000 — user_id → как есть.
+      • положительное «большое» (Telethon raw channel_id, обычно 10+ цифр)
+        → дописываем префикс -100.
+
+    Возвращает int либо None, если нормализовать невозможно.
+    """
+    if chat_id is None:
+        return None
+    try:
+        cid = int(chat_id)
+    except (TypeError, ValueError):
+        return None
+
+    # Уже в bot-формате
+    if cid < 0:
+        return cid
+
+    s = str(cid)
+    # Уже содержит префикс 100 в положительном виде (редкий кейс)
+    if s.startswith("100") and len(s) >= 13:
+        return -cid
+
+    # Эвристика: всё, что > 1_000_000_000 и не похоже на user_id, считаем
+    # «голым» channel_id из Telethon → дописываем -100.
+    # Современные user_id тоже могут перевалить за 1e9, поэтому ориентируемся
+    # на типичную длину channel_id (обычно 10 цифр и больше).
+    if cid > 1_000_000_000:
+        return int(f"-100{cid}")
+
+    # user_id — отдаём как есть
+    return cid
+
+
 def _extract_msg_ids(sent) -> tuple[int | None, int | None]:
     """
     Унифицировано достаёт (chat_id, msg_id) из объекта Message,
     возвращённого Hydrogram или Telethon.
+
+    chat_id всегда возвращается в формате Bot API (-100… для каналов).
     """
     if sent is None:
         return None, None
@@ -136,6 +179,8 @@ def _extract_msg_ids(sent) -> tuple[int | None, int | None]:
             if chat_id and getattr(peer, "channel_id", None):
                 chat_id = int(f"-100{chat_id}")
 
+    # Финальная нормализация (на случай если пришло «голое» положительное)
+    chat_id = _to_bot_chat_id(chat_id)
     return chat_id, msg_id
 
 
@@ -368,11 +413,27 @@ class BackupModule(KitsuneModule):
         chat_id = self.db.get(_DB_OWNER, "group_id", None)
         if chat_id:
             try:
-                await asyncio.wait_for(
+                # get_entity Telethon принимает любой формат — bot и raw.
+                entity = await asyncio.wait_for(
                     self.client.get_entity(int(chat_id)), timeout=20
                 )
-                await self._ensure_bot_in_channel(int(chat_id))
-                return int(chat_id)
+                # Нормализуем к bot-формату (-100…) — это и есть тот ID,
+                # который потом уйдёт в aiogram-бота.
+                normalized = _to_bot_chat_id(int(chat_id))
+                # Если в БД лежит «голый» raw-id, перезаписываем актуальным,
+                # иначе bot.send_document будет падать с chat not found.
+                if normalized is not None and normalized != int(chat_id):
+                    try:
+                        await self.db.set(_DB_OWNER, "group_id", int(normalized))
+                        logger.info(
+                            "backup: group_id мигрирован %s → %s",
+                            chat_id, normalized,
+                        )
+                    except Exception:
+                        pass
+                final_id = int(normalized) if normalized is not None else int(chat_id)
+                await self._ensure_bot_in_channel(final_id)
+                return final_id
             except Exception:
                 logger.debug("backup: сохранённый group_id %s недоступен — ищем заново", chat_id)
 
@@ -552,10 +613,18 @@ class BackupModule(KitsuneModule):
         cb_id = self._register_restore_cb(0, 0, kind)
         markup = self._build_restore_markup(cb_id)
 
+        # Нормализуем dest к bot-формату: aiogram падает с
+        # «chat not found», если ему передать «голый» raw-id канала.
+        bot_dest = _to_bot_chat_id(dest)
+        if bot_dest is None:
+            logger.warning("backup: невалидный dest=%s — кнопка не будет добавлена", dest)
+            inline._callbacks.pop(cb_id, None)
+            return False
+
         try:
             input_file = BufferedInputFile(data, filename=fname)
             sent = await bot.send_document(
-                chat_id=dest,
+                chat_id=bot_dest,
                 document=input_file,
                 caption=caption,
                 parse_mode="HTML",
@@ -564,15 +633,15 @@ class BackupModule(KitsuneModule):
         except Exception as exc:
             # Бот не в чате / нет прав / другая ошибка → fallback (с видимым логом).
             logger.warning(
-                "backup: bot.send_document(chat=%s) упал: %s — пробую fallback",
-                dest, exc,
+                "backup: bot.send_document(chat=%s, normalized=%s) упал: %s — пробую fallback",
+                dest, bot_dest, exc,
             )
             inline._callbacks.pop(cb_id, None)
             return False
 
         # Обновляем args колбэка реальным chat_id / message_id
         try:
-            sent_chat_id = sent.chat.id
+            sent_chat_id = _to_bot_chat_id(sent.chat.id) or sent.chat.id
             sent_msg_id  = sent.message_id
             inline._callbacks[cb_id] = (
                 self._cb_restore,
@@ -610,23 +679,30 @@ class BackupModule(KitsuneModule):
             logger.warning("backup: не смог извлечь chat/msg id — кнопка не будет добавлена")
             return False
 
-        cb_id  = self._register_restore_cb(int(chat_id), int(msg_id), kind)
+        # _extract_msg_ids уже нормализует, но дублируем явно — на случай
+        # если объект пришёл из неожиданного источника.
+        bot_chat_id = _to_bot_chat_id(chat_id)
+        if bot_chat_id is None:
+            logger.warning("backup: chat_id=%s не нормализуется — кнопка пропущена", chat_id)
+            return False
+
+        cb_id  = self._register_restore_cb(int(bot_chat_id), int(msg_id), kind)
         markup = self._build_restore_markup(cb_id)
         try:
             await inline._bot.edit_message_reply_markup(
-                chat_id=int(chat_id),
+                chat_id=int(bot_chat_id),
                 message_id=int(msg_id),
                 reply_markup=markup,
             )
             logger.info(
                 "backup: кнопка «Восстановить» прикреплена к %s/%s (kind=%s)",
-                chat_id, msg_id, kind,
+                bot_chat_id, msg_id, kind,
             )
             return True
         except Exception as exc:
             logger.warning(
-                "backup: edit_message_reply_markup(chat=%s msg=%s) упал: %s",
-                chat_id, msg_id, exc,
+                "backup: edit_message_reply_markup(chat=%s raw=%s msg=%s) упал: %s",
+                bot_chat_id, chat_id, msg_id, exc,
             )
             inline._callbacks.pop(cb_id, None)
             return False
