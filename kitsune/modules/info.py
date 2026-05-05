@@ -43,7 +43,7 @@ class InfoModule(KitsuneModule):
             ),
             ConfigValue(
                 "banner_url",
-                default="https://github.com/hikariatama/assets/raw/master/hikka_banner.mp4",
+                default="https://cdn.jsdelivr.net/gh/KitsuneX-dev/Kitsune@main/banner.gif",
                 doc="Ссылка на баннер (видео/гифка). Используй прямую ссылку. Для GitHub: используй команду .cdn чтобы конвертировать ссылку в CDN.",
             ),
         )
