@@ -24,7 +24,9 @@ def _make_bot(token: str) -> typing.Any:
     Создаёт aiogram.Bot через единую фабрику rkn_bypass.make_aiogram_bot.
     Фабрика сама:
       • читает [proxy_socks] из config.toml;
-      • поднимает SOCKS5-коннектор через aiohttp_socks (если установлен);
+      • заранее тащит aiohttp_socks (если ещё не стоит — авто-pip);
+      • поднимает SOCKS5-коннектор с rdns=True (DNS через прокси, иначе
+        под РКН локальный резолв отдаёт мёртвые IP);
       • выключает SSL-verify (под РКН бывает MITM от провайдера);
       • fallback на обычный TCPConnector, если SOCKS5 не настроен.
 
@@ -122,17 +124,20 @@ class BotRunner:
 
         await self.stop()
 
-        # Pre-check: если SOCKS5 настроен — проверим, что он вообще ходит до
-        # Telegram. Результат выводим в лог и всё равно двигаемся вперёд —
-        # polling сам перезапустится по watchdog’у. Если pre-check упал по
-        # сети/таймауту — это некритично (часто прокси живой, просто первый
-        # TLS-handshake медленный), поэтому логаем в INFO, а не WARNING.
+        # Pre-check: если SOCKS5 настроен — проверим, что он реально ходит
+        # на api.telegram.org. Раньше pre-check бил по 149.154.167.220:443
+        # (DC4) — нормальные SOCKS5-провайдеры это блокируют, поэтому soft-fail
+        # был у ВСЕХ хороших прокси. Теперь используем универсальный
+        # test_socks_proxy(), который ломится на api.telegram.org через прокси.
+        # Если pre-check упал — это уже реальный сигнал, что прокси сломан.
         try:
             from kitsune.rkn_bypass import (
+                ensure_aiohttp_socks,
                 get_socks_proxy_url,
                 test_socks_proxy,
             )
             if get_socks_proxy_url():
+                ensure_aiohttp_socks()
                 ok, msg = await test_socks_proxy(timeout=15.0)
                 if ok:
                     logger.info("BotRunner: SOCKS5 pre-check OK — %s", msg)
@@ -297,14 +302,14 @@ class BotRunner:
 
     async def _on_update_cb(self, call) -> None:
         owner_id = self._db.get(_DB_KEY, "owner_id", None)
-                                                                              
+
         try:
             if call.from_user.id != owner_id:
                 await call.answer("🔒 Нет доступа.", show_alert=True)
                 return
             await call.answer()
         except Exception:
-            return                                        
+            return
         if call.data == "update_no":
             await self._db.delete("kitsune.updater", "pending_update")
             try:

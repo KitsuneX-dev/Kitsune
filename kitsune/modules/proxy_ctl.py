@@ -31,6 +31,7 @@ class ProxyCtl(KitsuneModule):
       • .setsocks <host> <port> [user] [pass]
                                            — задать SOCKS5 (aiogram, notifier-бот)
       • .delsocks                          — удалить SOCKS5
+      • .testsocks                         — проверить SOCKS5 → api.telegram.org
       • .proxyinfo                         — показать оба прокси
 
     Зачем два прокси:
@@ -43,7 +44,7 @@ class ProxyCtl(KitsuneModule):
     name        = "ProxyCtl"
     description = "Управление MTPROTO/SOCKS5 прокси (Telethon + aiogram)"
     author      = "Kitsune Team"
-    version     = "1.0"
+    version     = "1.1"
     icon        = "🛰"
     category    = "system"
 
@@ -140,6 +141,16 @@ class ProxyCtl(KitsuneModule):
             )
             return
 
+        # Предупреждение о нетипичном порте: порты вроде 10001/443 у
+        # большинства tg-прокси — это MTPROTO, а НЕ SOCKS5. Если так и есть —
+        # SOCKS5-handshake падает по timeout (как в логе у пользователя
+        # с 84.201.144.65:10001), потому что прокси-сервер ждёт MTPROTO-байты.
+        if port not in (1080, 1081, 1082, 1085, 9050, 9150) and (port >= 10000 or port == 443):
+            logger.warning(
+                "ProxyCtl: подозрительный порт SOCKS5 (%d) — возможно это MTPROTO",
+                port,
+            )
+
         user = args[2] if len(args) > 2 else None
         pwd  = args[3] if len(args) > 3 else None
 
@@ -164,11 +175,21 @@ class ProxyCtl(KitsuneModule):
         _save_cfg(cfg)
 
         auth_str = f"{user}:***@" if user else "(без авторизации)"
+
+        warn = ""
+        if port not in (1080, 1081, 1082, 1085, 9050, 9150) and (port >= 10000 or port == 443):
+            warn = (
+                "\n⚠️ <b>Внимание:</b> порт <code>{p}</code> нетипичен для SOCKS5 "
+                "(обычно <code>1080</code>). Если это MTPROTO-порт — используй "
+                "<code>.setproxy</code>, а не <code>.setsocks</code>.\n"
+            ).format(p=port)
+
         await event.reply(
             "✅ <b>SOCKS5-прокси сохранён в config.toml:</b>\n"
             f"• host: <code>{_esc(host)}</code>\n"
             f"• port: <code>{port}</code>\n"
-            f"• auth: <code>{_esc(auth_str)}</code>\n\n"
+            f"• auth: <code>{_esc(auth_str)}</code>\n"
+            f"{warn}\n"
             "🔎 Проверь сейчас: <code>.testsocks</code>\n"
             "🔁 После этого перезапусти Kitsune, чтобы aiogram подхватил прокси.\n"
             "ℹ️ Если ещё не установлен — запусти:\n"
@@ -196,9 +217,25 @@ class ProxyCtl(KitsuneModule):
     async def testsocks_cmd(self, event) -> None:
         """.testsocks — проверить, что SOCKS5 доходит до api.telegram.org."""
         m = await event.reply("⏳ Проверяю SOCKS5 → api.telegram.org…", parse_mode="html")
+
+        # Гарантируем, что aiohttp_socks стоит (без него тест бессмыслен).
+        try:
+            from ..rkn_bypass import ensure_aiohttp_socks
+            if not ensure_aiohttp_socks():
+                await m.edit(
+                    "❌ <b>aiohttp-socks не установлен</b>\n\n"
+                    "Установи вручную:\n"
+                    "<code>pip install 'aiohttp-socks&gt;=0.9.0'</code>\n\n"
+                    "Без него aiogram не умеет ходить через SOCKS5.",
+                    parse_mode="html",
+                )
+                return
+        except Exception:
+            pass
+
         try:
             from ..rkn_bypass import test_socks_proxy
-            ok, msg = await test_socks_proxy(timeout=10.0)
+            ok, msg = await test_socks_proxy(timeout=15.0)
         except Exception as exc:
             await m.edit(f"❌ Ошибка проверки: <code>{_esc(exc)}</code>", parse_mode="html")
             return
@@ -210,13 +247,40 @@ class ProxyCtl(KitsuneModule):
                 "aiogram-бот (notifier + inline) пойдёт через этот прокси.",
                 parse_mode="html",
             )
-        else:
-            await m.edit(
-                "❌ <b>SOCKS5 НЕ работает</b>\n"
-                f"<code>{_esc(msg)}</code>\n\n"
-                "Проверь host/port командой <code>.proxyinfo</code> и переставь через аргументы <code>.setsocks</code>.",
-                parse_mode="html",
+            return
+
+        # Дополнительная подсказка по тексту ошибки.
+        hint = ""
+        msg_l = (msg or "").lower()
+        if "timeout" in msg_l:
+            hint = (
+                "\n\n💡 <b>Подсказка:</b> SOCKS5 не отвечает за 15с.\n"
+                "• Проверь, что порт правильный — <b>обычно 1080</b>.\n"
+                "• Если порт типа <code>10001</code>/<code>443</code> — это, скорее всего, "
+                "<b>MTPROTO</b>-порт, его нужно ставить через <code>.setproxy</code>, "
+                "а не <code>.setsocks</code>.\n"
+                "• Попробуй другой прокси командой <code>.setsocks</code>."
             )
+        elif "could not connect to proxy" in msg_l or "refused" in msg_l:
+            hint = (
+                "\n\n💡 <b>Подсказка:</b> прокси не принимает входящие подключения.\n"
+                "• Возможно, у домена устаревшая DNS-запись — попробуй IP вместо домена.\n"
+                "• Возможно, прокси умер — возьми другой."
+            )
+        elif "auth" in msg_l or "method" in msg_l:
+            hint = (
+                "\n\n💡 <b>Подсказка:</b> прокси требует авторизацию или версию SOCKS4.\n"
+                "Попробуй: <code>.setsocks host port user pass</code>"
+            )
+
+        await m.edit(
+            "❌ <b>SOCKS5 НЕ работает</b>\n"
+            f"<code>{_esc(msg)}</code>"
+            f"{hint}\n\n"
+            "Проверь host/port командой <code>.proxyinfo</code> "
+            "и переставь через <code>.setsocks</code>.",
+            parse_mode="html",
+        )
 
     @command("proxyinfo", required=OWNER, aliases=["proxystatus"])
     async def proxyinfo_cmd(self, event) -> None:
@@ -240,10 +304,34 @@ class ProxyCtl(KitsuneModule):
         lines.append("<b>2) SOCKS5 (aiogram / notifier)</b>")
         if sx.get("host"):
             lines.append(f"   • host: <code>{_esc(sx.get('host'))}</code>")
-            lines.append(f"   • port: <code>{sx.get('port')}</code>")
+            port_v = sx.get("port")
+            lines.append(f"   • port: <code>{port_v}</code>")
             if sx.get("username"):
                 lines.append(f"   • user: <code>{_esc(sx.get('username'))}</code>")
+            # Подсказка про нетипичный порт.
+            try:
+                p = int(port_v)
+                if p not in (1080, 1081, 1082, 1085, 9050, 9150) and (p >= 10000 or p == 443):
+                    lines.append(
+                        "   • ⚠️ <i>порт нетипичен для SOCKS5 — "
+                        "возможно, это MTPROTO-порт</i>"
+                    )
+            except (TypeError, ValueError):
+                pass
         else:
             lines.append("   • <i>не задан</i>")
+
+        # Статус aiohttp_socks.
+        lines.append("")
+        try:
+            import aiohttp_socks  # noqa: F401
+            lines.append("<b>3) Зависимости</b>")
+            lines.append("   • aiohttp-socks: <code>OK</code>")
+        except ImportError:
+            lines.append("<b>3) Зависимости</b>")
+            lines.append(
+                "   • aiohttp-socks: <code>НЕ установлен</code> — "
+                "<i>установи: <code>pip install 'aiohttp-socks&gt;=0.9.0'</code></i>"
+            )
 
         await event.reply("\n".join(lines), parse_mode="html")
