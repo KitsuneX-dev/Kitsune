@@ -198,13 +198,27 @@ def get_aiogram_session(timeout: int = 30):
         return None
 
 
-def get_connection_class(use_proxy: bool = False):
-    from telethon.network.connection import (
-        ConnectionTcpFull,
-        ConnectionTcpMTProxyRandomizedIntermediate,
-    )
+def get_mtproto_connection_class(secret: str | None = None):
+    from telethon.network.connection import ConnectionTcpMTProxyRandomizedIntermediate
+
+    try:
+        from .mtproto_faketls import (
+            ConnectionTcpMTProxyFakeTLS,
+            is_faketls_secret,
+        )
+        if is_faketls_secret(secret):
+            return ConnectionTcpMTProxyFakeTLS
+    except Exception as exc:
+        logger.debug("rkn_bypass: FakeTLS helper unavailable — %s", exc)
+
+    return ConnectionTcpMTProxyRandomizedIntermediate
+
+
+def get_connection_class(use_proxy: bool = False, secret: str | None = None):
+    from telethon.network.connection import ConnectionTcpFull
+
     if use_proxy:
-        return ConnectionTcpMTProxyRandomizedIntermediate
+        return get_mtproto_connection_class(secret)
     return ConnectionTcpFull
 
 
@@ -247,9 +261,6 @@ async def mtproxy_handshake_check(
 
     try:
         from telethon import TelegramClient
-        from telethon.network.connection import (
-            ConnectionTcpMTProxyRandomizedIntermediate,
-        )
     except Exception:
         return await test_connection(host, port, timeout=timeout)
 
@@ -264,7 +275,7 @@ async def mtproxy_handshake_check(
             MemorySession(),
             api_id=1,
             api_hash="0" * 32,
-            connection=ConnectionTcpMTProxyRandomizedIntermediate,
+            connection=get_mtproto_connection_class(secret),
             proxy=(host, port, secret),
             connection_retries=1,
             retry_delay=1,

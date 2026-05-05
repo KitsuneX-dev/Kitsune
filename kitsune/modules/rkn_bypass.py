@@ -211,13 +211,27 @@ def get_aiogram_session(timeout: int = 30):
         logger.warning("rkn_bypass: failed to create bypass session — %s", exc)
         return None
 
-def get_connection_class(use_proxy: bool = False):
-    from telethon.network.connection import (
-        ConnectionTcpFull,
-        ConnectionTcpMTProxyRandomizedIntermediate,
-    )
+def get_mtproto_connection_class(secret: str | None = None):
+    from telethon.network.connection import ConnectionTcpMTProxyRandomizedIntermediate
+
+    try:
+        from ..mtproto_faketls import (
+            ConnectionTcpMTProxyFakeTLS,
+            is_faketls_secret,
+        )
+        if is_faketls_secret(secret):
+            return ConnectionTcpMTProxyFakeTLS
+    except Exception as exc:
+        logger.debug("rkn_bypass: FakeTLS helper unavailable — %s", exc)
+
+    return ConnectionTcpMTProxyRandomizedIntermediate
+
+
+def get_connection_class(use_proxy: bool = False, secret: str | None = None):
+    from telethon.network.connection import ConnectionTcpFull
+
     if use_proxy:
-        return ConnectionTcpMTProxyRandomizedIntermediate
+        return get_mtproto_connection_class(secret)
     return ConnectionTcpFull
 
 async def test_connection(

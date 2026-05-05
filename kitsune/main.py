@@ -198,7 +198,6 @@ async def _startup(args: argparse.Namespace) -> None:
 
     from telethon.network.connection import (
         ConnectionTcpFull,
-        ConnectionTcpMTProxyRandomizedIntermediate,
     )
     proxy_cfg  = cfg.get("proxy") or {}
     proxy      = None
@@ -219,11 +218,11 @@ async def _startup(args: argparse.Namespace) -> None:
             )
         elif ptype == "MTPROTO":
             secret     = proxy_cfg.get("secret", "00000000000000000000000000000000")
-            from .rkn_bypass import normalize_secret
+            from .rkn_bypass import get_mtproto_connection_class, normalize_secret
             secret     = normalize_secret(str(secret))
             proxy      = (host, port, secret)
-            connection = ConnectionTcpMTProxyRandomizedIntermediate
-            logger.info("main: MTProto proxy → %s:%s", host, port)
+            connection = get_mtproto_connection_class(secret)
+            logger.info("main: MTProto proxy → %s:%s (%s)", host, port, connection.__name__)
         elif ptype in ("SOCKS5", "SOCKS4", "HTTP", "HTTPS"):
             try:
                 import socks as _socks
@@ -342,8 +341,7 @@ async def _startup(args: argparse.Namespace) -> None:
                            type(exc).__name__, exc)
             with contextlib.suppress(Exception):
                 await client.disconnect()
-            from .rkn_bypass import find_working_proxy
-            from telethon.network.connection import ConnectionTcpMTProxyRandomizedIntermediate
+            from .rkn_bypass import find_working_proxy, get_mtproto_connection_class
 
             if not _ensure_python_socks():
                 print(
@@ -363,6 +361,7 @@ async def _startup(args: argparse.Namespace) -> None:
             if proxy_info:
                 host, port, secret = proxy_info
                 logger.info("main: using MTProto proxy %s:%d for RKN bypass", host, port)
+                conn_cls = get_mtproto_connection_class(secret)
                 client = KitsuneTelegramClient(
                     str(session_path),
                     api_id=api_id,
@@ -376,7 +375,7 @@ async def _startup(args: argparse.Namespace) -> None:
                     app_version="1.0.0",
                     lang_code="ru",
                     proxy=(host, port, secret),
-                    connection=ConnectionTcpMTProxyRandomizedIntermediate,
+                    connection=conn_cls,
                 )
                 try:
                     cfg["proxy"] = {
