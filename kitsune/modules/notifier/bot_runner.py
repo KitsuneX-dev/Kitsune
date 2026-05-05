@@ -9,6 +9,47 @@ logger = logging.getLogger(__name__)
 
 _DB_KEY = "kitsune.notifier"
 
+
+def _load_socks_proxy_url() -> str | None:
+    """
+    Читает SOCKS5-прокси из config.toml (секция [proxy_socks]) и формирует
+    URL вида ``socks5://user:pass@host:port`` (или без auth — ``socks5://host:port``).
+
+    Возвращает None, если SOCKS5 не настроен — тогда aiogram пойдёт напрямую
+    через aiohttp (что в РФ под РКН не работает, поэтому пользователю стоит
+    настроить SOCKS5 командой ``.setsocks <host> <port>``).
+
+    aiogram сам по себе MTPROXY НЕ умеет — поэтому мы для aiogram используем
+    отдельный SOCKS5, а для Telethon — отдельный MTPROTO. Так и работают
+    оба клиента одновременно.
+    """
+    try:
+        from kitsune.main import _load_raw_config
+        cfg = _load_raw_config() or {}
+    except Exception:
+        return None
+
+    sp = cfg.get("proxy_socks") or {}
+    if not isinstance(sp, dict):
+        return None
+    host = sp.get("host")
+    port = sp.get("port")
+    if not host or not port:
+        return None
+
+    user = sp.get("username") or sp.get("user")
+    pwd  = sp.get("password") or sp.get("pass")
+    auth = ""
+    if user and pwd:
+        auth = f"{user}:{pwd}@"
+
+    scheme = str(sp.get("type", "socks5")).lower()
+    if scheme not in ("socks5", "socks4", "http", "https"):
+        scheme = "socks5"
+
+    return f"{scheme}://{auth}{host}:{int(port)}"
+
+
 def _make_bot(token: str) -> typing.Any:
     from aiogram import Bot
     from aiogram.client.default import DefaultBotProperties
@@ -20,9 +61,31 @@ def _make_bot(token: str) -> typing.Any:
     ssl_ctx.check_hostname = False
     ssl_ctx.verify_mode = ssl.CERT_NONE
 
+    proxy_url = _load_socks_proxy_url()
+
+    # Если SOCKS5 настроен — поднимаем коннектор через aiohttp_socks,
+    # иначе обычный TCPConnector. Импорт делаем лениво — пакет ставится
+    # только при необходимости.
+    socks_connector_cls = None
+    if proxy_url:
+        try:
+            from aiohttp_socks import ProxyConnector  # type: ignore
+            socks_connector_cls = ProxyConnector
+        except ImportError:
+            logger.warning(
+                "BotRunner: SOCKS5 настроен (%s), но aiohttp_socks не установлен. "
+                "Установи: pip install 'aiohttp-socks>=0.9.0' — иначе aiogram "
+                "пойдёт напрямую и упадёт на api.telegram.org.",
+                proxy_url,
+            )
+
     class _NoSSLSession(AiohttpSession):
         async def create_connector(self, _bot=None):
-            connector = aiohttp.TCPConnector(ssl=ssl_ctx)
+            if socks_connector_cls is not None and proxy_url:
+                connector = socks_connector_cls.from_url(proxy_url, ssl=ssl_ctx)
+                logger.info("BotRunner: aiogram использует SOCKS5 → %s", proxy_url)
+            else:
+                connector = aiohttp.TCPConnector(ssl=ssl_ctx)
             self._should_reset_connector = False
             return connector
 
@@ -31,6 +94,7 @@ def _make_bot(token: str) -> typing.Any:
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
         session=_NoSSLSession(timeout=60),
     )
+
 
 def _get_platform() -> str:
     import sys, os
