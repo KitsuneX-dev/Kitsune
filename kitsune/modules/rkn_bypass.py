@@ -1,406 +1,358 @@
 from __future__ import annotations
 
-import asyncio
 import logging
-
-from ..core.loader import KitsuneModule, command, ModuleConfig, ConfigValue
-from ..core.security import OWNER
+import re
+import ssl
+import sys
+import typing
 
 logger = logging.getLogger(__name__)
 
-_DB_OWNER = "kitsune.rkn"
-_DEFAULT_CHECK_INTERVAL = 600
 
-class RKNBypassModule(KitsuneModule):
+def ensure_python_socks(auto_install: bool = True) -> bool:
+    """
+    Проверяет наличие python-socks[asyncio]; при отсутствии пытается установить в рантайме.
 
-    name        = "RKNBypass"
-    description = "Обход блокировок РКН (MTProto прокси)"
-    author      = "@Mikasu32"
-    version     = "2.0"
-    _builtin    = True
+    Telethon >=1.36 использует именно python-socks (а НЕ PySocks) для всех типов прокси,
+    включая MTProto. Без этой библиотеки параметр ``proxy`` МОЛЧА игнорируется — видим
+    только UserWarning, и бот пытается подключиться напрямую (что в РФ под блокировкой
+    РКН не работает).
+    """
+    try:
+        import python_socks  # noqa: F401
+        return True
+    except ImportError:
+        pass
 
-    config = ModuleConfig(
-        ConfigValue(
-            key="check_interval",
-            default=_DEFAULT_CHECK_INTERVAL,
-            doc=(
-                "Интервал проверки прокси в секундах. "
-                "Дефолт — 600 (10 мин). Минимум — 60."
-            ),
-        ),
-        ConfigValue(
-            key="auto_switch",
-            default=True,
-            doc=(
-                "Автоматически переключаться на другой прокси, "
-                "если текущий перестал работать."
-            ),
-        ),
-        ConfigValue(
-            key="notify_on_switch",
-            default=True,
-            doc="Отправлять уведомление в Избранное при смене прокси.",
-        ),
+    if not auto_install:
+        return False
+
+    logger.warning(
+        "rkn_bypass: python-socks не установлен — прокси в Telethon НЕ работают. "
+        "Пытаюсь установить автоматически…"
+    )
+    try:
+        import subprocess
+        subprocess.check_call(
+            [sys.executable, "-m", "pip", "install", "--quiet",
+             "--disable-pip-version-check", "--no-warn-script-location",
+             "python-socks[asyncio]>=2.4.4"]
+        )
+        import importlib
+        importlib.invalidate_caches()
+        import python_socks  # noqa: F401
+        logger.info("rkn_bypass: python-socks[asyncio] успешно установлен в рантайме")
+        return True
+    except Exception as exc:
+        logger.error(
+            "rkn_bypass: не удалось установить python-socks: %s. "
+            "Установи вручную: pip install 'python-socks[asyncio]'", exc,
+        )
+        return False
+
+
+def _patch_telethon_mtproxy() -> None:
+    """
+    Патч на баг Telethon с MTProto-прокси:
+
+        File ".../telethon/network/connection/tcpmtproxy.py", line 77, in readexactly
+            return self._decrypt.encrypt(await self._reader.readexactly(n))
+        File ".../asyncio/streams.py", line 694, in readexactly
+            raise ValueError('readexactly size can not be less than zero')
+
+    Когда MTProxy-handshake заканчивается мусором (мёртвый/несовместимый прокси,
+    разрыв в середине FakeTLS), обфусцированный декодер парсит "длину" следующего
+    пакета как отрицательное int — и потом сам же вызывает ``readexactly(<0)``.
+    asyncio роняет ValueError, который Telethon НЕ ловит → весь _recv_loop крашится,
+    но MTProtoSender при этом не очищает состояние и при следующем reconnect видит
+    ``self._connection = None`` → вторичная ошибка ``AttributeError: 'NoneType'.connect``.
+
+    Решение: обернуть ``readexactly`` обфусцированного reader'а так, чтобы при
+    некорректном ``n`` мы сразу бросали ``ConnectionError``. Telethon корректно
+    обрабатывает ConnectionError в _recv_loop как обрыв и инициирует штатный
+    reconnect через ``auto_reconnect``.
+
+    ВАЖНО: патч применяется на ВСЕХ версиях Python (раньше был ограничен 3.13+ —
+    это и было причиной того, что под Python 3.10 баг проявлялся). Имя класса
+    тоже определяем динамически (в разных версиях Telethon оно отличается:
+    ``MTProxyIO`` / ``ObfuscatedIO`` / приватный ``_MTProxyReader``).
+    """
+    try:
+        from telethon.network.connection import tcpmtproxy as _m
+    except Exception as exc:
+        logger.debug("rkn_bypass: telethon.tcpmtproxy недоступен — %s", exc)
+        return
+
+    # 1) Находим класс, в котором ОПРЕДЕЛЁН (а не унаследован) метод readexactly.
+    target_cls = None
+    for _name in dir(_m):
+        obj = getattr(_m, _name, None)
+        if not isinstance(obj, type):
+            continue
+        if "readexactly" in obj.__dict__:
+            target_cls = obj
+            break
+
+    if target_cls is None:
+        logger.debug(
+            "rkn_bypass: класс с readexactly не найден в tcpmtproxy "
+            "(возможно, эта версия Telethon уже не страдает багом)"
+        )
+        return
+
+    if getattr(target_cls.readexactly, "_kitsune_size_guard", False):
+        return  # уже пропатчено
+
+    original = target_cls.readexactly
+
+    async def readexactly_safe(self, n):
+        # asyncio.StreamReader.readexactly валится с ValueError при n<0.
+        # n==0 формально валиден (вернёт b''), но в контексте MTProxy это
+        # тоже почти всегда означает рассинхронизацию обфусцированного
+        # потока — лучше честный обрыв, чем тихая дыра в стриме.
+        if n is None or n < 0:
+            raise ConnectionError(
+                f"MTProxy: получен невалидный размер пакета ({n!r}). "
+                "Прокси, вероятно, мёртв или не поддерживает FakeTLS — обрываю."
+            )
+        if n == 0:
+            return b""
+        return await original(self, n)
+
+    readexactly_safe._kitsune_size_guard = True
+    target_cls.readexactly = readexactly_safe
+    logger.info(
+        "rkn_bypass: Telethon MTProxy reader пропатчен (size guard) — class=%s",
+        target_cls.__name__,
     )
 
-    strings_ru = {
-        "checking":     "🔍 Проверяю подключение к Telegram...",
-        "ok":           "✅ Прямое подключение работает нормально.",
-        "blocked":      (
-            "🚫 Прямое подключение к Telegram заблокировано.\n\n"
-            "🔍 Ищу рабочий MTProto прокси..."
-        ),
-        "proxy_found":  (
-            "✅ Найден рабочий прокси!\n\n"
-            "🌐 <code>{host}:{port}</code>\n\n"
-            "Добавь в <code>config.toml</code>:\n"
-            "<pre>[proxy]\n"
-            "type = \"MTPROTO\"\n"
-            "host = \"{host}\"\n"
-            "port = {port}\n"
-            "secret = \"{secret}\"</pre>\n\n"
-            "Или используй <code>.setproxy {host} {port} {secret}</code>"
-        ),
-        "proxy_none":   (
-            "❌ Рабочий MTProto прокси не найден.\n\n"
-            "Попробуй вручную найти прокси в <a href=\"https://t.me/proxyme\">@proxyme</a> "
-            "или <a href=\"https://t.me/MTProxyT\">@MTProxyT</a>\n\n"
-            "Затем: <code>.setproxy host port secret</code>"
-        ),
-        "proxy_set":    (
-            "✅ Прокси сохранён в <code>config.toml</code>.\n"
-            "Перезапусти Kitsune: <code>.restart</code>"
-        ),
-        "proxy_clear":  "✅ Прокси удалён. Перезапусти: <code>.restart</code>",
-        "current":      (
-            "🌐 <b>Текущий прокси:</b>\n\n"
-            "Тип: <code>{type}</code>\n"
-            "Хост: <code>{host}:{port}</code>\n"
-            "Секрет: <code>{secret}</code>"
-        ),
-        "no_proxy":     "ℹ️ Прокси не настроен — используется прямое подключение.",
-        "set_usage":    "Использование: <code>.setproxy host port secret</code>",
-        "ssl_enabled":  "✅ Обход SSL РКН-фильтрации для Bot API — <b>уже включён по умолчанию</b>.",
-        "findproxy_start": (
-            "🔎 Ищу рабочие MTProto прокси в сети...\n"
-            "<i>Это может занять несколько секунд.</i>"
-        ),
-        "findproxy_testing": "🧪 Проверяю {count} прокси из веб-источников...",
-        "monitor_started":  "✅ Мониторинг прокси запущен (интервал: {interval} сек).",
-        "monitor_stopped":  "🛑 Мониторинг прокси остановлен.",
-        "monitor_ok":       "✅ Прокси <code>{host}:{port}</code> — работает.",
-        "monitor_fail":     (
-            "⚠️ Прокси <code>{host}:{port}</code> недоступен!\n"
-            "🔄 Автопереключение {status}."
-        ),
-        "auto_switched":    (
-            "🔄 <b>Автопереключение прокси</b>\n\n"
-            "❌ Старый: <code>{old_host}:{old_port}</code>\n"
-            "✅ Новый: <code>{new_host}:{new_port}</code>\n\n"
-            "<i>Перезапусти Kitsune для применения: <code>.restart</code></i>"
-        ),
-        "auto_switch_fail": (
-            "❌ Автопереключение не удалось — рабочий прокси не найден.\n"
-            "Попробуй <code>.findproxy</code> для поиска нового."
-        ),
-    }
 
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
-        self._monitor_task: asyncio.Task | None = None
+_patch_telethon_mtproxy()
 
-    async def on_load(self) -> None:
-        if self.db.get(_DB_OWNER, "monitor_enabled", False):
-            self._start_monitor()
 
-    async def on_unload(self) -> None:
-        self._stop_monitor()
+def normalize_secret(secret: str) -> str:
+    import base64
 
-    def _load_config(self) -> dict:
-        from pathlib import Path
-        try:
-            import toml
-            cfg_path = Path(__file__).parent.parent.parent / "config.toml"
-            if cfg_path.exists():
-                return toml.loads(cfg_path.read_text(encoding="utf-8"))
-        except Exception:
-            pass
-        return {}
+    s = secret.strip()
 
-    def _save_config(self, data: dict) -> None:
-        from pathlib import Path
-        try:
-            import toml
-            cfg_path = Path(__file__).parent.parent.parent / "config.toml"
-            cfg_path.write_text(toml.dumps(data), encoding="utf-8")
-        except Exception as exc:
-            logger.warning("RKNBypass: could not save config — %s", exc)
+    is_hex = all(c in '0123456789abcdefABCDEF' for c in s)
+    if is_hex and len(s) % 2 == 0:
+        return s.lower()
 
-    def _current_proxy(self) -> dict | None:
-        cfg = self._load_config()
-        proxy = cfg.get("proxy")
-        if proxy and proxy.get("host"):
-            return proxy
+    if is_hex and len(s) % 2 == 1:
+        logger.warning(
+            "normalize_secret: секрет имеет нечётную длину (%d символов). "
+            "Используй секрет из tg://proxy ссылки (кнопка «Поделиться» в Telegram).",
+            len(s),
+        )
+        return s
+
+    try:
+        padded = s + '=' * (-len(s) % 4)
+        decoded = base64.b64decode(padded.encode(), altchars=b'-_')
+        return decoded.hex()
+    except Exception:
+        pass
+
+    return s
+
+_PUBLIC_PROXIES: list[tuple[str, int, str]] = [
+    ("149.154.175.100", 443, "ee9000000000000000000000000000003900000000000000"),
+    ("149.154.167.51",  443, "dd0000000000000000000000000000001111111111111111"),
+    ("91.108.56.100",   443, "ee0000000000000000000000000000003900000000000000"),
+    ("mtproto.telegram.org", 443, "ee0000000000000000000000000000003900000000000000"),
+]
+
+_TG_PROXY_CHANNELS: list[str] = [
+    "https://t.me/s/mtp4tg",
+    "https://t.me/s/proxyme",
+    "https://t.me/s/MTProxyT",
+    "https://t.me/s/tg_proxy_mtproto",
+]
+
+_MTPRO_XYZ_URL = "https://mtpro.xyz/api/?type=mtproto"
+
+_SECRET_PAT = r'([0-9a-zA-Z+/=_-]{16,})'
+
+_RE_TG_PROXY = re.compile(
+    r'tg://proxy\?server=([^&"\'<>\s]+)&port=(\d+)&secret=' + _SECRET_PAT,
+    re.IGNORECASE,
+)
+_RE_TG_PROXY_ALT = re.compile(
+    r'https://t\.me/proxy\?server=([^&"\'<>\s]+)&port=(\d+)&secret=' + _SECRET_PAT,
+    re.IGNORECASE,
+)
+
+def make_ssl_ctx_no_verify() -> ssl.SSLContext:
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    return ctx
+
+def get_aiohttp_connector():
+    import aiohttp
+    return aiohttp.TCPConnector(ssl=make_ssl_ctx_no_verify())
+
+def get_aiogram_session(timeout: int = 30):
+    try:
+        from aiogram.client.session.aiohttp import AiohttpSession
+        import aiohttp
+
+        ssl_ctx = make_ssl_ctx_no_verify()
+
+        class _RKNBypassSession(AiohttpSession):
+            async def create_connector(self, _bot=None):
+                connector = aiohttp.TCPConnector(ssl=ssl_ctx)
+                self._should_reset_connector = False
+                return connector
+
+        return _RKNBypassSession(timeout=timeout)
+    except Exception as exc:
+        logger.warning("rkn_bypass: failed to create bypass session — %s", exc)
         return None
 
-    def _get_interval(self) -> int:
+def get_connection_class(use_proxy: bool = False):
+    from telethon.network.connection import (
+        ConnectionTcpFull,
+        ConnectionTcpMTProxyRandomizedIntermediate,
+    )
+    if use_proxy:
+        return ConnectionTcpMTProxyRandomizedIntermediate
+    return ConnectionTcpFull
+
+async def test_connection(
+    host: str = "api.telegram.org",
+    port: int = 443,
+    timeout: float = 5.0,
+) -> bool:
+    import asyncio
+    try:
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_connection(host, port),
+            timeout=timeout,
+        )
+        writer.close()
         try:
-            return max(60, int(self.config["check_interval"]))
+            await writer.wait_closed()
         except Exception:
-            return _DEFAULT_CHECK_INTERVAL
+            pass
+        return True
+    except Exception:
+        return False
 
-    def _start_monitor(self) -> None:
-        self._stop_monitor()
-        self._monitor_task = asyncio.ensure_future(self._monitor_loop())
-        logger.info("RKNBypass: мониторинг запущен")
+async def _fetch_from_tg_channel(url: str) -> list[tuple[str, int, str]]:
+    try:
+        import aiohttp
+        ssl_ctx = make_ssl_ctx_no_verify()
+        async with aiohttp.ClientSession(
+            connector=aiohttp.TCPConnector(ssl=ssl_ctx)
+        ) as session:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                if resp.status != 200:
+                    return []
+                text = await resp.text(errors="replace")
 
-    def _stop_monitor(self) -> None:
-        if self._monitor_task and not self._monitor_task.done():
-            self._monitor_task.cancel()
-        self._monitor_task = None
-
-    async def _monitor_loop(self) -> None:
-        from ..rkn_bypass import test_connection, find_working_proxy, find_proxy_from_web
-
-        while True:
-            interval = self._get_interval()
-            await asyncio.sleep(interval)
-
-            try:
-                proxy = self._current_proxy()
-
-                if proxy is None:
-                    ok = await test_connection("api.telegram.org", 443, timeout=5.0)
-                    if not ok:
-                        logger.warning("RKNBypass [monitor]: прямое соединение недоступно")
-                    continue
-
-                host = proxy["host"]
-                port = proxy["port"]
-                ok = await test_connection(host, port, timeout=5.0)
-
-                if ok:
-                    logger.debug("RKNBypass [monitor]: прокси %s:%d — OK", host, port)
-                    continue
-
-                logger.warning("RKNBypass [monitor]: прокси %s:%d недоступен!", host, port)
-
-                auto_switch = bool(self.config.get("auto_switch", True)) \
-                    if hasattr(self.config, "get") else True
+        found: list[tuple[str, int, str]] = []
+        for pattern in (_RE_TG_PROXY, _RE_TG_PROXY_ALT):
+            for m in pattern.finditer(text):
                 try:
-                    auto_switch = bool(self.config["auto_switch"])
-                except Exception:
-                    auto_switch = True
+                    found.append((m.group(1).strip(), int(m.group(2)), m.group(3).strip()))
+                except ValueError:
+                    pass
+        return found
+    except Exception as exc:
+        logger.debug("rkn_bypass: channel %s — %s", url, exc)
+        return []
 
-                if not auto_switch:
-                    await self._notify(
-                        self.strings("monitor_fail").format(
-                            host=host, port=port, status="отключено"
-                        )
-                    )
-                    continue
-
-                web_proxies = await find_proxy_from_web()
-                new_proxy = await find_working_proxy(extra_proxies=web_proxies)
-
-                if new_proxy:
-                    new_host, new_port, new_secret = new_proxy
-                    cfg = self._load_config()
-                    from ..rkn_bypass import normalize_secret
-                    cfg["proxy"] = {
-                        "type": "MTPROTO",
-                        "host": new_host,
-                        "port": new_port,
-                        "secret": normalize_secret(new_secret),
-                    }
-                    self._save_config(cfg)
-                    logger.info(
-                        "RKNBypass [monitor]: переключился на %s:%d", new_host, new_port
-                    )
-
+async def _fetch_from_mtpro_xyz() -> list[tuple[str, int, str]]:
+    try:
+        import aiohttp
+        ssl_ctx = make_ssl_ctx_no_verify()
+        async with aiohttp.ClientSession(
+            connector=aiohttp.TCPConnector(ssl=ssl_ctx)
+        ) as session:
+            async with session.get(
+                _MTPRO_XYZ_URL, timeout=aiohttp.ClientTimeout(total=8)
+            ) as resp:
+                if resp.status != 200:
+                    return []
+                data = await resp.json(content_type=None)
+        result: list[tuple[str, int, str]] = []
+        if isinstance(data, list):
+            for item in data:
+                host   = item.get("host") or item.get("ip") or ""
+                port   = item.get("port", 443)
+                secret = item.get("secret") or item.get("pass", "")
+                if host and secret:
                     try:
-                        notify = bool(self.config["notify_on_switch"])
-                    except Exception:
-                        notify = True
+                        result.append((host, int(port), secret))
+                    except (ValueError, TypeError):
+                        pass
+        return result
+    except Exception as exc:
+        logger.debug("rkn_bypass: mtpro.xyz — %s", exc)
+        return []
 
-                    if notify:
-                        await self._notify(
-                            self.strings("auto_switched").format(
-                                old_host=host,
-                                old_port=port,
-                                new_host=new_host,
-                                new_port=new_port,
-                            )
-                        )
-                else:
-                    await self._notify(self.strings("auto_switch_fail"))
+async def find_proxy_from_web() -> list[tuple[str, int, str]]:
+    import asyncio
 
-            except asyncio.CancelledError:
-                break
-            except Exception as exc:
-                logger.exception("RKNBypass [monitor]: ошибка — %s", exc)
+    tasks = [_fetch_from_tg_channel(u) for u in _TG_PROXY_CHANNELS]
+    tasks.append(_fetch_from_mtpro_xyz())
 
-    async def _notify(self, text: str) -> None:
-        try:
-            await self.client.send_message("me", text, parse_mode="html")
-        except Exception as exc:
-            logger.warning("RKNBypass: не удалось отправить уведомление — %s", exc)
+    results = await asyncio.gather(*tasks, return_exceptions=True)
 
-    @command("rkn", required=OWNER)
-    async def rkn_cmd(self, event) -> None:
-        await event.message.edit(self.strings("checking"), parse_mode="html")
+    proxies: list[tuple[str, int, str]] = []
+    seen: set[tuple[str, int]] = set()
+    for r in results:
+        if isinstance(r, list):
+            for item in r:
+                key = (item[0], item[1])
+                if key not in seen:
+                    seen.add(key)
+                    proxies.append(item)
 
-        from ..rkn_bypass import test_connection, find_working_proxy
-        direct_ok = await test_connection("api.telegram.org", 443, timeout=5.0)
+    logger.info("rkn_bypass: найдено %d прокси из веб-источников", len(proxies))
+    return proxies
 
-        if direct_ok:
-            await event.message.edit(self.strings("ok"), parse_mode="html")
-            return
+async def find_working_proxy(
+    extra_proxies: list[tuple[str, int, str]] | None = None,
+) -> tuple[str, int, str] | None:
+    candidates = list(_PUBLIC_PROXIES)
+    if extra_proxies:
+        seen = {(h, p) for h, p, _ in candidates}
+        for item in extra_proxies:
+            if (item[0], item[1]) not in seen:
+                candidates.append(item)
+                seen.add((item[0], item[1]))
 
-        await event.message.edit(self.strings("blocked"), parse_mode="html")
-        await asyncio.sleep(1)
+    for host, port, secret in candidates:
+        if await test_connection(host, port, timeout=3.0):
+            logger.info("rkn_bypass: рабочий прокси %s:%d", host, port)
+            return host, port, secret
 
-        proxy = await find_working_proxy()
-        if not proxy:
-            await event.message.edit(self.strings("proxy_none"), parse_mode="html")
-            return
+    logger.warning("rkn_bypass: рабочий прокси не найден")
+    return None
 
-        host, port, secret = proxy
-        await event.message.edit(
-            self.strings("proxy_found").format(host=host, port=port, secret=secret),
-            parse_mode="html",
-            link_preview=False,
-        )
+def apply_bypass_to_config(cfg: dict) -> dict:
+    import asyncio
 
-    @command("findproxy", required=OWNER)
-    async def findproxy_cmd(self, event) -> None:
-        await event.message.edit(self.strings("findproxy_start"), parse_mode="html")
+    async def _find():
+        return await find_working_proxy()
 
-        from ..rkn_bypass import find_proxy_from_web, find_working_proxy
+    try:
+        loop = asyncio.new_event_loop()
+        proxy = loop.run_until_complete(_find())
+        loop.close()
+    except Exception:
+        return cfg
 
-        web_proxies = await find_proxy_from_web()
-
-        if not web_proxies:
-            await event.message.edit(self.strings("proxy_none"), parse_mode="html")
-            return
-
-        await event.message.edit(
-            self.strings("findproxy_testing").format(count=len(web_proxies)),
-            parse_mode="html",
-        )
-
-        proxy = await find_working_proxy(extra_proxies=web_proxies)
-
-        if proxy:
-            host, port, secret = proxy
-            await event.message.edit(
-                self.strings("proxy_found").format(host=host, port=port, secret=secret),
-                parse_mode="html",
-                link_preview=False,
-            )
-            return
-
-        lines = []
-        for h, p, s in web_proxies[:3]:
-            lines.append(
-                "\U0001f310 <code>" + h + ":" + str(p) + "</code>\n"
-                "<code>.setproxy " + h + " " + str(p) + " " + s + "</code>"
-            )
-        text = (
-            "\u26a0\ufe0f <b>TCP-тест не прошёл, но найдены прокси из каналов.</b>\n"
-            "<i>Попробуй один из них — MTProto-прокси часто блокируют ping:</i>\n\n"
-            + "\n\n".join(lines)
-        )
-        await event.message.edit(text, parse_mode="html", link_preview=False)
-
-    @command("setproxy", required=OWNER)
-    async def setproxy_cmd(self, event) -> None:
-        args = self.get_args(event).split()
-        if len(args) < 3:
-            await event.message.edit(self.strings("set_usage"), parse_mode="html")
-            return
-
-        host, port_s, secret = args[0], args[1], args[2]
-        try:
-            port = int(port_s)
-        except ValueError:
-            await event.message.edit("❌ Port должен быть числом.", parse_mode="html")
-            return
-
-        from ..rkn_bypass import normalize_secret
-        secret = normalize_secret(secret)
-
-        cfg = self._load_config()
+    if proxy:
         cfg["proxy"] = {
             "type": "MTPROTO",
-            "host": host,
-            "port": port,
-            "secret": secret,
+            "host": proxy[0],
+            "port": proxy[1],
+            "secret": proxy[2],
         }
-        self._save_config(cfg)
-        await event.message.edit(self.strings("proxy_set"), parse_mode="html")
+        logger.info("rkn_bypass: прокси применён к конфигу")
 
-    @command("clearproxy", required=OWNER)
-    async def clearproxy_cmd(self, event) -> None:
-        cfg = self._load_config()
-        cfg.pop("proxy", None)
-        self._save_config(cfg)
-        await event.message.edit(self.strings("proxy_clear"), parse_mode="html")
-
-    @command("proxyinfo", required=OWNER)
-    async def proxyinfo_cmd(self, event) -> None:
-        proxy = self._current_proxy()
-        if not proxy:
-            await event.message.edit(self.strings("no_proxy"), parse_mode="html")
-            return
-
-        await event.message.edit(
-            self.strings("current").format(
-                type=proxy.get("type", "MTPROTO"),
-                host=proxy.get("host", "?"),
-                port=proxy.get("port", "?"),
-                secret=proxy.get("secret", "?"),
-            ),
-            parse_mode="html",
-        )
-
-    @command("checkcon", required=OWNER)
-    async def checkcon_cmd(self, event) -> None:
-        await event.message.edit("🔍 Проверяю...", parse_mode="html")
-
-        from ..rkn_bypass import test_connection
-        results = []
-        for host in ["api.telegram.org", "149.154.167.51", "149.154.175.100"]:
-            ok = await test_connection(host, 443, timeout=3.0)
-            icon = "✅" if ok else "❌"
-            results.append(f"{icon} <code>{host}:443</code>")
-
-        proxy = self._current_proxy()
-        if proxy:
-            ph, pp = proxy.get("host", ""), proxy.get("port", 443)
-            ok = await test_connection(ph, pp, timeout=3.0)
-            icon = "✅" if ok else "❌"
-            results.append(f"{icon} <code>{ph}:{pp}</code> <i>(текущий прокси)</i>")
-
-        await event.message.edit(
-            "🌐 <b>Проверка соединения:</b>\n\n" + "\n".join(results),
-            parse_mode="html",
-        )
-
-    @command("proxymon", required=OWNER)
-    async def proxymon_cmd(self, event) -> None:
-        arg = self.get_args(event).strip().lower()
-
-        if arg == "off":
-            self._stop_monitor()
-            await self.db.set(_DB_OWNER, "monitor_enabled", False)
-            await event.message.edit(self.strings("monitor_stopped"), parse_mode="html")
-            return
-
-        self._start_monitor()
-        await self.db.set(_DB_OWNER, "monitor_enabled", True)
-        interval = self._get_interval()
-        await event.message.edit(
-            self.strings("monitor_started").format(interval=interval),
-            parse_mode="html",
-        )
+    return cfg
