@@ -296,11 +296,67 @@ class _LayeredStreamWriterBase:
 
 
 class FakeTLSStreamReader(_LayeredStreamReaderBase):
+    """
+    TLS-frame ridge between Telethon and the MTProxy FakeTLS server.
+
+    КЛЮЧЕВОЕ ПРАВИЛО (после фикса 2026-05):
+      Никогда не возвращать b"" «по-тихому» при EOF. На EOF мы рейзим
+      ConnectionError. Иначе вызывающий код (MTProxyIO.readexactly →
+      AES-CTR decrypt → IntermediatePacketCodec.read_packet →
+      MTProtoState.decrypt_message_data → AES-IGE) получит «короткий»
+      буфер с длиной не кратной 16 и нативный AES-IGE сделает abort()
+      в aes_ige.c:60. Симптом — ровно та ошибка, что ловил пользователь.
+    """
+
     __slots__ = ("buf",)
 
     def __init__(self, upstream):
         self.upstream = upstream
         self.buf = bytearray()
+
+    async def _read_one_tls_frame(self) -> bytes:
+        """Считывает ровно ОДИН TLS-application-record (без заголовка).
+
+        Пропускает change-cipher-spec (0x14) фреймы — они появляются
+        ровно один раз сразу после ServerHello и не несут полезной нагрузки.
+        Бросает ConnectionError при любых аномалиях вместо «тихого» b"".
+        """
+        while True:
+            try:
+                tls_rec_type = await self.upstream.readexactly(1)
+            except asyncio.IncompleteReadError as exc:
+                raise ConnectionError(
+                    "FakeTLS: connection closed by proxy before TLS record header"
+                ) from exc
+
+            if tls_rec_type not in (b"\x14", b"\x17"):
+                raise ConnectionError(
+                    f"FakeTLS: unexpected TLS record type {tls_rec_type!r} "
+                    "(proxy stream desynced)"
+                )
+
+            try:
+                version = await self.upstream.readexactly(2)
+                if version != b"\x03\x03":
+                    raise ConnectionError(
+                        f"FakeTLS: unexpected TLS version {version!r}"
+                    )
+                data_len_bytes = await self.upstream.readexactly(2)
+                data_len = int.from_bytes(data_len_bytes, "big")
+                if data_len <= 0 or data_len > 16384 + 256:
+                    raise ConnectionError(
+                        f"FakeTLS: bogus TLS record length {data_len}"
+                    )
+                data = await self.upstream.readexactly(data_len)
+            except asyncio.IncompleteReadError as exc:
+                raise ConnectionError(
+                    "FakeTLS: connection closed mid-record"
+                ) from exc
+
+            if tls_rec_type == b"\x14":
+                # change-cipher-spec — служебный, читаем дальше
+                continue
+            return data
 
     async def read(self, n, ignore_buf=False):
         # ВАЖНО: контракт asyncio.StreamReader.read(n) — вернуть НЕ БОЛЕЕ n
@@ -310,52 +366,56 @@ class FakeTLSStreamReader(_LayeredStreamReaderBase):
         # abort() в aes_ige.c:60. Поэтому строго режем по n и излишек
         # кладём обратно в self.buf.
         if self.buf and not ignore_buf:
-            data = self.buf[:n]
-            self.buf = self.buf[n:]
-            return bytes(data)
-
-        while True:
-            tls_rec_type = await self.upstream.readexactly(1)
-            if not tls_rec_type:
-                return b""
-            if tls_rec_type not in [b"\x14", b"\x17"]:
-                logger.error("FakeTLS: bad tls type %s", tls_rec_type)
-                return b""
-
-            version = await self.upstream.readexactly(2)
-            if version != b"\x03\x03":
-                logger.error("FakeTLS: unknown tls version %s", version)
-                return b""
-
-            data_len = int.from_bytes(await self.upstream.readexactly(2), "big")
-            data = await self.upstream.readexactly(data_len)
-            if tls_rec_type == b"\x14":
-                continue
-
-            if ignore_buf:
-                # readexactly() сам управляет своим self.buf, ему отдаём
-                # весь TLS-фрейм целиком — он сам аккуратно нарежет.
-                return data
-
-            if len(data) > n:
-                # Излишек кладём в общий буфер до следующего read().
-                self.buf += data[n:]
-                data = data[:n]
+            data = bytes(self.buf[:n])
+            del self.buf[:n]
             return data
 
+        data = await self._read_one_tls_frame()
+
+        if ignore_buf:
+            # readexactly() сам управляет своим self.buf, ему отдаём
+            # весь TLS-фрейм целиком — он сам аккуратно нарежет.
+            return data
+
+        if len(data) > n:
+            # Излишек кладём в общий буфер до следующего read().
+            self.buf += data[n:]
+            data = data[:n]
+        return data
+
     async def readexactly(self, n):
+        if n is None or n < 0:
+            raise ConnectionError(f"FakeTLS: invalid readexactly size {n!r}")
+        if n == 0:
+            return b""
+
         while len(self.buf) < n:
-            tls_data = await self.read(1, ignore_buf=True)
+            tls_data = await self._read_one_tls_frame()
             if not tls_data:
-                return b""
+                # Защита от бесконечного цикла: пустой application-record
+                # не должен случиться, но если случится — рвём, а не виснем.
+                raise ConnectionError("FakeTLS: empty TLS record from proxy")
             self.buf += tls_data
-        data, self.buf = self.buf[:n], self.buf[n:]
-        return bytes(data)
+
+        data = bytes(self.buf[:n])
+        del self.buf[:n]
+        return data
 
     async def read_server_hello(self) -> bytes:
-        server_hello = await super().readexactly(127 + 6 + 3 + 2)
-        http_data_len = int.from_bytes(server_hello[-2:], "big")
-        return server_hello + await super().readexactly(http_data_len)
+        """Читает ServerHello + change-cipher-spec + начало AppData.
+
+        Здесь нам нужен СЫРОЙ TLS-поток (заголовки ServerHello НЕ являются
+        application-data), поэтому используем upstream напрямую, а не
+        наш FakeTLS-парсер.
+        """
+        try:
+            server_hello = await self.upstream.readexactly(127 + 6 + 3 + 2)
+            http_data_len = int.from_bytes(server_hello[-2:], "big")
+            return server_hello + await self.upstream.readexactly(http_data_len)
+        except asyncio.IncompleteReadError as exc:
+            raise ConnectionError(
+                "FakeTLS: proxy closed connection during ServerHello"
+            ) from exc
 
 
 class FakeTLSStreamWriter(_LayeredStreamWriterBase):
@@ -419,14 +479,21 @@ class ConnectionTcpMTProxyFakeTLS(ConnectionTcpMTProxyRandomizedIntermediate):
         await self._writer.drain()
         logger.info("mtproto_faketls: FakeTLS headers sent")
 
-        self._writer = FakeTLSStreamWriter(self._writer)
-        self._reader = FakeTLSStreamReader(self._reader)
-
+        # ВНИМАНИЕ: сначала читаем ServerHello из СЫРОГО потока (до того как
+        # обернули в FakeTLSStreamReader), а уже потом ставим обёртку.
+        raw_reader = self._reader
         logger.info("mtproto_faketls: waiting for FakeTLS server hello")
-        if not self.fake_tls_cdc.verify_server_hello(await self._reader.read_server_hello()):
+        # Создаём reader на сыром потоке и сразу проверяем ServerHello.
+        wrapped_reader = FakeTLSStreamReader(raw_reader)
+        if not self.fake_tls_cdc.verify_server_hello(
+            await wrapped_reader.read_server_hello()
+        ):
             logger.error("mtproto_faketls: FakeTLS server hello verification failed")
             raise ConnectionError("FakeTLS server hello verification failed")
         logger.info("mtproto_faketls: FakeTLS handshake completed")
+
+        self._writer = FakeTLSStreamWriter(self._writer)
+        self._reader = wrapped_reader
 
         self._codec = self.packet_codec(self)
         self._init_conn()

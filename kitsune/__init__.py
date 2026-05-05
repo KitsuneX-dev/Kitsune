@@ -12,27 +12,27 @@ __status__ = "Production"
 #  импортирует telethon.network.connection.* и любой код начнёт пользоваться
 #  пропатченными классами.
 #
-#  Чиним баг в Telethon, который ловится у пользователя в проде:
+#  Чиним ДВА бага сразу:
 #
-#    File ".../telethon/network/connection/tcpmtproxy.py", line 77, in readexactly
-#        return self._decrypt.encrypt(await self._reader.readexactly(n))
-#    File ".../telethon/network/connection/tcpintermediate.py", line 17, in read_packet
-#        return await reader.readexactly(length)
-#    File ".../asyncio/streams.py", line 694, in readexactly
-#        raise ValueError('readexactly size can not be less than zero')
+#  (A) ``ValueError: readexactly size can not be less than zero`` —
+#      когда FakeTLS-прокси отдаёт мусор и в length-поле прилетает <0.
 #
-#  Корень: IntermediatePacketCodec.read_packet читает 4 байта длины, делает
-#  ``int.from_bytes(..., signed=False)`` НО Telethon на ряде версий парсит
-#  как signed (или после XOR-расшифровки в MTProxyIO длина уже мусорная и
-#  старший бит выставлен) → length ∈ [-2^31, -1] → asyncio роняет ValueError,
-#  и весь _recv_loop помирает БЕЗ корректного разрыва соединения, что потом
-#  каскадом рождает ``'NoneType' object has no attribute 'connect'`` в
-#  MTProtoSender и ``Server replied with a wrong session ID``.
+#  (B) ``../crypto/aes/aes_ige.c:60: OpenSSL internal error:
+#      assertion failed: (length % AES_BLOCK_SIZE) == 0`` →  Aborted —
+#      этот баг ПОРОЖДАЛ САМ ПРЕДЫДУЩИЙ ПАТЧ. Старая версия патча
+#      перезаписывала ОБА класса (IntermediatePacketCodec И
+#      RandomizedIntermediatePacketCodec), затирая в Randomized-варианте
+#      штатное снятие padding-а ``len(pkt) % 4``. В MTProto-слой приходил
+#      пакет с 1–3 байтами случайного хвоста → длина не кратна 16 →
+#      нативный AES-IGE (cryptg / OpenSSL) делал abort() прямо в C.
 #
-#  Защищаемся СРАЗУ В ТРЁХ слоях:
-#    (1) MTProxyIO.readexactly — обёртка с size guard;
-#    (2) IntermediatePacketCodec.read_packet — перехватываем парсинг длины;
-#    (3) ObfuscatedConnection / packet codec общая страховка.
+#  Решение:
+#    * Патчим ТОЛЬКО ``IntermediatePacketCodec.read_packet`` — это
+#      базовый метод, и ``RandomizedIntermediatePacketCodec.read_packet``
+#      сам зовёт ``super().read_packet()``, так что наш size-guard
+#      достаётся ему автоматически, а штатное снятие padding-а
+#      остаётся НЕТРОНУТЫМ.
+#    * Патчим ``MTProxyIO.readexactly`` как нижний слой защиты.
 # ─────────────────────────────────────────────────────────────────────────────
 
 import logging as _logging
@@ -83,36 +83,37 @@ def _kitsune_install_mtproxy_hardening() -> None:
         _log.debug("kitsune: MTProxyIO patch skipped — %s", _exc)
 
     # 2) IntermediatePacketCodec.read_packet -----------------------------------
-    #    Это ИСТИННЫЙ источник отрицательного size: тут парсится 4 байта длины
-    #    из потока. Если они уже мусор после XOR-расшифровки MTProxyIO —
-    #    ловим тут и рвём соединение по-человечески.
+    #    ТОЛЬКО базовый класс! RandomizedIntermediatePacketCodec унаследует
+    #    наш size-guard через super().read_packet() и продолжит штатно
+    #    снимать свой padding %4.  Если перезаписать обе read_packet —
+    #    выпиливается снятие padding-а и ломается AES-IGE длина → abort().
     try:
         from telethon.network.connection import tcpintermediate as _ti
 
-        _candidates = (
-            getattr(_ti, "IntermediatePacketCodec", None),
-            getattr(_ti, "RandomizedIntermediatePacketCodec", None),
-        )
-        for _cls in _candidates:
-            if _cls is None:
-                continue
-            if "read_packet" not in _cls.__dict__:
-                continue
-            if getattr(_cls.read_packet, "_kitsune_len_guard", False):
-                continue
+        _cls = getattr(_ti, "IntermediatePacketCodec", None)
+        if (
+            _cls is not None
+            and "read_packet" in _cls.__dict__
+            and not getattr(_cls.read_packet, "_kitsune_len_guard", False)
+        ):
+            import struct as _struct
 
-            _orig_read = _cls.read_packet
-
-            async def _read_packet_safe(self, reader, _orig=_orig_read):
+            async def _read_packet_safe(self, reader):
                 # Сами читаем 4 байта длины и валидируем перед тем,
                 # как уйти в reader.readexactly(length).
                 length_bytes = await reader.readexactly(4)
-                # signed=True — потому что именно signed-парсинг в комбинации
-                # с мусорным старшим битом и порождает «<0».
-                length = int.from_bytes(length_bytes, "little", signed=False)
+                if not length_bytes or len(length_bytes) < 4:
+                    raise ConnectionError(
+                        "Intermediate codec: short read on length field"
+                    )
+
+                # signed=False — корректный парсинг для Telegram intermediate.
+                # Старый «signed=True» — это был костыль, теперь он не нужен,
+                # потому что нижний readexactly_safe уже отсекает мусор.
+                (length,) = _struct.unpack("<i", length_bytes)
 
                 # Реальные пакеты Telegram — десятки байт..несколько мегабайт.
-                # Всё, что выше 16 MiB или нечётно в плохом смысле — мусор.
+                # Всё, что выше 16 MiB или ≤0 — мусор.
                 MAX_PACKET = 16 * 1024 * 1024
                 if length <= 0 or length > MAX_PACKET:
                     raise ConnectionError(
@@ -120,10 +121,10 @@ def _kitsune_install_mtproxy_hardening() -> None:
                         f"({length}) — proxy stream desynced"
                     )
 
-                # Для RandomizedIntermediate длина выровнена по 4 — но на
-                # всякий случай не паримся, отдадим как есть.
-                data = await reader.readexactly(length)
-                return data
+                # ВАЖНО: НЕ снимаем здесь padding %4. Если поверх нас стоит
+                # RandomizedIntermediatePacketCodec — он сделает это сам,
+                # вызывая нас через super().read_packet().
+                return await reader.readexactly(length)
 
             _read_packet_safe._kitsune_len_guard = True
             _cls.read_packet = _read_packet_safe
