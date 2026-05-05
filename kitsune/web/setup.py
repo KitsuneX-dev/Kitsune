@@ -291,8 +291,45 @@ class SetupServer:
             extra: dict = {}
             if proxy_cfg.get("host") and proxy_cfg.get("port"):
                 ptype = str(proxy_cfg.get("type", "SOCKS5")).upper()
-                if ptype == "MTPROTO":
+
+                # Telethon >=1.36 требует python-socks[asyncio] для всех типов прокси
+                # (включая MTProto). Без неё прокси МОЛЧА игнорируется.
+                try:
+                    import python_socks  # noqa: F401
+                    _has_python_socks = True
+                except ImportError:
+                    _has_python_socks = False
+                    logger.warning(
+                        "setup: python-socks не установлен — Telethon проигнорирует прокси. "
+                        "Пытаюсь установить автоматически…"
+                    )
+                    try:
+                        import sys as _sys, subprocess as _sp
+                        _sp.check_call(
+                            [_sys.executable, "-m", "pip", "install", "--quiet",
+                             "--disable-pip-version-check", "--no-warn-script-location",
+                             "python-socks[asyncio]>=2.4.4"]
+                        )
+                        import importlib
+                        importlib.invalidate_caches()
+                        import python_socks  # noqa: F401
+                        _has_python_socks = True
+                        logger.info("setup: python-socks[asyncio] установлен в рантайме")
+                    except Exception as _exc:
+                        logger.error(
+                            "setup: не удалось установить python-socks: %s. "
+                            "Прокси будет отключён.", _exc,
+                        )
+
+                if not _has_python_socks:
+                    pass  # прокси останется None
+                elif ptype == "MTPROTO":
                     secret = proxy_cfg.get("secret", "00000000000000000000000000000000")
+                    try:
+                        from ..rkn_bypass import normalize_secret
+                        secret = normalize_secret(str(secret))
+                    except Exception:
+                        pass
                     proxy = (str(proxy_cfg["host"]), int(proxy_cfg["port"]), secret)
                     from telethon.network import connection as tl_conn
                     extra["connection"] = tl_conn.ConnectionTcpMTProxyRandomizedIntermediate
@@ -304,6 +341,7 @@ class SetupServer:
                             "SOCKS5": _socks.SOCKS5,
                             "SOCKS4": _socks.SOCKS4,
                             "HTTP":   _socks.HTTP,
+                            "HTTPS":  _socks.HTTP,
                         }
                         proxy = (
                             _type_map.get(ptype, _socks.SOCKS5),

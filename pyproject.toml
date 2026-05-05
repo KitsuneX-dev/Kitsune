@@ -36,6 +36,8 @@ dependencies = [
     "toml>=0.10.2",
     "aiofiles>=23.2.1",
     "colorama>=0.4.6",
+    "PySocks>=1.7.1",
+    "python-socks[asyncio]>=2.4.4",
 ]
 
 [project.optional-dependencies]
