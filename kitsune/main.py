@@ -273,12 +273,33 @@ async def _startup(args: argparse.Namespace) -> None:
     else:
         extra = {"proxy": proxy, "connection": connection} if proxy else {}
 
+        # Pre-check: если прокси задан, проверяем что хост вообще доступен на TCP-уровне.
+        # Без этого Telethon молча уходит в бесконечные ретраи (connection_retries=10,
+        # retry_delay=3) и бот выглядит «зависшим». Эта проверка превращает молчаливое
+        # зависание в честную ошибку и позволяет fallback'у сработать.
+        if proxy:
+            from .rkn_bypass import test_connection as _proxy_tcp_check
+            _phost = proxy_cfg.get("host")
+            _pport = int(proxy_cfg.get("port") or 443)
+            logger.info("main: проверяю TCP-доступность прокси %s:%d…", _phost, _pport)
+            _proxy_alive = await _proxy_tcp_check(_phost, _pport, timeout=8.0)
+            if _proxy_alive:
+                logger.info("main: прокси %s:%d отвечает на TCP — пробую handshake", _phost, _pport)
+            else:
+                logger.warning(
+                    "main: прокси %s:%d НЕ отвечает на TCP за 8s — пропускаю и иду на fallback",
+                    _phost, _pport,
+                )
+                # Сбрасываем proxy/connection — Telethon без них пойдёт напрямую,
+                # упадёт по таймауту, и тогда сработает RKN-bypass ниже.
+                extra = {}
+
         client = KitsuneTelegramClient(
             str(session_path),
             api_id=api_id,
             api_hash=api_hash,
-            connection_retries=10,
-            retry_delay=3,
+            connection_retries=3,            # было 10 — слишком долго при дохлом прокси
+            retry_delay=2,
             auto_reconnect=True,
             flood_sleep_threshold=60,
             device_model="Kitsune Userbot",
@@ -289,9 +310,16 @@ async def _startup(args: argparse.Namespace) -> None:
         )
 
         try:
-            await client.connect()
+            # Жёсткий таймаут 30s на весь handshake — иначе Telethon может крутиться
+            # в ретраях гораздо дольше при сбойном MTProto-прокси (FakeTLS handshake
+            # особенно склонен залипать без явных ошибок).
+            await asyncio.wait_for(client.connect(), timeout=30.0)
+            logger.info("main: client.connect() OK")
         except (TimeoutError, OSError, ConnectionError, asyncio.TimeoutError) as exc:
-            logger.warning("main: direct connection failed (%s), trying RKN bypass…", exc)
+            logger.warning("main: connection failed (%s: %s), trying RKN bypass…",
+                           type(exc).__name__, exc)
+            with contextlib.suppress(Exception):
+                await client.disconnect()
             from .rkn_bypass import find_working_proxy
             from telethon.network.connection import ConnectionTcpMTProxyRandomizedIntermediate
 
@@ -340,7 +368,19 @@ async def _startup(args: argparse.Namespace) -> None:
                     logger.info("main: рабочий MTProto-прокси сохранён в config.toml")
                 except Exception:
                     logger.exception("main: не удалось сохранить прокси в config.toml")
-                await client.connect()
+                try:
+                    await asyncio.wait_for(client.connect(), timeout=30.0)
+                    logger.info("main: RKN-bypass client.connect() OK")
+                except (TimeoutError, OSError, ConnectionError, asyncio.TimeoutError) as exc2:
+                    logger.error(
+                        "main: RKN-bypass прокси %s:%d тоже не отвечает (%s)",
+                        host, port, exc2,
+                    )
+                    print(
+                        "\n❌ Найденный RKN-bypass прокси оказался нерабочим.\n"
+                        "   Попробуй .findproxy после старта или укажи прокси вручную.\n"
+                    )
+                    sys.exit(1)
             else:
                 print(
                     "\n❌ Не удалось подключиться к Telegram.\n"
