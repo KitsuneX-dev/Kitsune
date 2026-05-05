@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 _DB_OWNER         = "kitsune.backup"
 _DB_LOADER        = "kitsune.loader_mod"
-_INTERVAL_OPTIONS = [2, 4, 6, 8, 12, 24, 48]
+_INTERVAL_OPTIONS = ["1m", 2, 4, 6, 8, 12, 24, 48]  # "1m" = 1 минута (тест)
 
 # Папка с пользовательскими модулями (dlmod + lm)
 _USER_MODULES_DIR = Path.home() / ".kitsune" / "modules"
@@ -178,8 +178,8 @@ class BackupModule(KitsuneModule):
         "interval_off":   "🔕 Авто-бэкап отключён.",
         "interval_usage": (
             "Использование: <code>.setbackupinterval &lt;часы&gt;</code> или <code>.setbackupinterval off</code>\n"
-            f"Доступные значения: 2 4 6 8 12 24 48\n"
-            "Пример: <code>.setbackupinterval 6</code>"
+            "Доступные значения: <code>1m</code> 2 4 6 8 12 24 48\n"
+            "Пример: <code>.setbackupinterval 6</code> | тест: <code>.setbackupinterval 1m</code>"
         ),
         "interval_bad":   "❌ Неверное значение. Доступно: 2 4 6 8 12 24 48 или off",
         # captions (в сообщении Telegram)
@@ -273,7 +273,8 @@ class BackupModule(KitsuneModule):
     async def on_load(self) -> None:
         interval_h = self.db.get(_DB_OWNER, "interval_h", None)
         if interval_h:
-            self._start_auto(int(interval_h))
+            val = interval_h if interval_h == "1m" else int(interval_h)
+            self._start_auto(val)
 
     # ── Хелперы ───────────────────────────────────────────────────────────────
 
@@ -393,6 +394,7 @@ class BackupModule(KitsuneModule):
 
         if found_id:
             await self.db.set(_DB_OWNER, "group_id", found_id)
+            await self._ensure_bot_in_channel(found_id)
             return found_id
 
         # ── 3. Создаём новую группу ───────────────────────────────────────────
@@ -417,8 +419,9 @@ class BackupModule(KitsuneModule):
             logger.error("backup: не удалось создать KitsuneBackup: %s", exc)
             return None
 
-        # ── 4. Аватарка + папка Kitsune ──────────────────────────────────────
+        # ── 4. Бот в канале + Аватарка + папка Kitsune ───────────────────────
         if new_id:
+            await self._ensure_bot_in_channel(new_id)
             try:
                 from ..assets import ensure_channel_photo, BACKUP_AVATAR
                 await ensure_channel_photo(self.client, self.db, new_id, BACKUP_AVATAR)
@@ -430,6 +433,45 @@ class BackupModule(KitsuneModule):
                 logger.debug("backup: не удалось добавить в папку Kitsune: %s", e)
 
         return new_id
+
+    async def _ensure_bot_in_channel(self, channel_id: int) -> None:
+        """
+        Добавляет aiogram-бота как администратора в KitsuneBackup.
+        Это обязательно — иначе bot.send_document() упадёт с Forbidden
+        и кнопка «🔄 Восстановить» не прикрепится к файлу.
+        """
+        inline = self._inline()
+        if not inline or not getattr(inline, "_bot", None):
+            return
+        try:
+            from telethon.tl.functions.channels import InviteToChannelRequest, EditAdminRequest
+            from telethon.tl.types import ChatAdminRights
+
+            bot_me = await inline._bot.get_me()
+            bot_username = bot_me.username
+
+            entity = await self.client.get_entity(channel_id)
+
+            # Приглашаем (игнорируем если уже в чате)
+            try:
+                await self.client(InviteToChannelRequest(channel=entity, users=[bot_username]))
+            except Exception:
+                pass
+
+            # Даём права на публикацию и редактирование
+            await self.client(EditAdminRequest(
+                channel=entity,
+                user_id=bot_username,
+                admin_rights=ChatAdminRights(
+                    post_messages=True,
+                    edit_messages=True,
+                    delete_messages=True,
+                ),
+                rank="",
+            ))
+            logger.info("backup: бот @%s добавлен в KitsuneBackup как админ", bot_username)
+        except Exception as exc:
+            logger.warning("backup: не удалось добавить бота в KitsuneBackup: %s", exc)
 
     @staticmethod
     def _strip_tokens(db_data: dict) -> None:
@@ -908,7 +950,15 @@ class BackupModule(KitsuneModule):
             await event.reply(self.strings("interval_off"), parse_mode="html")
             return
 
-        # Числовое значение
+        # 1m — специальный тестовый режим (1 минута)
+        if arg == "1m":
+            await self.db.set(_DB_OWNER, "interval_h", "1m")
+            await self.db.set(_DB_OWNER, "last_backup", int(time.time()))
+            self._start_auto("1m")
+            await event.reply("✅ Авто-бэкап каждые <b>1 мин</b> (тест).", parse_mode="html")
+            return
+
+        # Числовое значение (часы)
         try:
             h = int(arg)
         except ValueError:
@@ -978,13 +1028,13 @@ class BackupModule(KitsuneModule):
 
     # ── Авто-бэкап ────────────────────────────────────────────────────────────
 
-    def _start_auto(self, interval_h: int) -> None:
+    def _start_auto(self, interval_h) -> None:
         if self._auto_task and not self._auto_task.done():
             self._auto_task.cancel()
         self._auto_task = asyncio.ensure_future(self._auto_loop(interval_h))
 
-    async def _auto_loop(self, interval_h: int) -> None:
-        interval_sec = interval_h * 3_600
+    async def _auto_loop(self, interval_h) -> None:
+        interval_sec = 60 if interval_h == "1m" else int(interval_h) * 3_600
         while True:
             last = self.db.get(_DB_OWNER, "last_backup", 0)
             wait = max(0, last + interval_sec - time.time())
@@ -1038,8 +1088,9 @@ class BackupModule(KitsuneModule):
             from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
             buttons, row = [], []
             for h in _INTERVAL_OPTIONS:
+                label = "1м 🧪" if h == "1m" else f"{h}ч"
                 row.append(InlineKeyboardButton(
-                    text=f"{h}ч",
+                    text=label,
                     callback_data=f"backup_interval:{h}",
                 ))
                 if len(row) == 4:
@@ -1073,14 +1124,21 @@ class BackupModule(KitsuneModule):
     async def on_callback(self, call) -> None:
         if not call.data.startswith("backup_interval:"):
             return
-        h = int(call.data.split(":")[1])
+        raw_h = call.data.split(":")[1]
+        h = raw_h if raw_h == "1m" else int(raw_h)
         if h == 0:
             if self._auto_task and not self._auto_task.done():
                 self._auto_task.cancel()
             await self.db.delete(_DB_OWNER, "interval_h")
             await call.message.edit_text(self.strings("interval_off"), parse_mode="HTML")
             return
-        await self.db.set(_DB_OWNER, "interval_h", h)
-        await self.db.set(_DB_OWNER, "last_backup", int(time.time()))
-        self._start_auto(h)
-        await call.message.edit_text(self.strings("interval_set").format(h=h), parse_mode="HTML")
+        if h == "1m":
+            await self.db.set(_DB_OWNER, "interval_h", "1m")
+            await self.db.set(_DB_OWNER, "last_backup", int(time.time()))
+            self._start_auto("1m")
+            await call.message.edit_text("✅ Авто-бэкап каждые <b>1 мин</b> (тест).", parse_mode="HTML")
+        else:
+            await self.db.set(_DB_OWNER, "interval_h", h)
+            await self.db.set(_DB_OWNER, "last_backup", int(time.time()))
+            self._start_auto(h)
+            await call.message.edit_text(self.strings("interval_set").format(h=h), parse_mode="HTML")
