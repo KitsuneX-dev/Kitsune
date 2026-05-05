@@ -303,9 +303,15 @@ class FakeTLSStreamReader(_LayeredStreamReaderBase):
         self.buf = bytearray()
 
     async def read(self, n, ignore_buf=False):
+        # ВАЖНО: контракт asyncio.StreamReader.read(n) — вернуть НЕ БОЛЕЕ n
+        # байт. Если отдавать целый TLS-фрейм (до 16 КБ) на запрос «дай мне
+        # 64 байта», поверхностный obfuscated2-кодек Telethon рассинхронится
+        # и в AES-IGE прилетит буфер некратной 16 длины → OpenSSL делает
+        # abort() в aes_ige.c:60. Поэтому строго режем по n и излишек
+        # кладём обратно в self.buf.
         if self.buf and not ignore_buf:
-            data = self.buf
-            self.buf = bytearray()
+            data = self.buf[:n]
+            self.buf = self.buf[n:]
             return bytes(data)
 
         while True:
@@ -325,6 +331,16 @@ class FakeTLSStreamReader(_LayeredStreamReaderBase):
             data = await self.upstream.readexactly(data_len)
             if tls_rec_type == b"\x14":
                 continue
+
+            if ignore_buf:
+                # readexactly() сам управляет своим self.buf, ему отдаём
+                # весь TLS-фрейм целиком — он сам аккуратно нарежет.
+                return data
+
+            if len(data) > n:
+                # Излишек кладём в общий буфер до следующего read().
+                self.buf += data[n:]
+                data = data[:n]
             return data
 
     async def readexactly(self, n):
