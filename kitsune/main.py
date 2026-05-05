@@ -11,6 +11,12 @@ import sys
 from pathlib import Path
 from typing import Any
 
+# ВАЖНО: импорт ``kitsune`` (через относительные импорты ниже) уже включил
+# MTProxy hardening из kitsune/__init__.py — патчи на Telethon применяются
+# ДО того, как мы тут что-либо делаем с сетью. Если видишь в логе
+# ``kitsune: MTProxy hardening active`` — значит защита от
+# ``ValueError: readexactly size can not be less than zero`` стоит.
+
 BASE_DIR = (
     "/data"
     if "DOCKER" in os.environ
@@ -273,32 +279,51 @@ async def _startup(args: argparse.Namespace) -> None:
     else:
         extra = {"proxy": proxy, "connection": connection} if proxy else {}
 
-        # Pre-check: если прокси задан, проверяем что хост вообще доступен на TCP-уровне.
-        # Без этого Telethon молча уходит в бесконечные ретраи (connection_retries=10,
-        # retry_delay=3) и бот выглядит «зависшим». Эта проверка превращает молчаливое
-        # зависание в честную ошибку и позволяет fallback'у сработать.
+        # Pre-check: TCP уровень.
         if proxy:
-            from .rkn_bypass import test_connection as _proxy_tcp_check
+            from .rkn_bypass import (
+                test_connection as _proxy_tcp_check,
+                mtproxy_handshake_check as _proxy_hs_check,
+            )
             _phost = proxy_cfg.get("host")
             _pport = int(proxy_cfg.get("port") or 443)
+            _psecret = str(proxy_cfg.get("secret") or "")
+
             logger.info("main: проверяю TCP-доступность прокси %s:%d…", _phost, _pport)
             _proxy_alive = await _proxy_tcp_check(_phost, _pport, timeout=8.0)
-            if _proxy_alive:
-                logger.info("main: прокси %s:%d отвечает на TCP — пробую handshake", _phost, _pport)
-            else:
+            if not _proxy_alive:
                 logger.warning(
                     "main: прокси %s:%d НЕ отвечает на TCP за 8s — пропускаю и иду на fallback",
                     _phost, _pport,
                 )
-                # Сбрасываем proxy/connection — Telethon без них пойдёт напрямую,
-                # упадёт по таймауту, и тогда сработает RKN-bypass ниже.
                 extra = {}
+            else:
+                # Глубокая проверка handshake — отсекает «полу-мёртвые» FakeTLS-прокси,
+                # которые TCP принимают, но при первом MTProto-пакете отдают мусор
+                # → ``readexactly size can not be less than zero``. Это и есть
+                # сценарий пользователя с prxy.vpnspacev.com.
+                logger.info(
+                    "main: TCP OK, проверяю MTProto handshake %s:%d…", _phost, _pport,
+                )
+                _hs_ok = await _proxy_hs_check(_phost, _pport, _psecret, timeout=10.0)
+                if _hs_ok:
+                    logger.info(
+                        "main: handshake OK — поднимаю основное соединение через %s:%d",
+                        _phost, _pport,
+                    )
+                else:
+                    logger.warning(
+                        "main: прокси %s:%d отвечает на TCP, но MTProto handshake "
+                        "ПРОВАЛЕН — прокси нерабочий (FakeTLS мусор). Иду на fallback.",
+                        _phost, _pport,
+                    )
+                    extra = {}
 
         client = KitsuneTelegramClient(
             str(session_path),
             api_id=api_id,
             api_hash=api_hash,
-            connection_retries=3,            # было 10 — слишком долго при дохлом прокси
+            connection_retries=3,
             retry_delay=2,
             auto_reconnect=True,
             flood_sleep_threshold=60,
@@ -310,9 +335,6 @@ async def _startup(args: argparse.Namespace) -> None:
         )
 
         try:
-            # Жёсткий таймаут 30s на весь handshake — иначе Telethon может крутиться
-            # в ретраях гораздо дольше при сбойном MTProto-прокси (FakeTLS handshake
-            # особенно склонен залипать без явных ошибок).
             await asyncio.wait_for(client.connect(), timeout=30.0)
             logger.info("main: client.connect() OK")
         except (TimeoutError, OSError, ConnectionError, asyncio.TimeoutError) as exc:
@@ -323,7 +345,6 @@ async def _startup(args: argparse.Namespace) -> None:
             from .rkn_bypass import find_working_proxy
             from telethon.network.connection import ConnectionTcpMTProxyRandomizedIntermediate
 
-            # Для RKN-bypass тоже нужен python-socks — иначе Telethon проигнорирует proxy.
             if not _ensure_python_socks():
                 print(
                     "\n❌ Не удалось подключиться к Telegram, а RKNBypass требует python-socks.\n"
@@ -332,8 +353,9 @@ async def _startup(args: argparse.Namespace) -> None:
                 sys.exit(1)
 
             try:
-                # Мы уже внутри работающего event loop — просто await.
-                proxy_info = await find_working_proxy()
+                # deep_check=True — благодаря ему мы НЕ сохраним в config.toml
+                # «полу-мёртвый» прокси и не упадём на нём при следующем старте.
+                proxy_info = await find_working_proxy(deep_check=True)
             except Exception as _exc:
                 logger.exception("main: find_working_proxy() failed: %s", _exc)
                 proxy_info = None
@@ -356,7 +378,6 @@ async def _startup(args: argparse.Namespace) -> None:
                     proxy=(host, port, secret),
                     connection=ConnectionTcpMTProxyRandomizedIntermediate,
                 )
-                # Сохраняем найденный прокси в config.toml для будущих запусков.
                 try:
                     cfg["proxy"] = {
                         "type":   "MTPROTO",
@@ -384,12 +405,16 @@ async def _startup(args: argparse.Namespace) -> None:
             else:
                 print(
                     "\n❌ Не удалось подключиться к Telegram.\n"
-                    "   Попробуй настроить прокси в config.toml:\n\n"
+                    "   Текущий прокси из config.toml не отвечает на MTProto handshake,\n"
+                    "   а публичные fallback-прокси тоже не сработали.\n\n"
+                    "   Попробуй настроить прокси вручную в config.toml:\n\n"
                     "      [proxy]\n"
                     "      type = \"MTPROTO\"\n"
                     "      host = \"149.154.175.100\"\n"
                     "      port = 443\n"
                     "      secret = \"ee9000000000000000000000000000003900000000000000\"\n\n"
+                    "   Или возьми свежий прокси из @MTProxyT / @proxyme и подставь его:\n"
+                    "      .setproxy <host> <port> <secret>\n\n"
                     f"   Детали: {exc}\n"
                 )
                 sys.exit(1)
@@ -517,47 +542,35 @@ async def _safe_force_reconnect(client: Any) -> bool:
     """
     Безопасный «жёсткий» reconnect.
 
-    Старый код делал ``await client.disconnect()`` и сразу же
-    ``await client.connect()``. Из-за этого:
-
+    Раньше keepalive делал ``disconnect()`` и сразу ``connect()`` — из-за чего:
       1) ``_recv_loop`` ещё не успевал завершиться → asyncio ругался
          ``RuntimeError: readexactly() called while another coroutine
          is already waiting for incoming data``;
-      2) Telethon обнулял ``_sender._connection = None``, а на следующей
-         итерации сам же звал ``self._connection.connect(...)`` →
+      2) Telethon обнулял ``_sender._connection = None``, а на следующем
+         тике сам же звал ``self._connection.connect(...)`` →
          ``AttributeError: 'NoneType' object has no attribute 'connect'``;
       3) старый и новый сокеты ненадолго работали параллельно с одним
-         auth_key → сервер бил ``Server replied with a wrong session ID``.
+         auth_key → ``Server replied with a wrong session ID``.
 
-    Здесь мы делаем «дисконнект → ждём ОЧИСТКИ всех внутренних задач →
-    только потом connect». При любых вспомогательных ошибках полагаемся
-    на встроенный ``auto_reconnect=True``.
+    Тут мы корректно дожидаемся завершения внутренних задач Telethon
+    перед новым connect() и полагаемся на штатный auto_reconnect.
     """
-    # 1. Просим Telethon штатно закрыть соединение.
     with contextlib.suppress(Exception):
         await client.disconnect()
 
-    # 2. Дожидаемся, пока recv-loop / send-loop / disconnect_coro реально
-    #    завершатся. Без этого старт нового connect() пересечётся со старым
-    #    StreamReader и asyncio упадёт.
     sender = getattr(client, "_sender", None)
     pending = []
     for attr in ("_recv_loop_handle", "_send_loop_handle", "_disconnected"):
         t = getattr(sender, attr, None) if sender is not None else None
         if t is None:
             continue
-        # _disconnected — это Future, остальные — Task; await работает на обоих.
         pending.append(t)
     for t in pending:
         with contextlib.suppress(Exception):
             await asyncio.wait_for(asyncio.shield(t), timeout=5.0)
 
-    # 3. На всякий случай дадим event loop тик, чтобы коллбеки .done() отработали.
     await asyncio.sleep(0.1)
 
-    # 4. Connect. Если Telethon внутри себя оставил _connection=None
-    #    (это и было корнем AttributeError), он сам пересоздаст connection
-    #    из ``client._connection`` (класса) при следующем connect().
     try:
         await asyncio.wait_for(client.connect(), timeout=30.0)
         return True
@@ -571,18 +584,18 @@ async def _keepalive(client: Any) -> None:
     """
     Лёгкий мониторинг подключения.
 
-    Раньше keepalive при ЛЮБОЙ ошибке сам делал ``disconnect()`` +
-    ``connect()`` — и провоцировал гонку с ``_recv_loop`` (см. подробный
-    разбор в ``_safe_force_reconnect``). Теперь схема такая:
+    Старая схема: на ЛЮБУЮ ошибку — disconnect()+connect(). Это и порождало
+    каскад из ``NoneType.connect`` / wrong session ID / readexactly race
+    (см. подробный разбор в ``_safe_force_reconnect``).
 
-      • Каждые 30s пингуем ``get_me()`` с таймаутом.
-      • На временные сбои НЕ дёргаем сокет — у Telethon уже включён
-        ``auto_reconnect=True``, он сам разрулит короткие обрывы.
-      • Только если сбои идут подряд достаточно долго (≥ 5 минут),
-        разово делаем «жёсткий» безопасный reconnect через
-        ``_safe_force_reconnect``.
+    Новая схема:
+      • каждые 30s пингуем ``get_me()`` с таймаутом;
+      • на временные сбои НЕ дёргаем сокет — у Telethon уже включён
+        ``auto_reconnect=True``, он сам разрулит короткие обрывы;
+      • только если сбои идут подряд ≥5 минут — разово делаем
+        безопасный жёсткий reconnect через ``_safe_force_reconnect``.
     """
-    HARD_RECONNECT_AFTER_S = 300   # 5 минут подряд неудач до hard reconnect
+    HARD_RECONNECT_AFTER_S = 300
     PING_INTERVAL_S        = 30
     PING_TIMEOUT_S         = 15
 
@@ -600,7 +613,6 @@ async def _keepalive(client: Any) -> None:
                 raise ConnectionError("client disconnected")
             await asyncio.wait_for(client.get_me(), timeout=PING_TIMEOUT_S)
 
-            # Успех — сбрасываем серию.
             if fail_streak_started is not None:
                 logger.info(
                     "keepalive: соединение восстановлено (после %d попыт(ок))",
@@ -625,12 +637,9 @@ async def _keepalive(client: Any) -> None:
                 type(exc).__name__, exc, attempts, elapsed,
             )
 
-            # Доверяем встроенному auto_reconnect — пока серия короче
-            # порога, ничего сами не дёргаем.
             if elapsed < HARD_RECONNECT_AFTER_S:
                 continue
 
-            # Серия сбоев слишком длинная → делаем безопасный hard reconnect.
             logger.warning(
                 "keepalive: %d неудачных пингов за ~%.0fs — жёсткий reconnect",
                 attempts, elapsed,
@@ -644,9 +653,6 @@ async def _keepalive(client: Any) -> None:
                 fail_streak_started = None
                 attempts = 0
             else:
-                # Не получилось — сдвигаем «начало серии», чтобы
-                # следующая попытка hard reconnect случилась снова
-                # через HARD_RECONNECT_AFTER_S, а не каждые 30s.
                 fail_streak_started = now
 
 async def _setup_kitsune_folder(client: Any, db: Any) -> None:
