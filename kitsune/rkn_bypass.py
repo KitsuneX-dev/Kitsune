@@ -50,32 +50,67 @@ def ensure_python_socks(auto_install: bool = True) -> bool:
         )
         return False
 
+
 def _patch_telethon_mtproxy() -> None:
-    import sys
-    if sys.version_info < (3, 13):
-        return
+    """
+    Резервный hook на случай, если ``kitsune/__init__.py`` по какой-то причине
+    не успел применить патч (например, кто-то импортировал ``kitsune.rkn_bypass``
+    напрямую без прохода через ``import kitsune``).
+
+    Реальная защита от
+        ``ValueError: readexactly size can not be less than zero``
+    живёт в ``kitsune/__init__.py`` — там патчатся СРАЗУ ТРИ места:
+      • ``MTProxyIO.readexactly`` (size guard на низком уровне);
+      • ``IntermediatePacketCodec.read_packet`` (валидация длины пакета);
+      • ``RandomizedIntermediatePacketCodec.read_packet`` (то же).
+
+    Здесь повторяем размывание для MTProxyIO — патч идемпотентен (флаг
+    ``_kitsune_size_guard``), так что двойного наложения не будет.
+    """
     try:
         from telethon.network.connection import tcpmtproxy as _m
-        import inspect, types
-
-        src = inspect.getsource(_m.MTProxyReader.readexactly)
-        if '_py313_patched' in src:
-            return
-
-        original = _m.MTProxyReader.readexactly
-
-        async def readexactly_patched(self, n):
-            if n <= 0:
-                return b''
-            return await original(self, n)
-
-        readexactly_patched._py313_patched = True
-        _m.MTProxyReader.readexactly = readexactly_patched
-        logger.info("rkn_bypass: Telethon MTProxy patched for Python 3.13")
     except Exception as exc:
-        logger.debug("rkn_bypass: MTProxy patch failed — %s", exc)
+        logger.debug("rkn_bypass: telethon.tcpmtproxy недоступен — %s", exc)
+        return
+
+    target_cls = None
+    for _name in dir(_m):
+        obj = getattr(_m, _name, None)
+        if not isinstance(obj, type):
+            continue
+        if "readexactly" in obj.__dict__:
+            target_cls = obj
+            break
+
+    if target_cls is None:
+        logger.debug("rkn_bypass: класс с readexactly не найден в tcpmtproxy")
+        return
+
+    if getattr(target_cls.readexactly, "_kitsune_size_guard", False):
+        return  # уже пропатчено в __init__.py — идём дальше молча
+
+    original = target_cls.readexactly
+
+    async def readexactly_safe(self, n):
+        if n is None or n < 0:
+            raise ConnectionError(
+                f"MTProxy: получен невалидный размер пакета ({n!r}). "
+                "Прокси, вероятно, мёртв или не поддерживает FakeTLS — обрываю."
+            )
+        if n == 0:
+            return b""
+        return await original(self, n)
+
+    readexactly_safe._kitsune_size_guard = True
+    target_cls.readexactly = readexactly_safe
+    logger.info(
+        "rkn_bypass: fallback MTProxy patch applied (class=%s)",
+        target_cls.__name__,
+    )
+
 
 _patch_telethon_mtproxy()
+
 
 def normalize_secret(secret: str) -> str:
     import base64
@@ -102,6 +137,7 @@ def normalize_secret(secret: str) -> str:
         pass
 
     return s
+
 
 _PUBLIC_PROXIES: list[tuple[str, int, str]] = [
     ("149.154.175.100", 443, "ee9000000000000000000000000000003900000000000000"),
@@ -130,15 +166,18 @@ _RE_TG_PROXY_ALT = re.compile(
     re.IGNORECASE,
 )
 
+
 def make_ssl_ctx_no_verify() -> ssl.SSLContext:
     ctx = ssl.create_default_context()
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
     return ctx
 
+
 def get_aiohttp_connector():
     import aiohttp
     return aiohttp.TCPConnector(ssl=make_ssl_ctx_no_verify())
+
 
 def get_aiogram_session(timeout: int = 30):
     try:
@@ -158,6 +197,7 @@ def get_aiogram_session(timeout: int = 30):
         logger.warning("rkn_bypass: failed to create bypass session — %s", exc)
         return None
 
+
 def get_connection_class(use_proxy: bool = False):
     from telethon.network.connection import (
         ConnectionTcpFull,
@@ -166,6 +206,7 @@ def get_connection_class(use_proxy: bool = False):
     if use_proxy:
         return ConnectionTcpMTProxyRandomizedIntermediate
     return ConnectionTcpFull
+
 
 async def test_connection(
     host: str = "api.telegram.org",
@@ -186,6 +227,69 @@ async def test_connection(
         return True
     except Exception:
         return False
+
+
+async def mtproxy_handshake_check(
+    host: str,
+    port: int,
+    secret: str,
+    timeout: float = 8.0,
+) -> bool:
+    """
+    Делает мини-handshake через настоящий Telethon MTProxy и проверяет,
+    что сервер не возвращает мусор. Это ловит «дохлые» FakeTLS-прокси,
+    которые отвечают на TCP, но не умеют MTProto — именно такие порождают
+    ``readexactly size can not be less than zero``.
+
+    Возвращает True, если хоть какой-то валидный пакет был прочитан.
+    """
+    import asyncio
+
+    try:
+        from telethon import TelegramClient
+        from telethon.network.connection import (
+            ConnectionTcpMTProxyRandomizedIntermediate,
+        )
+    except Exception:
+        return await test_connection(host, port, timeout=timeout)
+
+    secret = normalize_secret(secret)
+
+    # Используем заведомо "пустую" сессию в памяти, чтобы handshake не
+    # пытался залогиниться. api_id/api_hash тоже dummy — для handshake
+    # важен только TCP+обфускация.
+    try:
+        from telethon.sessions import MemorySession
+        client = TelegramClient(
+            MemorySession(),
+            api_id=1,
+            api_hash="0" * 32,
+            connection=ConnectionTcpMTProxyRandomizedIntermediate,
+            proxy=(host, port, secret),
+            connection_retries=1,
+            retry_delay=1,
+            auto_reconnect=False,
+            timeout=timeout,
+        )
+        try:
+            await asyncio.wait_for(client.connect(), timeout=timeout)
+            ok = client.is_connected()
+            return bool(ok)
+        finally:
+            try:
+                await client.disconnect()
+            except Exception:
+                pass
+    except ConnectionError:
+        # наш size-guard сработал — прокси не валиден
+        return False
+    except Exception as exc:
+        logger.debug(
+            "mtproxy_handshake_check: %s:%d failed — %s",
+            host, port, type(exc).__name__,
+        )
+        return False
+
 
 async def _fetch_from_tg_channel(url: str) -> list[tuple[str, int, str]]:
     try:
@@ -210,6 +314,7 @@ async def _fetch_from_tg_channel(url: str) -> list[tuple[str, int, str]]:
     except Exception as exc:
         logger.debug("rkn_bypass: channel %s — %s", url, exc)
         return []
+
 
 async def _fetch_from_mtpro_xyz() -> list[tuple[str, int, str]]:
     try:
@@ -240,6 +345,7 @@ async def _fetch_from_mtpro_xyz() -> list[tuple[str, int, str]]:
         logger.debug("rkn_bypass: mtpro.xyz — %s", exc)
         return []
 
+
 async def find_proxy_from_web() -> list[tuple[str, int, str]]:
     import asyncio
 
@@ -261,9 +367,21 @@ async def find_proxy_from_web() -> list[tuple[str, int, str]]:
     logger.info("rkn_bypass: найдено %d прокси из веб-источников", len(proxies))
     return proxies
 
+
 async def find_working_proxy(
     extra_proxies: list[tuple[str, int, str]] | None = None,
+    deep_check: bool = True,
 ) -> tuple[str, int, str] | None:
+    """
+    Ищет рабочий MTProto-прокси.
+
+    Если ``deep_check=True`` (по умолчанию) — после успешного TCP-теста
+    дополнительно делает реальный MTProto handshake. Это отсеивает
+    «полу-мёртвые» прокси, которые отвечают на TCP, но при первом же
+    шифрованном пакете возвращают мусор → ``readexactly size can not be
+    less than zero``. Без deep_check мы как раз и сохраняли в config.toml
+    нерабочий прокси и потом крашились на нём при каждом старте.
+    """
     candidates = list(_PUBLIC_PROXIES)
     if extra_proxies:
         seen = {(h, p) for h, p, _ in candidates}
@@ -273,12 +391,22 @@ async def find_working_proxy(
                 seen.add((item[0], item[1]))
 
     for host, port, secret in candidates:
-        if await test_connection(host, port, timeout=3.0):
-            logger.info("rkn_bypass: рабочий прокси %s:%d", host, port)
-            return host, port, secret
+        if not await test_connection(host, port, timeout=3.0):
+            continue
+        if deep_check:
+            ok = await mtproxy_handshake_check(host, port, secret, timeout=8.0)
+            if not ok:
+                logger.debug(
+                    "rkn_bypass: %s:%d — TCP OK, но handshake провален",
+                    host, port,
+                )
+                continue
+        logger.info("rkn_bypass: рабочий прокси %s:%d", host, port)
+        return host, port, secret
 
     logger.warning("rkn_bypass: рабочий прокси не найден")
     return None
+
 
 def apply_bypass_to_config(cfg: dict) -> dict:
     import asyncio
