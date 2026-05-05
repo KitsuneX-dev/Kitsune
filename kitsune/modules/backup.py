@@ -488,6 +488,34 @@ class BackupModule(KitsuneModule):
     def _inline(self):
         return getattr(self.client, "_kitsune_inline", None)
 
+    def _register_restore_cb(self, chat_id: int, msg_id: int, kind: str) -> str:
+        """
+        Регистрирует обработчик кнопки «🔄 Восстановить» в InlineManager
+        в том же формате, что и `cfg`/`config` (5-tuple), и возвращает cb_id
+        для использования в callback_data.
+        """
+        inline = self._inline()
+        import uuid as _uuid
+        cb_id = str(_uuid.uuid4())[:12]
+        inline._callbacks[cb_id] = (
+            self._cb_restore,
+            (int(chat_id), int(msg_id), kind),
+            self.client.tg_id,
+            False,
+            {},
+        )
+        return cb_id
+
+    def _build_restore_markup(self, cb_id: str):
+        """Aiogram-разметка с одной кнопкой «🔄 Восстановить»."""
+        from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+        return InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(
+                text=self.strings("restore_btn"),
+                callback_data=cb_id,
+            ),
+        ]])
+
     async def _send_with_button_via_bot(
         self,
         dest: int,
@@ -500,50 +528,29 @@ class BackupModule(KitsuneModule):
     ) -> bool:
         """
         Отправляет файл бэкапа через aiogram-бота с прикреплённой
-        инлайн-кнопкой «🔄 Восстановить» в одном сообщении (документ + caption + кнопка).
+        инлайн-кнопкой «🔄 Восстановить» в одном сообщении
+        (документ + caption + кнопка) — ровно как просит пользователь.
 
         Возвращает True если получилось, False — иначе (тогда вызывающая сторона
-        делает fallback на отправку через юзербот без кнопки).
+        пробует fallback: юзербот + bot.edit_message_reply_markup).
         """
         inline = self._inline()
         if not inline or not getattr(inline, "_bot", None):
+            logger.warning("backup: inline-бот недоступен — кнопка не будет добавлена")
             return False
 
         bot = inline._bot
 
-        # Бот должен быть в чате чтобы туда отправлять документы. Если нет —
-        # fallback на юзербот.
         try:
-            from aiogram.types import (
-                BufferedInputFile,
-                InlineKeyboardButton,
-                InlineKeyboardMarkup,
-            )
-        except Exception:
+            from aiogram.types import BufferedInputFile
+        except Exception as exc:
+            logger.warning("backup: aiogram недоступен (%s)", exc)
             return False
 
-        # Регистрируем callback в InlineManager, чтобы получить cb_id для кнопки.
-        # После отправки документа мы знаем sent.message_id и сможем привязать
-        # restore-обработчик к этому сообщению.
-        import uuid as _uuid
-        cb_id = str(_uuid.uuid4())[:12]
-
-        # placeholder регистрации — реальные args (chat_id, msg_id, kind)
-        # подменим после получения ответа от Telegram.
-        inline._callbacks[cb_id] = (
-            self._cb_restore,
-            (0, 0, kind),  # будет обновлено ниже
-            self.client.tg_id,
-            False,
-            {},
-        )
-
-        markup = InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(
-                text=self.strings("restore_btn"),
-                callback_data=cb_id,
-            ),
-        ]])
+        # Регистрируем callback заранее — реальные chat/msg id подставим после
+        # получения ответа от Telegram.
+        cb_id = self._register_restore_cb(0, 0, kind)
+        markup = self._build_restore_markup(cb_id)
 
         try:
             input_file = BufferedInputFile(data, filename=fname)
@@ -555,8 +562,11 @@ class BackupModule(KitsuneModule):
                 reply_markup=markup,
             )
         except Exception as exc:
-            # Бот не в чате / нет прав / другая ошибка → fallback
-            logger.debug("backup: bot.send_document failed (%s)", exc)
+            # Бот не в чате / нет прав / другая ошибка → fallback (с видимым логом).
+            logger.warning(
+                "backup: bot.send_document(chat=%s) упал: %s — пробую fallback",
+                dest, exc,
+            )
             inline._callbacks.pop(cb_id, None)
             return False
 
@@ -571,10 +581,55 @@ class BackupModule(KitsuneModule):
                 False,
                 {},
             )
-        except Exception:
+            logger.info(
+                "backup: бот отправил %s (chat=%s msg=%s) с кнопкой «Восстановить»",
+                kind, sent_chat_id, sent_msg_id,
+            )
+        except Exception as exc:
+            logger.warning("backup: не смог достать sent.chat/message_id: %s", exc)
             inline._callbacks.pop(cb_id, None)
             return False
         return True
+
+    async def _attach_button_to_userbot_msg(
+        self,
+        sent_msg,
+        kind: str,
+    ) -> bool:
+        """
+        Fallback: файл уже отправлен юзерботом, добавляем кнопку «🔄 Восстановить»
+        через bot.edit_message_reply_markup. Бот должен быть админом канала с
+        правом edit_messages (выдаём в _ensure_bot_in_channel).
+        """
+        inline = self._inline()
+        if not inline or not getattr(inline, "_bot", None):
+            return False
+
+        chat_id, msg_id = _extract_msg_ids(sent_msg)
+        if not chat_id or not msg_id:
+            logger.warning("backup: не смог извлечь chat/msg id — кнопка не будет добавлена")
+            return False
+
+        cb_id  = self._register_restore_cb(int(chat_id), int(msg_id), kind)
+        markup = self._build_restore_markup(cb_id)
+        try:
+            await inline._bot.edit_message_reply_markup(
+                chat_id=int(chat_id),
+                message_id=int(msg_id),
+                reply_markup=markup,
+            )
+            logger.info(
+                "backup: кнопка «Восстановить» прикреплена к %s/%s (kind=%s)",
+                chat_id, msg_id, kind,
+            )
+            return True
+        except Exception as exc:
+            logger.warning(
+                "backup: edit_message_reply_markup(chat=%s msg=%s) упал: %s",
+                chat_id, msg_id, exc,
+            )
+            inline._callbacks.pop(cb_id, None)
+            return False
 
     async def _send_backup(
         self,
@@ -590,30 +645,42 @@ class BackupModule(KitsuneModule):
         Отправка бэкапа ТОЛЬКО в группу KitsuneBackup.
         Saved Messages намеренно не используются.
 
-        Если есть aiogram-бот — отправляем через него: одно сообщение содержит
-        файл + текст (caption) + кнопку «🔄 Восстановить».
-        Если бота нет / он не в чате — fallback на юзербот без кнопки.
+        Цепочка попыток (любая выдаёт «файл + текст + кнопка»):
+          1. bot.send_document(reply_markup=…) — одно сообщение, атомарно.
+          2. юзербот шлёт файл, затем bot.edit_message_reply_markup
+             прикрепляет кнопку «🔄 Восстановить» (нужно admin/edit_messages).
+          3. крайний случай — юзербот без кнопки (логируем warning).
         """
         if not dest:
             logger.warning("backup: нет KitsuneBackup — отправка пропущена")
             return
 
-        # Основной путь — через бота, файл+текст+кнопка в одном сообщении.
-        ok = await self._send_with_button_via_bot(
+        # ── 1. Основной путь — через бота, файл+текст+кнопка одним сообщением.
+        if await self._send_with_button_via_bot(
             dest, data, fname, caption, kind, ts, count,
-        )
-        if ok:
+        ):
             return
 
-        # Fallback: бота нет → отправляем юзерботом без кнопки.
+        # ── 2. Fallback: юзербот шлёт файл, бот пристёгивает кнопку.
+        sent = None
         try:
             buf = io.BytesIO(data)
             buf.name = fname
-            await hydro_send_file(
+            sent = await hydro_send_file(
                 self.client, dest, buf, caption=caption, parse_mode="html",
             )
         except Exception:
             logger.exception("backup: send to KitsuneBackup failed")
+            return
+
+        if sent is not None:
+            attached = await self._attach_button_to_userbot_msg(sent, kind)
+            if not attached:
+                logger.warning(
+                    "backup: %s отправлен без кнопки — проверь права бота "
+                    "в KitsuneBackup (нужен admin + edit_messages)",
+                    kind,
+                )
 
     # ── backupdb ──────────────────────────────────────────────────────────────
 
