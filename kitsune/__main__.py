@@ -11,16 +11,14 @@ import os
 import sys
 from pathlib import Path
 
-
 def _auto_venv() -> None:
     """Перезапускает процесс через venv-python, если telethon недоступен."""
     try:
-        import telethon  # noqa: F401 — просто проверяем наличие
-        return  # всё хорошо, зависимости найдены
+        import telethon
+        return
     except ImportError:
         pass
 
-    # Ищем venv относительно каталога пакета (../venv/bin/python3)
     venv_python = Path(__file__).resolve().parent.parent / "venv" / "bin" / "python3"
     if venv_python.exists() and os.path.realpath(sys.executable) != os.path.realpath(str(venv_python)):
         print(
@@ -28,10 +26,7 @@ def _auto_venv() -> None:
             f"[Kitsune] Перезапуск через venv: {venv_python}\n"
         )
         os.execv(str(venv_python), [str(venv_python), "-m", "kitsune"] + sys.argv[1:])
-        # os.execv заменяет процесс — сюда мы не вернёмся.
-        # Если вдруг не удалось (редкость) — упадём дальше с понятной ошибкой.
 
-    # venv не найден или мы УЖЕ в venv — выводим подсказку и продолжаем.
     print(
         "[Kitsune] ОШИБКА: модуль 'telethon' не найден.\n"
         "Запусти установку зависимостей:\n"
@@ -40,10 +35,9 @@ def _auto_venv() -> None:
         "    ~/start_kitsune.sh\n"
     )
 
-
 _auto_venv()
 
-from .main import main  # noqa: E402
+from .main import main
 
 if __name__ == "__main__":
     main()

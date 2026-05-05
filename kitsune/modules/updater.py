@@ -13,7 +13,6 @@ from ..utils import escape_html
 _DB_OWNER = "kitsune.updater"
 _TTL = 120
 
-
 class UpdaterModule(KitsuneModule):
     name        = "updater"
     description = "Обновление и перезапуск"
@@ -87,7 +86,6 @@ class UpdaterModule(KitsuneModule):
         chat_id = restart_data.get("chat_id", 0)
         msg_id  = restart_data.get("msg_id", 0)
         if chat_id and msg_id:
-            # on_load срабатывает до полного подключения — откладываем на 3с
             asyncio.ensure_future(
                 self._post_restart_edit(chat_id, msg_id, report, loader, total_time, restart_time, mod_count)
             )
@@ -434,7 +432,6 @@ class UpdaterModule(KitsuneModule):
             "is_update":  is_update,
         })
         await self.db.force_save()
-
 
 def _fmt_time(seconds: float) -> str:
     if seconds < 1:

@@ -30,14 +30,11 @@ INFO_BANNER   = ASSETS_DIR / "kitsune_info.png"
 
 _DB_NS = "kitsune.assets"
 
-# Названия каналов/групп → файл аватарки
-# Используется для поиска через iter_dialogs когда ID нет в БД
 _CHANNEL_AVATARS: dict[str, Path] = {
     "KitsuneBackup":  BACKUP_AVATAR,
     "Kitsune-logs":   LOGS_AVATAR,
     "kitsune-assets": ASSETS_AVATAR,
 }
-
 
 def get_asset(name: str) -> Path:
     for ext in (".png", ".jpeg", ".jpg", ".gif"):
@@ -45,9 +42,6 @@ def get_asset(name: str) -> Path:
         if p.exists():
             return p
     raise FileNotFoundError(f"Asset not found: {name}")
-
-
-# ── Поиск каналов по названию через диалоги ──────────────────────────────────
 
 async def _find_channels_by_title(
     client: "TelegramClient",
@@ -71,7 +65,6 @@ async def _find_channels_by_title(
                 else:
                     found[t] = -cid
 
-    # Папка 0 — обычные диалоги
     try:
         async for dialog in client.iter_dialogs(limit=500, folder=0):
             _extract(dialog)
@@ -80,7 +73,6 @@ async def _find_channels_by_title(
     except Exception as e:
         logger.warning("assets: ошибка iter_dialogs(folder=0): %s", e)
 
-    # Папка 1 — архив (сюда попадают заархивированные каналы)
     try:
         async for dialog in client.iter_dialogs(limit=500, folder=1):
             _extract(dialog)
@@ -90,9 +82,6 @@ async def _find_channels_by_title(
         logger.warning("assets: ошибка iter_dialogs(folder=1): %s", e)
 
     return found
-
-
-# ── Определение bot_username ──────────────────────────────────────────────────
 
 def _resolve_bot_username(client: "TelegramClient", db) -> str | None:
     """
@@ -118,9 +107,6 @@ def _resolve_bot_username(client: "TelegramClient", db) -> str | None:
             return u
     return None
 
-
-# ── Установка аватарки канала/группы ─────────────────────────────────────────
-
 async def ensure_channel_photo(
     client: "TelegramClient",
     db,
@@ -143,7 +129,6 @@ async def ensure_channel_photo(
 
         entity = await client.get_entity(channel_id)
 
-        # Вступаем если не состоим
         try:
             await client(JoinChannelRequest(entity))
             logger.debug("assets: вступили в %s", channel_id)
@@ -164,9 +149,6 @@ async def ensure_channel_photo(
     except Exception as exc:
         logger.debug("assets: не удалось установить аватарку для %s: %s", channel_id, exc)
         return False
-
-
-# ── Установка аватарки бота ───────────────────────────────────────────────────
 
 async def ensure_bot_photo(client: "TelegramClient", db, bot_username: str) -> bool:
     flag_key = f"bot_photo_{bot_username.lstrip('@').lower()}"
@@ -198,9 +180,6 @@ async def ensure_bot_photo(client: "TelegramClient", db, bot_username: str) -> b
         logger.debug("assets: не удалось установить аватарку бота @%s: %s", bot_username, exc)
     return False
 
-
-# ── Главная функция — вызывается при каждом старте ───────────────────────────
-
 async def setup_all_avatars(client: "TelegramClient", db) -> None:
     """
     Устанавливает аватарки для всех каналов/групп/бота если ещё не установлены.
@@ -213,11 +192,9 @@ async def setup_all_avatars(client: "TelegramClient", db) -> None:
     Оптимизация: если в БД стоит флаг setup_done — выходим мгновенно
     без каких-либо логов и проверок.
     """
-    # ── Шаг 0: быстрый выход — всё уже сделано раньше ───────────────────────
     if db.get(_DB_NS, "setup_done", False):
         return
 
-    # ── Шаг 1: собираем ID из БД ─────────────────────────────────────────────
     id_map: dict[str, int | None] = {
         "KitsuneBackup": (
             db.get("kitsune.backup",         "group_id",        None) or
@@ -241,7 +218,6 @@ async def setup_all_avatars(client: "TelegramClient", db) -> None:
 
     logger.debug("assets: ID из БД: %s", {k: v for k, v in id_map.items()})
 
-    # ── Шаг 2: сканируем диалоги для тех у кого ID = None ───────────────────
     missing_titles = {t for t, cid in id_map.items() if not cid}
     if missing_titles:
         logger.debug("assets: ищем в диалогах: %s", missing_titles)
@@ -249,7 +225,6 @@ async def setup_all_avatars(client: "TelegramClient", db) -> None:
         for title, cid in found.items():
             logger.debug("assets: нашли '%s' в диалогах: id=%s", title, cid)
             id_map[title] = cid
-            # Сохраняем в БД — следующий запуск не будет сканировать диалоги
             _db_key = title.replace("-", "_").lower()
             try:
                 db.set_sync("kitsune.assets", f"known_{_db_key}", cid)
@@ -258,7 +233,6 @@ async def setup_all_avatars(client: "TelegramClient", db) -> None:
             except Exception as _e:
                 logger.debug("assets: не удалось сохранить id '%s': %s", title, _e)
 
-    # ── Шаг 2.5: создаём kitsune-assets если не существует ──────────────────
     if not id_map.get("kitsune-assets"):
         try:
             from telethon.tl.functions.channels import CreateChannelRequest
@@ -272,7 +246,6 @@ async def setup_all_avatars(client: "TelegramClient", db) -> None:
             ))
             new_cid = int(f"-100{result.chats[0].id}")
             id_map["kitsune-assets"] = new_cid
-            # Архивируем
             try:
                 from telethon.tl.functions.folders import EditPeerFoldersRequest
                 from telethon.tl.types import InputFolderPeer
@@ -284,7 +257,6 @@ async def setup_all_avatars(client: "TelegramClient", db) -> None:
                 ]))
             except Exception:
                 pass
-            # Заглушаем уведомления
             try:
                 await client(UpdateNotifySettingsRequest(
                     peer=InputNotifyPeer(await client.get_input_entity(new_cid)),
@@ -301,7 +273,6 @@ async def setup_all_avatars(client: "TelegramClient", db) -> None:
         except Exception as e:
             logger.debug("assets: не удалось создать kitsune-assets: %s", e)
 
-    # ── Шаг 3: устанавливаем аватарки ─────────────────────────────────────────
     all_channel_ok = True
     for title, cid in id_map.items():
         if not cid:
@@ -318,7 +289,6 @@ async def setup_all_avatars(client: "TelegramClient", db) -> None:
         if not ok:
             all_channel_ok = False
 
-    # ── Шаг 4: аватарка бота ──────────────────────────────────────────────────
     bot_ok = True
     bot_username = _resolve_bot_username(client, db)
     logger.debug("assets: bot_username = %s", bot_username)
@@ -332,19 +302,14 @@ async def setup_all_avatars(client: "TelegramClient", db) -> None:
         else:
             logger.debug("assets: аватарка бота уже стоит")
     else:
-        # bot_username ещё не известен — финальный флаг ставить рано
         bot_ok = False
 
-    # ── Финальный флаг: всё установлено → больше никогда не проверяем ────────
     if all_channel_ok and bot_ok:
         try:
             db.set_sync(_DB_NS, "setup_done", True)
             await db.force_save()
         except Exception:
             pass
-
-
-# ── Диагностика ───────────────────────────────────────────────────────────────
 
 async def diagnose(client: "TelegramClient", db) -> str:
     lines = ["🔍 <b>Kitsune Assets — диагностика</b>\n"]

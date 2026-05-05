@@ -35,7 +35,7 @@ def test_upsert_updates_existing(backend):
 def test_deleted_keys_removed(backend):
     data1 = {"owner": {"k1": "v1", "k2": "v2"}}
     run(backend.save(data1))
-    data2 = {"owner": {"k1": "v1"}}  # k2 удалён
+    data2 = {"owner": {"k1": "v1"}}
     run(backend.save(data2))
     loaded = run(backend.load())
     assert "k2" not in loaded.get("owner", {})
@@ -55,7 +55,6 @@ def test_persistent_connection(backend):
 def test_close(backend):
     run(backend.save({"x": {"y": 1}}))
     backend.close()
-    # После close должна открыться снова
     loaded = run(backend.load())
     assert loaded["x"]["y"] == 1
 

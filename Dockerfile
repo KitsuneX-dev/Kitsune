@@ -1,5 +1,3 @@
-#  Kitsune Userbot — Dockerfile
-#  Developer: Yushi (@Mikasu32)
 
 FROM python:3.12-slim AS base
 

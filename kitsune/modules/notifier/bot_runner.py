@@ -20,13 +20,11 @@ def _make_bot(token: str) -> typing.Any:
     ssl_ctx.check_hostname = False
     ssl_ctx.verify_mode = ssl.CERT_NONE
 
-
     class _NoSSLSession(AiohttpSession):
         async def create_connector(self, _bot=None):
             connector = aiohttp.TCPConnector(ssl=ssl_ctx)
             self._should_reset_connector = False
             return connector
-
 
     return Bot(
         token=str(token),
@@ -34,19 +32,15 @@ def _make_bot(token: str) -> typing.Any:
         session=_NoSSLSession(timeout=60),
     )
 
-
 def _get_platform() -> str:
     """Определяет платформу где запущен бот."""
     import sys, os
-    # UserLand / Android
     if os.path.exists("/data/data/tech.ula") or "com.termux" in os.environ.get("PREFIX", ""):
         return "📱 Android (UserLand)"
     if "ANDROID_ROOT" in os.environ or "ANDROID_DATA" in os.environ:
         return "📱 Android (Termux)"
-    # iOS
     if sys.platform == "darwin" and os.path.exists("/var/mobile"):
         return "🍎 iOS (iSH)"
-    # Linux
     try:
         release = open("/etc/os-release").read()
         if "ubuntu" in release.lower(): return "🐧 Ubuntu"
@@ -62,7 +56,6 @@ def _get_platform() -> str:
     if sys.platform == "darwin":
         return "🍎 macOS"
     return f"❓ {sys.platform}"
-
 
 def _build_welcome_text(db) -> str:
     """Строит welcome-сообщение для /start в боте."""
@@ -97,8 +90,6 @@ def _build_welcome_text(db) -> str:
         f"🖥 <b>Платформа:</b> {platform}"
     )
 
-
-
 async def _run_asset_setup(client, db) -> None:
     """
     Запускает setup_all_avatars с небольшой задержкой чтобы дать боту
@@ -106,11 +97,9 @@ async def _run_asset_setup(client, db) -> None:
     Если все аватарки уже стоят — выполняется мгновенно.
     """
     import asyncio as _asyncio
-    # Быстрый выход — всё уже было установлено раньше,
-    # не логируем вообще ничего в консоль.
     if db.get("kitsune.assets", "setup_done", False):
         return
-    await _asyncio.sleep(5)  # ждём полную готовность бота
+    await _asyncio.sleep(5)
     try:
         from ...assets import setup_all_avatars
         logger.debug("BotRunner: auto asset setup starting...")
@@ -118,7 +107,6 @@ async def _run_asset_setup(client, db) -> None:
         logger.debug("BotRunner: auto asset setup done")
     except Exception as _e:
         logger.debug("BotRunner: asset setup error: %s", _e, exc_info=True)
-
 
 class BotRunner:
 
@@ -151,16 +139,12 @@ class BotRunner:
             )
             logger.info("BotRunner: polling started (first_run=%s)", first_run)
 
-            # Проверяем и устанавливаем аватарки при каждом старте.
-            # Если все флаги уже стоят — функция завершится за долю секунды.
-            # Если что-то не установлено — тихо исправит и сохранит флаг в БД.
             asyncio.ensure_future(_run_asset_setup(self._client, self._db))
 
             if first_run:
                 owner_id = self._db.get(_DB_KEY, "owner_id", None)
                 if owner_id:
                     await asyncio.sleep(2)
-                    # ── Фикс: welcome в бота, не в «Избранное» ────────────────
                     try:
                         from pathlib import Path as _Path
                         _info = _Path(__file__).parent.parent.parent / "assets" / "kitsune_info.png"
@@ -180,7 +164,6 @@ class BotRunner:
                             )
                     except Exception as _wexc:
                         logger.warning("BotRunner: не удалось отправить welcome: %s", _wexc)
-                    # ── Настройка авто-бэкапа ──────────────────────────────────
                     loader = getattr(self._client, "_kitsune_loader", None)
                     backup = loader.modules.get("backup") if loader else None
                     if backup:
@@ -272,7 +255,6 @@ class BotRunner:
                 await backup.show_interval_setup(self.bot, msg.from_user.id)
                 await self._db.set(_DB_KEY, "backup_interval_asked", True)
             else:
-                # Отправляем баннер + текст
                 from pathlib import Path as _Path
                 _info = _Path(__file__).parent.parent.parent / "assets" / "kitsune_info.png"
                 if _info.exists():

@@ -66,7 +66,6 @@ class SettingsModule(KitsuneModule):
 
         await event.reply(self.strings("prefix_set").format(p=new_prefix), parse_mode="html")
 
-    # ── Фикс #6: алиас setprefix ─────────────────────────────────────────────────
     @command("setprefix", required=OWNER)
     async def setprefix_cmd(self, event) -> None:
         """Алиас для команды prefix — обратная совместимость."""
@@ -79,7 +78,6 @@ class SettingsModule(KitsuneModule):
             from ..assets import diagnose, setup_all_avatars
             report = await diagnose(self.client, self.db)
             await event.reply(report, parse_mode="html")
-            # Принудительно запускаем установку
             await setup_all_avatars(self.client, self.db)
             await event.reply("✅ Установка аватарок запущена. Смотри логи.", parse_mode="html")
         except Exception as exc:

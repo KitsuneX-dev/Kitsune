@@ -18,7 +18,6 @@ _KITSUNE_CHATS = [
     {"key": "assets", "title": "kitsune-assets", "type": "channel", "about": "Медиа и ресурсы Kitsune"},
 ]
 
-
 def _make_filter_title(text: str):
     """
     В новых версиях Telethon (schema layer 180+) DialogFilter.title
@@ -31,7 +30,6 @@ def _make_filter_title(text: str):
     except ImportError:
         return text
 
-
 def _peer_id(peer) -> int | None:
     """Возвращает числовой id пира вне зависимости от его типа."""
     return (
@@ -39,7 +37,6 @@ def _peer_id(peer) -> int | None:
         or getattr(peer, "chat_id", None)
         or getattr(peer, "user_id", None)
     )
-
 
 class QuickstartModule(KitsuneModule):
     name        = "quickstart"
@@ -94,7 +91,6 @@ class QuickstartModule(KitsuneModule):
         from telethon.errors import FloodWaitError
 
                                                                        
-        # Кэш ID чатов в БД — избегаем iter_dialogs при каждом старте
         _CACHE_KEY = "kitsune.quickstart"
         cached_ids: dict = self.db.get(_CACHE_KEY, "chat_ids", {}) or {}
 
@@ -116,7 +112,6 @@ class QuickstartModule(KitsuneModule):
                     entity = None
 
             if entity is None:
-                # Кэша нет или устарел — ищем в диалогах (только один раз)
                 if not hasattr(self, "_dialogs_cache"):
                     self._dialogs_cache = []
                     for _attempt in range(3):
@@ -136,15 +131,12 @@ class QuickstartModule(KitsuneModule):
                 else:
                     logger.info("Quickstart: «%s» уже существует", cfg["title"])
             result_entities[cfg["key"]] = entity
-            # Обновляем кэш
             if entity is not None:
                 eid = getattr(entity, "id", None)
                 if eid:
                     cached_ids[cfg["key"]] = eid
 
-         # Сохраняем обновлённый кэш в БД
         await self.db.set(_CACHE_KEY, "chat_ids", cached_ids)
-        # Сбрасываем временный кэш диалогов
         if hasattr(self, "_dialogs_cache"):
             del self._dialogs_cache
 
@@ -364,7 +356,6 @@ class QuickstartModule(KitsuneModule):
             ls.set(_LS_OWNER, _LS_KEY, True)
         except Exception as exc:
             await event.reply(f"❌ Ошибка: <code>{exc}</code>", parse_mode="html")
-
 
                                                                     
                     

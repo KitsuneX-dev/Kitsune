@@ -81,7 +81,6 @@ FAILED_PKGS=()
 while IFS= read -r pkg || [[ -n "$pkg" ]]; do
     [[ -z "$pkg" || "${pkg:0:1}" == "#" ]] && continue
     [[ "$pkg" == telethon* ]] && continue
-    # aiogram и pydantic устанавливаются отдельно ниже с fallback
     [[ "$pkg" == aiogram* ]] && continue
     [[ "$pkg" == pydantic* ]] && continue
     if pip_install "$pkg"; then
@@ -99,7 +98,6 @@ else
 fi
 
 step "aiogram + pydantic"
-# pydantic — пробуем новую, если не получится — старую совместимую
 if pip_install "pydantic>=2.7.0"; then
     ok "pydantic установлен"
 elif pip install --prefer-binary --no-cache-dir -q "pydantic" 2>/dev/null; then
@@ -111,7 +109,6 @@ else
     warn "pydantic не установился"
 fi
 
-# aiogram — пробуем новую, затем старую
 if pip_install "aiogram>=3.7.0"; then
     ok "aiogram установлен"
 elif pip install --prefer-binary --no-cache-dir -q "aiogram" 2>/dev/null; then

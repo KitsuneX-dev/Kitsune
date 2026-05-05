@@ -10,13 +10,10 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# Файлы больше этого порога получают прогресс-бар
-_LARGE_FILE_THRESHOLD = 10 * 1024 * 1024  # 10 MB
-
+_LARGE_FILE_THRESHOLD = 10 * 1024 * 1024
 
 def _hydro(client: typing.Any) -> typing.Any | None:
     return getattr(client, "hydrogram", None)
-
 
 def _file_size(file: typing.Any) -> int:
     if isinstance(file, (str, Path)):
@@ -37,13 +34,11 @@ def _file_size(file: typing.Any) -> int:
         return len(file)
     return 0
 
-
 def _make_progress_bar(done: int, total: int, width: int = 10) -> str:
     if total <= 0:
         return "░" * width
     filled = int(width * done / total)
     return "█" * filled + "░" * (width - filled)
-
 
 async def _edit_progress(
     client: typing.Any,
@@ -75,7 +70,6 @@ async def _edit_progress(
     except Exception:
         pass
 
-
 def _make_progress_cb(
     client: typing.Any,
     chat_id: int,
@@ -95,7 +89,6 @@ def _make_progress_cb(
         )
 
     return cb
-
 
 async def send_file(
     client: typing.Any,
@@ -127,12 +120,10 @@ async def send_file(
 
     if hydro and not force_telethon:
         try:
-            # Резолвим пир заранее — Hydrogram выдаёт PEER_ID_INVALID
-            # если чат был создан недавно и не попал в его кэш диалогов
             try:
                 await hydro.get_chat(chat_id)
             except Exception:
-                pass  # если не вышло — пробуем всё равно, упадём в except ниже
+                pass
 
             pm = "html" if parse_mode.lower() == "html" else None
             kwargs: dict = dict(chat_id=chat_id, document=file, caption=caption, parse_mode=pm)
@@ -148,7 +139,6 @@ async def send_file(
 
         except Exception as exc:
             exc_str = str(exc)
-            # PEER_ID_INVALID — нормальный фоллбэк для недавно созданных чатов
             if "PEER_ID_INVALID" in exc_str:
                 logger.debug("hydro_media: Hydrogram PEER_ID_INVALID for %s — falling back to Telethon", chat_id)
             else:
@@ -169,7 +159,6 @@ async def send_file(
     if reply_to:
         kwargs_tl["reply_to"] = reply_to
     return await client.send_file(chat_id, file, **kwargs_tl)
-
 
 async def send_photo(
     client: typing.Any,
@@ -219,7 +208,6 @@ async def send_photo(
         kwargs_tl["reply_to"] = reply_to
     return await client.send_file(chat_id, photo, **kwargs_tl)
 
-
 async def download_media(
     client: typing.Any,
     message: typing.Any,
@@ -260,7 +248,6 @@ async def download_media(
 
     return await message.download_media(bytes)
 
-
 def _msg_chat_id(message: typing.Any) -> int:
     cid = getattr(message, "chat_id", None)
     if cid:
@@ -274,7 +261,6 @@ def _msg_chat_id(message: typing.Any) -> int:
             or 0
         )
     return 0
-
 
 def _get_hydro_file_ref(message: typing.Any) -> str | None:
     media = getattr(message, "media", None)

@@ -248,7 +248,6 @@ class InlineManager:
                         logger.debug("InlineManager.edit: Telethon fallback also failed", exc_info=True)
         except Exception as _edit_exc:
             _err = str(_edit_exc)
-            # MESSAGE_ID_INVALID — сообщение устарело после перезапуска, не критично
             if "MESSAGE_ID_INVALID" in _err or "message to edit not found" in _err.lower():
                 logger.debug("InlineManager.edit: stale message after restart, skipping")
             else:
@@ -273,14 +272,12 @@ class InlineManager:
             logger.error("InlineManager: cannot resolve entity", exc_info=True)
             return None
 
-        # Минимальная пауза — даём боту зарегистрировать unit до inline_query
         await asyncio.sleep(0.3)
 
         for attempt in range(5):
             try:
                 results = await self._client.inline_query(self._bot_username, unit_id)
                 if not results:
-                    # Бот ещё не ответил — короткая пауза и retry
                     await asyncio.sleep(0.4)
                     continue
                 sent = await results[0].click(entity, reply_to=reply_to)
@@ -292,7 +289,6 @@ class InlineManager:
             except Exception as exc:
                 err = str(exc)
                 if "BotResponseTimeout" in err or "timeout" in err.lower():
-                    # Экспоненциальный backoff, но с меньшим базовым значением
                     delay = 0.5 * (attempt + 1)
                     logger.warning(
                         "InlineManager._invoke_unit: timeout attempt %d/5, retrying in %.1fs",

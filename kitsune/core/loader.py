@@ -122,10 +122,6 @@ class KitsuneModule:
         prefix = dispatcher._prefix if dispatcher else "."
         text = event.message.raw_text or event.message.text or ""
         if text.startswith(prefix):
-            # Фикс: срезаем префикс и убираем пробелы — чтобы
-            # "*help" и "* help" давали одинаковый результат.
-            # Без этого "* help" → split → ["*","help"] → get_args
-            # возвращал "help" как аргумент вместо пустой строки.
             remainder = text[len(prefix):].lstrip()
             parts = remainder.split(maxsplit=1)
             return parts[1] if len(parts) > 1 else ""
@@ -135,18 +131,14 @@ class KitsuneModule:
         db = getattr(self, "db", None)
         lang = db.get("kitsune.core", "lang", "ru") if db else "ru"
 
-        # Всегда используем суффикс: strings_ru, strings_en и т.д.
-        # Это исключает конфликт с методом strings() если модуль объявит strings = {}.
         strings_key = f"strings_{lang}"
         strings = getattr(self, strings_key, None) or getattr(self, "strings_ru", None) or getattr(self, "strings_en", {})
 
         text = strings.get(key, key) if isinstance(strings, dict) else key
 
-        # Подставляем реальный префикс вместо хардкода "."
         dispatcher = getattr(getattr(self, "client", None), "_kitsune_dispatcher", None)
         prefix = dispatcher._prefix if dispatcher else "."
         if prefix != ".":
-            # Заменяем точку только внутри <code>...</code> тегов
             import re as _re
             text = _re.sub(
                 r'(<code>)\.([\w])',
@@ -314,8 +306,6 @@ async def _pip_install(package: str) -> bool:
     pip_name = _IMPORT_TO_PIP.get(package, package)
     import os as _os
     is_termux = "com.termux" in _os.environ.get("PREFIX", "") or _os.path.isdir("/data/data/com.termux")
-    # Namespace packages (e.g. google-generativeai) need --upgrade to rebuild the
-    # google namespace so that sub-packages like genai become importable right away.
     _NAMESPACE_PKGS = {"google-generativeai", "google-cloud-storage", "google-auth"}
     args = [sys.executable, "-m", "pip", "install", pip_name, "--quiet", "--no-warn-script-location"]
     if pip_name in _NAMESPACE_PKGS:
@@ -545,8 +535,6 @@ class Loader:
                             await progress_cb(f"✅ Зависимость <code>{missing_pkg}</code> установлена. Загружаю модуль...")
                         except Exception:
                             pass
-                    # Purge any stale/broken namespace-package entries so the
-                    # freshly installed package is discovered from scratch.
                     _stale = [k for k in list(sys.modules) if k == missing_pkg or k.startswith(missing_pkg + ".")]
                     for _k in _stale:
                         sys.modules.pop(_k, None)

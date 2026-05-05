@@ -10,7 +10,6 @@ from ..core.security import OWNER
 logger = logging.getLogger(__name__)
 
 _DB_OWNER = "kitsune.info"
-# Namespace used by _load_config_from_db in KitsuneModule — must match module name lowercased
 _DB_CONFIG = "kitsune.config.kitsuneinfo"
 
 def _esc(s: str) -> str:
