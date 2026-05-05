@@ -267,6 +267,13 @@ rm -rf "$_PYAES_TMP"
     || err "Не удалось установить зависимости. Проверь requirements.txt"
 ok "Зависимости установлены"
 
+# python-socks нужен Telethon >=1.36 для всех типов прокси (включая MTProto).
+# Дублируем явную установку — на случай старых requirements.txt у обновляющихся пользователей.
+"$PIP" install --no-cache-dir --no-warn-script-location --disable-pip-version-check --quiet \
+    "python-socks[asyncio]>=2.4.4" PySocks \
+    && ok "python-socks[asyncio] установлен (нужен для прокси и обхода РКН)" \
+    || warn "python-socks не установился — прокси/RKNBypass работать не будут"
+
 "$PIP" install --no-cache-dir hydrogram --no-build-isolation \
     --no-warn-script-location --disable-pip-version-check --quiet \
     && ok "Hydrogram установлен" \

@@ -198,13 +198,48 @@ async def _startup(args: argparse.Namespace) -> None:
     proxy      = None
     connection = ConnectionTcpFull
 
+    from .rkn_bypass import ensure_python_socks as _ensure_python_socks
+
     if isinstance(proxy_cfg, dict) and proxy_cfg.get("host") and proxy_cfg.get("port"):
         ptype = str(proxy_cfg.get("type", "MTPROTO")).upper()
-        if ptype == "MTPROTO":
+        host  = str(proxy_cfg["host"])
+        port  = int(proxy_cfg["port"])
+
+        if not _ensure_python_socks():
+            logger.error(
+                "main: python-socks недоступен — прокси %s://%s:%d будет пропущен. "
+                "Бот попытается подключиться напрямую (не работает в РФ под РКН).",
+                ptype, host, port,
+            )
+        elif ptype == "MTPROTO":
             secret     = proxy_cfg.get("secret", "00000000000000000000000000000000")
-            proxy      = (str(proxy_cfg["host"]), int(proxy_cfg["port"]), secret)
+            from .rkn_bypass import normalize_secret
+            secret     = normalize_secret(str(secret))
+            proxy      = (host, port, secret)
             connection = ConnectionTcpMTProxyRandomizedIntermediate
-            logger.info("main: MTProto proxy → %s:%s", proxy_cfg["host"], proxy_cfg["port"])
+            logger.info("main: MTProto proxy → %s:%s", host, port)
+        elif ptype in ("SOCKS5", "SOCKS4", "HTTP", "HTTPS"):
+            try:
+                import socks as _socks
+                _type_map = {
+                    "SOCKS5": _socks.SOCKS5,
+                    "SOCKS4": _socks.SOCKS4,
+                    "HTTP":   _socks.HTTP,
+                    "HTTPS":  _socks.HTTP,
+                }
+                proxy = (
+                    _type_map.get(ptype, _socks.SOCKS5),
+                    host, port, True,
+                    proxy_cfg.get("username") or None,
+                    proxy_cfg.get("password") or None,
+                )
+                logger.info("main: %s proxy → %s:%s", ptype, host, port)
+            except ImportError:
+                logger.warning(
+                    "main: PySocks не установлен (pip install PySocks) — SOCKS-прокси отключён"
+                )
+        else:
+            logger.warning("main: неизвестный тип прокси '%s' — игнорирую", ptype)
 
     from .session_enc import (
         decrypt_session_file, _fix_session_permissions,
@@ -255,16 +290,24 @@ async def _startup(args: argparse.Namespace) -> None:
 
         try:
             await client.connect()
-        except (TimeoutError, OSError, ConnectionError) as exc:
+        except (TimeoutError, OSError, ConnectionError, asyncio.TimeoutError) as exc:
             logger.warning("main: direct connection failed (%s), trying RKN bypass…", exc)
-            from .rkn_bypass import find_working_proxy, get_connection_class
+            from .rkn_bypass import find_working_proxy
             from telethon.network.connection import ConnectionTcpMTProxyRandomizedIntermediate
-            import asyncio as _asyncio
 
-            proxy_info = _asyncio.get_event_loop().run_until_complete(find_working_proxy()) if not asyncio.get_event_loop().is_running() else None
+            # Для RKN-bypass тоже нужен python-socks — иначе Telethon проигнорирует proxy.
+            if not _ensure_python_socks():
+                print(
+                    "\n❌ Не удалось подключиться к Telegram, а RKNBypass требует python-socks.\n"
+                    "   Установи вручную: pip install 'python-socks[asyncio]'\n"
+                )
+                sys.exit(1)
+
             try:
+                # Мы уже внутри работающего event loop — просто await.
                 proxy_info = await find_working_proxy()
-            except Exception:
+            except Exception as _exc:
+                logger.exception("main: find_working_proxy() failed: %s", _exc)
                 proxy_info = None
 
             if proxy_info:
@@ -285,6 +328,18 @@ async def _startup(args: argparse.Namespace) -> None:
                     proxy=(host, port, secret),
                     connection=ConnectionTcpMTProxyRandomizedIntermediate,
                 )
+                # Сохраняем найденный прокси в config.toml для будущих запусков.
+                try:
+                    cfg["proxy"] = {
+                        "type":   "MTPROTO",
+                        "host":   host,
+                        "port":   int(port),
+                        "secret": secret,
+                    }
+                    _save_config(cfg)
+                    logger.info("main: рабочий MTProto-прокси сохранён в config.toml")
+                except Exception:
+                    logger.exception("main: не удалось сохранить прокси в config.toml")
                 await client.connect()
             else:
                 print(

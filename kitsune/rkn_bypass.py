@@ -3,9 +3,52 @@ from __future__ import annotations
 import logging
 import re
 import ssl
+import sys
 import typing
 
 logger = logging.getLogger(__name__)
+
+
+def ensure_python_socks(auto_install: bool = True) -> bool:
+    """
+    Проверяет наличие python-socks[asyncio]; при отсутствии пытается установить в рантайме.
+
+    Telethon >=1.36 использует именно python-socks (а НЕ PySocks) для всех типов прокси,
+    включая MTProto. Без этой библиотеки параметр ``proxy`` МОЛЧА игнорируется — видим
+    только UserWarning, и бот пытается подключиться напрямую (что в РФ под блокировкой
+    РКН не работает).
+    """
+    try:
+        import python_socks  # noqa: F401
+        return True
+    except ImportError:
+        pass
+
+    if not auto_install:
+        return False
+
+    logger.warning(
+        "rkn_bypass: python-socks не установлен — прокси в Telethon НЕ работают. "
+        "Пытаюсь установить автоматически…"
+    )
+    try:
+        import subprocess
+        subprocess.check_call(
+            [sys.executable, "-m", "pip", "install", "--quiet",
+             "--disable-pip-version-check", "--no-warn-script-location",
+             "python-socks[asyncio]>=2.4.4"]
+        )
+        import importlib
+        importlib.invalidate_caches()
+        import python_socks  # noqa: F401
+        logger.info("rkn_bypass: python-socks[asyncio] успешно установлен в рантайме")
+        return True
+    except Exception as exc:
+        logger.error(
+            "rkn_bypass: не удалось установить python-socks: %s. "
+            "Установи вручную: pip install 'python-socks[asyncio]'", exc,
+        )
+        return False
 
 def _patch_telethon_mtproxy() -> None:
     import sys
