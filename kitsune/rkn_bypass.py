@@ -182,11 +182,23 @@ def get_aiohttp_connector():
 def _build_socks_url_from_cfg() -> str | None:
     """
     Читает [proxy_socks] из config.toml и собирает URL вида
-    ``socks5://user:pass@host:port``. Возвращает None, если SOCKS5
-    не настроен.
+    ``socks5://user:pass@host:port`` (или ``socks5://host:port`` без auth).
 
-    Используется aiogram (notifier-бот, update_checker), потому что
+    Возвращает None, если SOCKS5 не настроен или указан некорректно.
+
+    Используется aiogram (notifier-бот, update_checker, inline-бот), потому что
     aiogram MTPROTO НЕ умеет — ему нужен HTTP/SOCKS5 для api.telegram.org.
+
+    Поддерживаемые алиасы ключей в [proxy_socks]:
+      • host       — обязательно
+      • port       — обязательно (для SOCKS5 типично 1080)
+      • type       — socks5 | socks4 | http | https (default socks5)
+      • username | user — опционально (auth)
+      • password | pass — опционально (auth)
+
+    NB: если задан только user БЕЗ pass (или наоборот) — auth выкидывается,
+    чтобы не получить кривой URL вида ``socks5://user:@host:port``,
+    на котором aiohttp_socks падает с непонятной ошибкой.
     """
     try:
         from .main import _load_raw_config
@@ -202,15 +214,105 @@ def _build_socks_url_from_cfg() -> str | None:
     if not host or not port:
         return None
 
+    try:
+        port_i = int(port)
+        if not (0 < port_i < 65536):
+            logger.warning("rkn_bypass: некорректный порт SOCKS5: %r", port)
+            return None
+    except (TypeError, ValueError):
+        logger.warning("rkn_bypass: порт SOCKS5 не число: %r", port)
+        return None
+
     user = sp.get("username") or sp.get("user")
     pwd  = sp.get("password") or sp.get("pass")
-    auth = f"{user}:{pwd}@" if (user and pwd) else ""
+    if user and pwd:
+        from urllib.parse import quote
+        auth = f"{quote(str(user), safe='')}:{quote(str(pwd), safe='')}@"
+    else:
+        if user or pwd:
+            logger.warning(
+                "rkn_bypass: для SOCKS5 указан только %s — auth отключён",
+                "username" if user else "password",
+            )
+        auth = ""
 
     scheme = str(sp.get("type", "socks5")).lower()
     if scheme not in ("socks5", "socks4", "http", "https"):
         scheme = "socks5"
 
-    return f"{scheme}://{auth}{host}:{int(port)}"
+    return f"{scheme}://{auth}{host}:{port_i}"
+
+
+def get_socks_proxy_url() -> str | None:
+    """Публичный alias для _build_socks_url_from_cfg() — для модулей."""
+    return _build_socks_url_from_cfg()
+
+
+def _get_socks_connector_cls():
+    """Лениво импортирует aiohttp_socks.ProxyConnector. None если не установлен."""
+    try:
+        from aiohttp_socks import ProxyConnector  # type: ignore
+        return ProxyConnector
+    except ImportError:
+        return None
+
+
+def get_aiohttp_connector_with_proxy():
+    """
+    Возвращает aiohttp-коннектор с SOCKS5 (если настроен и aiohttp_socks
+    установлен), иначе обычный TCPConnector. Используется для прямых
+    HTTP-запросов к api.telegram.org (getMe, getChatMember и т.п.).
+    """
+    import aiohttp
+    ssl_ctx = make_ssl_ctx_no_verify()
+    proxy_url = _build_socks_url_from_cfg()
+    if proxy_url:
+        cls = _get_socks_connector_cls()
+        if cls is not None:
+            try:
+                return cls.from_url(proxy_url, ssl=ssl_ctx)
+            except Exception as exc:
+                logger.warning(
+                    "rkn_bypass: ProxyConnector.from_url(%s) упал: %s — fallback на TCP",
+                    proxy_url, exc,
+                )
+        else:
+            logger.warning(
+                "rkn_bypass: SOCKS5 настроен (%s), но aiohttp_socks не установлен. "
+                "Установи: pip install 'aiohttp-socks>=0.9.0'",
+                proxy_url,
+            )
+    return aiohttp.TCPConnector(ssl=ssl_ctx)
+
+
+async def test_socks_proxy(timeout: float = 8.0) -> tuple[bool, str]:
+    """
+    Проверяет, что SOCKS5 из config.toml действительно ходит до api.telegram.org.
+    Возвращает (ok, message). Используется при старте и командой .testsocks.
+    """
+    proxy_url = _build_socks_url_from_cfg()
+    if not proxy_url:
+        return False, "SOCKS5 не настроен (.setsocks <host> <port>)."
+    cls = _get_socks_connector_cls()
+    if cls is None:
+        return False, (
+            "aiohttp_socks не установлен. Установи: "
+            "pip install 'aiohttp-socks>=0.9.0'"
+        )
+    import aiohttp
+    try:
+        connector = cls.from_url(proxy_url, ssl=make_ssl_ctx_no_verify())
+        async with aiohttp.ClientSession(connector=connector) as sess:
+            async with sess.get(
+                "https://api.telegram.org",
+                timeout=aiohttp.ClientTimeout(total=timeout),
+                allow_redirects=False,
+            ) as resp:
+                # api.telegram.org / отдаёт 404 — это нормально, главное что
+                # TCP+TLS отработал через прокси.
+                return True, f"SOCKS5 OK (HTTP {resp.status}) → {proxy_url}"
+    except Exception as exc:
+        return False, f"{type(exc).__name__}: {exc}"
 
 
 def get_aiogram_session(timeout: int = 30):
@@ -223,10 +325,8 @@ def get_aiogram_session(timeout: int = 30):
 
         socks_connector_cls = None
         if proxy_url:
-            try:
-                from aiohttp_socks import ProxyConnector  # type: ignore
-                socks_connector_cls = ProxyConnector
-            except ImportError:
+            socks_connector_cls = _get_socks_connector_cls()
+            if socks_connector_cls is None:
                 logger.warning(
                     "rkn_bypass: SOCKS5 настроен (%s), но aiohttp_socks "
                     "не установлен. Установи: pip install 'aiohttp-socks>=0.9.0'",
@@ -237,6 +337,7 @@ def get_aiogram_session(timeout: int = 30):
             async def create_connector(self, _bot=None):
                 if socks_connector_cls is not None and proxy_url:
                     connector = socks_connector_cls.from_url(proxy_url, ssl=ssl_ctx)
+                    logger.debug("rkn_bypass: aiogram session uses SOCKS5 → %s", proxy_url)
                 else:
                     connector = aiohttp.TCPConnector(ssl=ssl_ctx)
                 self._should_reset_connector = False
@@ -246,6 +347,24 @@ def get_aiogram_session(timeout: int = 30):
     except Exception as exc:
         logger.warning("rkn_bypass: failed to create bypass session — %s", exc)
         return None
+
+
+def make_aiogram_bot(token: str, *, parse_mode: str = "HTML", timeout: int = 30):
+    """
+    Единая точка создания aiogram.Bot c SOCKS5-сессией (если настроена).
+    Используется везде, где нужен aiogram-бот для обращения к api.telegram.org:
+    notifier (bot_runner, update_checker), inline-бот, разовые getMe-запросы.
+    """
+    from aiogram import Bot
+    from aiogram.client.default import DefaultBotProperties
+    from aiogram.enums import ParseMode
+
+    pm = ParseMode.HTML if str(parse_mode).upper() == "HTML" else ParseMode.MARKDOWN
+    session = get_aiogram_session(timeout=timeout)
+    kwargs = dict(token=str(token), default=DefaultBotProperties(parse_mode=pm))
+    if session is not None:
+        kwargs["session"] = session
+    return Bot(**kwargs)
 
 
 def get_mtproto_connection_class(secret: str | None = None):
