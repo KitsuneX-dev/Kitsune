@@ -256,6 +256,12 @@ async def _start_hydrogram(api_id: int, api_hash: str, session_name: str) -> Any
 
         logger.info("main: hydrogram not installed, skipping secondary client")
 
+        # Phase 3: отмечаем деградацию — Telethon-only.
+        try:
+            from .core.reliability import flags as _deg_flags
+            _deg_flags.mark_hydrogram_failed("hydrogram package not installed")
+        except Exception:
+            pass
         return None
 
     try:
@@ -310,17 +316,36 @@ async def _start_hydrogram(api_id: int, api_hash: str, session_name: str) -> Any
 
         logger.info("main: Hydrogram client started (termux=%s, no_updates=%s)", is_termux, is_termux)
 
+        # Phase 3: всё ок — снимаем флаг деградации если он был.
+        try:
+            from .core.reliability import flags as _deg_flags
+            _deg_flags.clear_hydrogram_failed()
+        except Exception:
+            pass
+
         return hydro
 
     except AuthKeyUnregistered:
 
         logger.warning("main: Hydrogram session invalid, skipping")
 
+        try:
+            from .core.reliability import flags as _deg_flags
+            _deg_flags.mark_hydrogram_failed("AuthKeyUnregistered")
+        except Exception:
+            pass
+
         return None
 
-    except Exception:
+    except Exception as _exc:
 
         logger.exception("main: Hydrogram startup failed, continuing without it")
+
+        try:
+            from .core.reliability import flags as _deg_flags
+            _deg_flags.mark_hydrogram_failed(f"startup: {type(_exc).__name__}")
+        except Exception:
+            pass
 
         return None
 
@@ -782,6 +807,16 @@ async def _startup(args: argparse.Namespace) -> None:
 
     logger.info("main: logged in as %s (id=%d)", me.first_name, me.id)
 
+    # Phase 3: предварительно регистрируем circuit breaker'ы в реестре,
+    # чтобы /health видел их с самого старта.
+    try:
+        from .core.reliability import get_breaker
+        get_breaker("telegram_api", failure_threshold=5, cooldown=60.0)
+        get_breaker("redis_io", failure_threshold=3, cooldown=30.0)
+        get_breaker("hydrogram_io", failure_threshold=3, cooldown=300.0)
+    except Exception:
+        logger.debug("main: reliability breakers preregister failed", exc_info=True)
+
     hydro = None
 
     if not args.no_hydrogram:
@@ -962,6 +997,12 @@ async def _startup(args: argparse.Namespace) -> None:
 
 async def _safe_force_reconnect(client: Any) -> bool:
 
+    """Phase 3: выполнить reconnect с экспоненциальным backoff.
+
+    При отвале VPN/прокси делаем до 5 попыток (1с → 2с → 4с → 8с → 16с),
+    помечаем degradation flag «vpn_down» пока идёт retry-цикл.
+    """
+
     with contextlib.suppress(Exception):
 
         await client.disconnect()
@@ -988,18 +1029,48 @@ async def _safe_force_reconnect(client: Any) -> bool:
 
     await asyncio.sleep(0.1)
 
+    # Phase 3: retry с backoff
     try:
+        from .core.reliability import retry_with_backoff, RetryPolicy, flags as _deg_flags
+    except Exception:
+        # Резервный путь — без reliability просто одна попытка.
+        try:
+            await asyncio.wait_for(client.connect(), timeout=30.0)
+            return True
+        except Exception as exc:
+            logger.debug("keepalive: forced reconnect failed (%s: %s)",
+                         type(exc).__name__, exc)
+            return False
 
+    _deg_flags.mark_vpn_down("keepalive: hard reconnect cycle")
+
+    async def _do_connect() -> bool:
         await asyncio.wait_for(client.connect(), timeout=30.0)
-
         return True
 
+    try:
+        await retry_with_backoff(
+            _do_connect,
+            policy=RetryPolicy(
+                base_delay=1.0,
+                max_delay=16.0,
+                multiplier=2.0,
+                jitter=0.25,
+                max_attempts=5,
+            ),
+            name="telegram_reconnect",
+            expected_exceptions=(
+                TimeoutError, asyncio.TimeoutError,
+                ConnectionError, OSError,
+            ),
+        )
+        _deg_flags.clear_vpn_down()
+        return True
     except Exception as exc:
-
-        logger.debug("keepalive: forced reconnect failed (%s: %s)",
-
-                     type(exc).__name__, exc)
-
+        logger.debug(
+            "keepalive: forced reconnect failed after retries (%s: %s)",
+            type(exc).__name__, exc,
+        )
         return False
 
 def _is_link_alive(client: Any) -> bool:
@@ -1052,6 +1123,12 @@ async def _keepalive(client: Any) -> None:
 
     attempts: int = 0
 
+    # Phase 3: импорт реестра breaker'ов без обязательности (если сломается — работаем без него)
+    try:
+        from .core.reliability import flags as _deg_flags
+    except Exception:
+        _deg_flags = None
+
     while True:
 
         try:
@@ -1077,6 +1154,10 @@ async def _keepalive(client: Any) -> None:
                     attempts,
 
                 )
+                # Phase 3: снимаем флаг vpn_down при восстановлении
+                if _deg_flags is not None:
+                    try: _deg_flags.clear_vpn_down()
+                    except Exception: pass
 
             fail_streak_started = None
 

@@ -234,11 +234,31 @@ class RedisBackend:
 
         import redis as _redis
 
-        self._redis = _redis.Redis.from_url(uri)
+        # socket_timeout — чтобы операции не зависали навсегда при отвале сети.
+        # health_check_interval — pinger в драйвере, ловит мёртвые соединения.
+        self._redis = _redis.Redis.from_url(
+            uri,
+            socket_timeout=5.0,
+            socket_connect_timeout=5.0,
+            socket_keepalive=True,
+            health_check_interval=30,
+        )
 
         self._key = str(client_id)
 
         self._lock = asyncio.Lock()
+
+        self._uri = uri
+
+    def ping(self) -> bool:
+
+        try:
+
+            return bool(self._redis.ping())
+
+        except Exception:
+
+            return False
 
     async def load(self) -> dict[str, dict[str, JSONValue]]:
 
@@ -255,6 +275,8 @@ class RedisBackend:
         except Exception:
 
             logger.exception("Redis: failed to load")
+
+            raise
 
         return {}
 
@@ -286,6 +308,9 @@ class DatabaseManager:
 
     _SAVE_DELAY = 0.2
 
+    # Phase 3: после стольких подряд провалов Redis уходим в SQLite-fallback.
+    _REDIS_FAIL_THRESHOLD = 3
+
     def __init__(self, client: typing.Any) -> None:
 
         self._client = client
@@ -309,6 +334,12 @@ class DatabaseManager:
         self._deleted: list[tuple[str, str]] = []
 
         self._bg_tasks: set[asyncio.Task] = set()
+
+        # Phase 3 reliability state
+        self._redis_fail_streak: int = 0
+        self._sqlite_fallback: SQLiteBackend | None = None
+        self._redis_uri: str | None = None
+        self._sqlite_path: typing.Any = None
 
     async def init(self) -> None:
 
@@ -336,7 +367,14 @@ class DatabaseManager:
 
                 pass
 
+        # Path для SQLite — нужен и как primary, и как fallback к Redis
+        _base = _Path(__file__).parent.parent.parent
+        db_path = _base / f"kitsune-{self._client.tg_id}.db"
+        self._sqlite_path = db_path
+
         if redis_uri:
+
+            self._redis_uri = redis_uri
 
             try:
 
@@ -346,17 +384,35 @@ class DatabaseManager:
 
                 logger.info("Database: Redis backend active")
 
-            except Exception:
+                # Подготовим «тёплый» SQLite fallback заранее: при отвале Redis
+                # переключение будет мгновенным.
+                try:
+                    self._sqlite_fallback = SQLiteBackend(db_path)
+                    # ленивый connect — не открываем коннект, пока не нужен
+                except Exception:
+                    logger.debug("Database: SQLite fallback not pre-warmed", exc_info=True)
 
-                logger.warning("Database: Redis unavailable, falling back to SQLite")
+                # Сообщим reliability-подсистеме что Redis жив.
+                try:
+                    from ..core.reliability import flags as _deg_flags
+                    _deg_flags.clear_redis_unavailable()
+                except Exception:
+                    pass
 
+            except Exception as _exc:
+
+                logger.warning(
+                    "Database: Redis unavailable (%s: %s), falling back to SQLite",
+                    type(_exc).__name__, _exc,
+                )
+                try:
+                    from ..core.reliability import flags as _deg_flags
+                    _deg_flags.mark_redis_unavailable(f"{type(_exc).__name__}: {_exc}")
+                except Exception:
+                    pass
                 self._backend = None
 
         if self._backend is None:
-
-            _base = _Path(__file__).parent.parent.parent
-
-            db_path = _base / f"kitsune-{self._client.tg_id}.db"
 
             self._backend = SQLiteBackend(db_path)
 
@@ -419,6 +475,20 @@ class DatabaseManager:
         except Exception as _exc:
 
             logger.debug("Database: assets channel unavailable (%s) — asset storage disabled", _exc)
+
+            # Phase 3: помечаем деградацию чтобы потребители пропускали медиа.
+            try:
+                from ..core.reliability import flags as _deg_flags
+                _deg_flags.mark_assets_unavailable(f"{type(_exc).__name__}: {_exc}")
+            except Exception:
+                pass
+        else:
+            if self._assets_channel:
+                try:
+                    from ..core.reliability import flags as _deg_flags
+                    _deg_flags.clear_assets_unavailable()
+                except Exception:
+                    pass
 
     def get(
 
@@ -590,7 +660,24 @@ class DatabaseManager:
 
                 snapshot = {o: dict(s) for o, s in self._data.items()}
 
-            return await self._backend.save(snapshot)
+            try:
+                ok = await self._backend.save(snapshot)
+                if ok:
+                    self._redis_fail_streak = 0
+                    return True
+                self._redis_fail_streak += 1
+            except Exception:
+                self._redis_fail_streak += 1
+                logger.warning(
+                    "Database: Redis save failed (streak=%d)",
+                    self._redis_fail_streak,
+                )
+            # Phase 3: если Redis продолжает падать — переключаемся на SQLite
+            if self._redis_fail_streak >= self._REDIS_FAIL_THRESHOLD:
+                self._switch_to_sqlite_fallback()
+                # Немедленно пишем в SQLite
+                return await self._save_sqlite_fallback(dirty, deleted)
+            return False
 
     async def shutdown(self) -> None:
 
@@ -600,37 +687,122 @@ class DatabaseManager:
 
             self._backend.close()
 
-    async def store_asset(self, message: typing.Any) -> int:
+        if self._sqlite_fallback is not None and self._sqlite_fallback is not self._backend:
+            try:
+                self._sqlite_fallback.close()
+            except Exception:
+                pass
+
+    # ---- Phase 3 helpers: graceful Redis -> SQLite fallback ----------------
+
+    def _switch_to_sqlite_fallback(self) -> None:
+        """Переключиться на SQLite, если Redis упал. Идемпотентно."""
+        if isinstance(self._backend, SQLiteBackend):
+            return
+        if self._sqlite_fallback is None:
+            try:
+                self._sqlite_fallback = SQLiteBackend(self._sqlite_path)
+            except Exception:
+                logger.exception("Database: cannot create SQLite fallback")
+                return
+        old_backend = self._backend
+        self._backend = self._sqlite_fallback
+        logger.warning(
+            "Database: switched to SQLite fallback after %d Redis failures",
+            self._redis_fail_streak,
+        )
+        try:
+            from ..core.reliability import flags as _deg_flags
+            _deg_flags.mark_redis_unavailable(
+                f"{self._redis_fail_streak} consecutive save failures",
+            )
+        except Exception:
+            pass
+        # Пытаемся освободить клиента Redis (без ожидания ответа).
+        try:
+            old_redis = getattr(old_backend, "_redis", None)
+            if old_redis is not None:
+                old_redis.close()
+        except Exception:
+            pass
+
+    async def _save_sqlite_fallback(
+        self,
+        dirty: list[tuple[str, str]],
+        deleted: list[tuple[str, str]],
+    ) -> bool:
+        """Прямой save в SQLite-fallback (когда Redis рухнул)."""
+        backend = self._sqlite_fallback if isinstance(self._sqlite_fallback, SQLiteBackend) else (
+            self._backend if isinstance(self._backend, SQLiteBackend) else None
+        )
+        if backend is None:
+            return False
+        upsert_rows: list[tuple[str, str, str]] = []
+        for owner, key in dirty:
+            val = self._data.get(owner, {}).get(key)
+            if val is not None or (owner in self._data and key in self._data[owner]):
+                upsert_rows.append((owner, key, json_dumps(val)))
+        loop = asyncio.get_event_loop()
+        try:
+            ok = await loop.run_in_executor(
+                None, backend.upsert_sync, upsert_rows, deleted,
+            )
+            return bool(ok)
+        except Exception:
+            logger.exception("Database: SQLite fallback save failed")
+            return False
+
+    @property
+    def assets_available(self) -> bool:
+        """True если assets channel доступен и пригоден для хранения медиа."""
+        return bool(self._assets_channel)
+
+    async def store_asset(self, message: typing.Any) -> int | None:
 
         from telethon.tl.types import Message
 
         if not self._assets_channel:
 
-            raise RuntimeError("Assets channel not available")
+            # Phase 3: graceful degradation — не паникуем, возвращаем None.
+            logger.debug("Database.store_asset: assets channel unavailable, skipping")
+            return None
 
-        if isinstance(message, Message):
-
-            sent = await self._client.send_message(self._assets_channel, message)
-
-        else:
-
-            sent = await self._client.send_message(
-
-                self._assets_channel, file=message, force_document=True
-
+        try:
+            if isinstance(message, Message):
+                sent = await self._client.send_message(self._assets_channel, message)
+            else:
+                sent = await self._client.send_message(
+                    self._assets_channel, file=message, force_document=True
+                )
+            return sent.id
+        except Exception as exc:
+            logger.warning(
+                "Database.store_asset: failed (%s: %s) — returning None",
+                type(exc).__name__, exc,
             )
-
-        return sent.id
+            try:
+                from ..core.reliability import flags as _deg_flags
+                _deg_flags.mark_assets_unavailable(f"store: {type(exc).__name__}")
+            except Exception:
+                pass
+            return None
 
     async def fetch_asset(self, asset_id: int) -> typing.Any | None:
 
         if not self._assets_channel:
 
-            raise RuntimeError("Assets channel not available")
+            logger.debug("Database.fetch_asset: assets channel unavailable")
+            return None
 
-        msgs = await self._client.get_messages(self._assets_channel, ids=[asset_id])
-
-        return msgs[0] if msgs else None
+        try:
+            msgs = await self._client.get_messages(self._assets_channel, ids=[asset_id])
+            return msgs[0] if msgs else None
+        except Exception as exc:
+            logger.warning(
+                "Database.fetch_asset(%s) failed: %s: %s",
+                asset_id, type(exc).__name__, exc,
+            )
+            return None
 
     def export_data(self) -> dict:
 
@@ -716,13 +888,29 @@ class DatabaseManager:
 
             async with self._lock:
 
+                snapshot_dirty = list(self._dirty)
+                snapshot_deleted = list(self._deleted)
                 snapshot = {o: dict(s) for o, s in self._data.items()}
 
                 self._dirty.clear()
 
                 self._deleted.clear()
 
-            await self._backend.save(snapshot)
+            try:
+                ok = await self._backend.save(snapshot)
+                if ok:
+                    self._redis_fail_streak = 0
+                    return
+                self._redis_fail_streak += 1
+            except Exception:
+                self._redis_fail_streak += 1
+                logger.warning(
+                    "Database: Redis scheduled save failed (streak=%d)",
+                    self._redis_fail_streak,
+                )
+            if self._redis_fail_streak >= self._REDIS_FAIL_THRESHOLD:
+                self._switch_to_sqlite_fallback()
+                await self._save_sqlite_fallback(snapshot_dirty, snapshot_deleted)
 
     def __contains__(self, item: object) -> bool:
 

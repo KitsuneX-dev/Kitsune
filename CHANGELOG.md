@@ -4,6 +4,64 @@ All notable changes to Kitsune Userbot are documented here.
 
 ---
 
+## [1.3.0] — Phase 3: Reliability
+
+### 🛡 Reliability subsystem
+- **Новый модуль `kitsune/core/reliability.py`** с полным набором инструментов надёжности:
+  - `CircuitBreaker` — классический «автоматический выключатель»
+    с тремя состояниями (CLOSED → OPEN → HALF_OPEN), async-safe.
+  - `RetryPolicy` + `retry_with_backoff()` — экспоненциальный backoff
+    с jitter для сетевых операций (1с → 2с → 4с → 8с → 16с).
+  - `DegradationFlags` — глобальные флаги graceful degradation
+    (`hydrogram_failed`, `assets_unavailable`, `redis_unavailable`, `vpn_down`).
+  - `global_registry` — единый реестр всех breaker'ов.
+
+### 💗 Health endpoint & модуль
+- **Команда `.health`** переписана полностью (`kitsune/modules/health.py`):
+  - Параллельные пробы SQLite (`SELECT 1`), Redis (`PING`),
+    Telegram session (`GetStateRequest` под защитой breaker'а).
+  - Latency-измерения для каждой подсистемы.
+  - Статус всех circuit breaker'ов + флаги деградации.
+  - Uptime, RAM/CPU/disk, process RSS.
+- **Новые команды**: `.breakers`, `.resetbreaker <name>`.
+- **HTTP `/health`** в web/core.py возвращает тот же расширенный JSON-snapshot;
+  при проблемах отвечает HTTP 503 (удобно для load-balancer'ов).
+
+### ⚡ Circuit breakers в боевых местах
+- **`telegram_api`** (5 fail / 60с cooldown) — защищает GetState-probe.
+- **`redis_io`** (3 fail / 30с cooldown) — после 3 провалов
+  `DatabaseManager` автоматически фоллбекится на SQLite,
+  без потерь данных.
+- **`hydrogram_io`** (3 fail / 5 мин cooldown).
+
+### 🔄 Graceful degradation
+- **Hydrogram сломался → Telethon-only**: `hydro_media.py` после
+  3 провалов подряд помечает Hydrogram мёртвым на 5 мин и всё
+  время идёт напрямую через Telethon. PEER_ID_INVALID не считается
+  системным сбоем. `HydrogramBridge` респектит флаг.
+- **Assets channel недоступен → пропускаем медиа**:
+  `store_asset()`/`fetch_asset()` больше не бросают RuntimeError,
+  возвращают None и пишут в debug-лог.
+- **Redis отвалился → SQLite-fallback**: `DatabaseManager` держит
+  «тёплый» SQLite-backend наготове; переключение мгновенное,
+  порог — 3 провальных save подряд.
+- **VPN/прокси отключился → retry с backoff**: `_safe_force_reconnect()`
+  в main.py использует `retry_with_backoff` и поднимает флаг
+  `vpn_down` на время retry-цикла.
+
+### ✋🏻 Tests
+- `kitsune/tests/test_reliability.py` — 18 unit-тестов:
+  CircuitBreaker (states/transitions/reset), RetryWithBackoff (success/
+  retry/exhaust), DegradationFlags, registry. Все проходят (`OK`).
+
+### 🔧 Misc
+- Redis-клиент теперь создаётся с `socket_timeout=5s`,
+  `socket_keepalive=True`, `health_check_interval=30s` — хвист ловит
+  обрывы быстрее.
+- Bumpнут версии `health` до v3.0.
+
+---
+
 ## [1.2.7] — 2026-04-10
 
 ### ⚡ Performance
