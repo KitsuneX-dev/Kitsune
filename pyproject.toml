@@ -4,7 +4,7 @@ build-backend = "setuptools.backends.legacy:build"
 
 [project]
 name = "kitsune"
-version = "1.2.4"
+version = "1.3.0"
 description = "Kitsune Userbot — fast, stable, modern Telegram userbot"
 readme = "README.md"
 license = { text = "AGPLv3" }

@@ -20,7 +20,7 @@ _DEFAULT_PONG = (
 
     "💠 Версия: <code>{version}</code>\n"
 
-    "🌑 Статус: <code>Beta (Stable)</code>\n"
+    "✅ Статус: <code>Stable Release</code>\n"
 
     " \n"
 
