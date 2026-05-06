@@ -246,6 +246,15 @@ async def _interactive_login(client: Any) -> None:
 
 async def _start_hydrogram(api_id: int, api_hash: str, session_name: str) -> Any | None:
 
+    # Проверяем сессию ДО импорта hydrogram — чтобы не тратить 10-15с на инициализацию TgCrypto
+    hydro_session_file = DATA_DIR / f"{Path(session_name).name}_hydro.session"
+
+    if not hydro_session_file.exists():
+
+        logger.info("main: Hydrogram session not found, skipping to avoid console prompt")
+
+        return None
+
     try:
 
         from hydrogram import Client as HydroClient
@@ -265,14 +274,6 @@ async def _start_hydrogram(api_id: int, api_hash: str, session_name: str) -> Any
         return None
 
     try:
-
-        hydro_session_file = DATA_DIR / f"{Path(session_name).name}_hydro.session"
-
-        if not hydro_session_file.exists():
-
-            logger.info("main: Hydrogram session not found, skipping to avoid console prompt")
-
-            return None
 
         import os as _os
 
