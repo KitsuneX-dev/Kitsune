@@ -438,7 +438,7 @@ class DatabaseManager:
 
                         "kitsune-assets",
 
-                        "🦊 Your Kitsune assets are stored here",
+                        description="🦊 Your Kitsune assets are stored here",
 
                         archive=True,
 
