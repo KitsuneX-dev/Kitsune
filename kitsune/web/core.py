@@ -180,23 +180,19 @@ class WebCore:
 
     async def _handle_health(self, request):
 
-        import time
-
-        start = self._db.get("kitsune.ping", "start_time", None)
-
-        uptime = int(time.time() - float(start)) if start else 0
-
-        connected = getattr(self._client, "is_connected", lambda: False)()
-
-        return self._json({
-
-            "ok": True,
-
-            "uptime_s": uptime,
-
-            "connected": connected,
-
-        })
+        # Phase 3: расширенный health-check — делегируем в health-модуль.
+        try:
+            from ..modules.health import collect_health
+            snapshot = await collect_health(self._client, self._db)
+            status = 200 if snapshot.get("ok") else 503
+            return self._json(snapshot, status=status)
+        except Exception as exc:
+            import time as _time
+            return self._json({
+                "ok": False,
+                "error": f"{type(exc).__name__}: {exc}",
+                "timestamp": int(_time.time()),
+            }, status=500)
 
     async def _handle_modules(self, request):
 
