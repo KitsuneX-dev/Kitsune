@@ -4,7 +4,27 @@ import os
 
 import sys
 
+import warnings
+
 from pathlib import Path
+
+# --- Python 3.13 готовность ---
+# Проверяем минимальную версию Python
+if sys.version_info < (3, 10):
+    print(
+        "[Kitsune] ОШИБКА: требуется Python 3.10+ (рекомендован 3.13).\n"
+        f"Текущая версия: {sys.version_info.major}.{sys.version_info.minor}\n",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
+# Подавляем шум от deprecated asyncio.get_event_loop() в 3.12+
+# (останется рабочим до Python 3.14)
+warnings.filterwarnings(
+    "ignore",
+    category=DeprecationWarning,
+    message=r".*get_event_loop.*",
+)
 
 def _auto_venv() -> None:
 

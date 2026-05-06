@@ -101,9 +101,9 @@ fi
 
 step "Проверка Python"
 PYTHON=""
-for cmd in python3.12 python3.11 python3.10 python3; do
+for cmd in python3.13 python3.12 python3.11 python3; do
     if command -v "$cmd" &>/dev/null; then
-        if $cmd -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)" 2>/dev/null; then
+        if $cmd -c "import sys; sys.exit(0 if sys.version_info >= (3, 13) else 1)" 2>/dev/null; then
             VER=$($cmd -c "import sys; print('.'.join(map(str,sys.version_info[:2])))")
             PYTHON="$cmd"
             ok "Python найден: $cmd ($VER)"
@@ -113,15 +113,25 @@ for cmd in python3.12 python3.11 python3.10 python3; do
 done
 
 if [[ -z "$PYTHON" ]]; then
-    warn "Python 3.10+ не найден — устанавливаю..."
+    warn "Python 3.13+ не найден — устанавливаю..."
     if $IS_TERMUX; then
         pkg install python -y; PYTHON="python3"
     elif $IS_UBUNTU; then
-        apt_install python3.11 python3.11-venv python3-pip \
-            || err "Установи Python вручную: sudo apt install python3.11 python3.11-venv"
-        PYTHON="python3.11"
+        # сначала пытаемся ставить 3.13 через deadsnakes PPA, fallback — то, что есть в репозитории
+        if command -v add-apt-repository &>/dev/null; then
+            ${SUDO:-} add-apt-repository -y ppa:deadsnakes/ppa 2>/dev/null || true
+            ${SUDO:-} apt-get update -qq 2>/dev/null || true
+        fi
+        if apt_install python3.13 python3.13-venv python3-pip 2>/dev/null; then
+            PYTHON="python3.13"
+        elif apt_install python3.12 python3.12-venv python3-pip 2>/dev/null; then
+            PYTHON="python3.12"
+            warn "Python 3.13 недоступен в репозитории — поставлен 3.12 (минимально совместим)"
+        else
+            err "Установи Python 3.13 вручную: sudo add-apt-repository ppa:deadsnakes/ppa && sudo apt install python3.13 python3.13-venv"
+        fi
     else
-        err "Установи Python 3.10+ вручную: https://python.org"
+        err "Установи Python 3.13+ вручную: https://python.org"
     fi
     ok "Python: $PYTHON"
 fi
@@ -174,10 +184,10 @@ step "Виртуальное окружение"
 VENV_DIR="$INSTALL_DIR/venv"
 if [[ ! -d "$VENV_DIR" ]]; then
     if ! $PYTHON -m venv "$VENV_DIR"; then
-        warn "venv не создался — пробую доустановить python${PYVER:-3.10}-venv..."
-        ${SUDO:-} apt-get install -y "python${PYVER:-3.10}-venv" python3-venv 2>/dev/null || true
+        warn "venv не создался — пробую доустановить python${PYVER:-3.13}-venv..."
+        ${SUDO:-} apt-get install -y "python${PYVER:-3.13}-venv" python3-venv 2>/dev/null || true
         $PYTHON -m venv "$VENV_DIR" \
-            || err "Не удалось создать venv. Запусти вручную: sudo apt install python3.10-venv"
+            || err "Не удалось создать venv. Запусти вручную: sudo apt install python3.13-venv"
     fi
     ok "venv создан: $VENV_DIR"
 else
