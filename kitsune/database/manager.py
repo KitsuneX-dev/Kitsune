@@ -234,8 +234,6 @@ class RedisBackend:
 
         import redis as _redis
 
-        # socket_timeout — чтобы операции не зависали навсегда при отвале сети.
-        # health_check_interval — pinger в драйвере, ловит мёртвые соединения.
         self._redis = _redis.Redis.from_url(
             uri,
             socket_timeout=5.0,
@@ -367,7 +365,6 @@ class DatabaseManager:
 
                 pass
 
-        # Path для SQLite — нужен и как primary, и как fallback к Redis
         _base = _Path(__file__).parent.parent.parent
         db_path = _base / f"kitsune-{self._client.tg_id}.db"
         self._sqlite_path = db_path
@@ -388,7 +385,6 @@ class DatabaseManager:
                 # переключение будет мгновенным.
                 try:
                     self._sqlite_fallback = SQLiteBackend(db_path)
-                    # ленивый connect — не открываем коннект, пока не нужен
                 except Exception:
                     logger.debug("Database: SQLite fallback not pre-warmed", exc_info=True)
 
@@ -672,7 +668,6 @@ class DatabaseManager:
                     "Database: Redis save failed (streak=%d)",
                     self._redis_fail_streak,
                 )
-            # Phase 3: если Redis продолжает падать — переключаемся на SQLite
             if self._redis_fail_streak >= self._REDIS_FAIL_THRESHOLD:
                 self._switch_to_sqlite_fallback()
                 # Немедленно пишем в SQLite
@@ -763,7 +758,6 @@ class DatabaseManager:
 
         if not self._assets_channel:
 
-            # Phase 3: graceful degradation — не паникуем, возвращаем None.
             logger.debug("Database.store_asset: assets channel unavailable, skipping")
             return None
 

@@ -534,7 +534,6 @@ async def test_loader_reload_module(tmp_path):
     m1 = await loader.load_from_file(mod_file)
     first_id = id(m1)
 
-    # Реалистичный reload — снова загружаем тот же файл
     reloaded = await loader.reload_module("RL")
     # Должен быть СВЕЖИЙ экземпляр (другой объект в памяти)
     assert id(reloaded) != first_id

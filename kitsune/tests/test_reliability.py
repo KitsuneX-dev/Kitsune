@@ -84,7 +84,6 @@ class CircuitBreakerTests(unittest.TestCase):
                     await cb.call(fail)
             self.assertEqual(cb.state, STATE_OPEN)
             await asyncio.sleep(0.08)
-            # Первая проба после cooldown — успех → CLOSED
             result = await cb.call(ok)
             self.assertEqual(result, "ok")
             self.assertEqual(cb.state, STATE_CLOSED)
@@ -102,7 +101,6 @@ class CircuitBreakerTests(unittest.TestCase):
                 with self.assertRaises(TimeoutError):
                     await cb.call(fail)
             await asyncio.sleep(0.08)
-            # Проба провалена — снова OPEN
             with self.assertRaises(TimeoutError):
                 await cb.call(fail)
             self.assertEqual(cb.state, STATE_OPEN)

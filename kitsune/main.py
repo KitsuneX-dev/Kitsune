@@ -246,7 +246,6 @@ async def _interactive_login(client: Any) -> None:
 
 async def _start_hydrogram(api_id: int, api_hash: str, session_name: str) -> Any | None:
 
-    # Проверяем сессию ДО импорта hydrogram — чтобы не тратить 10-15с на инициализацию TgCrypto
     hydro_session_file = DATA_DIR / f"{Path(session_name).name}_hydro.session"
 
     if not hydro_session_file.exists():
@@ -265,7 +264,6 @@ async def _start_hydrogram(api_id: int, api_hash: str, session_name: str) -> Any
 
         logger.info("main: hydrogram not installed, skipping secondary client")
 
-        # Phase 3: отмечаем деградацию — Telethon-only.
         try:
             from .core.reliability import flags as _deg_flags
             _deg_flags.mark_hydrogram_failed("hydrogram package not installed")
@@ -317,7 +315,6 @@ async def _start_hydrogram(api_id: int, api_hash: str, session_name: str) -> Any
 
         logger.info("main: Hydrogram client started (termux=%s, no_updates=%s)", is_termux, is_termux)
 
-        # Phase 3: всё ок — снимаем флаг деградации если он был.
         try:
             from .core.reliability import flags as _deg_flags
             _deg_flags.clear_hydrogram_failed()
@@ -862,9 +859,10 @@ async def _startup(args: argparse.Namespace) -> None:
 
     client._kitsune_loader = loader
 
-    await loader.load_all_builtin()
-
-    await loader.load_all_user()
+    await asyncio.gather(
+        loader.load_all_builtin(),
+        loader.load_all_user(),
+    )
 
     translator = Translator(db)
 
@@ -1034,7 +1032,6 @@ async def _safe_force_reconnect(client: Any) -> bool:
     try:
         from .core.reliability import retry_with_backoff, RetryPolicy, flags as _deg_flags
     except Exception:
-        # Резервный путь — без reliability просто одна попытка.
         try:
             await asyncio.wait_for(client.connect(), timeout=30.0)
             return True
@@ -1124,7 +1121,6 @@ async def _keepalive(client: Any) -> None:
 
     attempts: int = 0
 
-    # Phase 3: импорт реестра breaker'ов без обязательности (если сломается — работаем без него)
     try:
         from .core.reliability import flags as _deg_flags
     except Exception:

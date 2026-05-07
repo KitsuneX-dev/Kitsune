@@ -1,17 +1,3 @@
-"""
-Kitsune — Hydrogram media helpers.
-
-Phase 3 (Reliability):
-    • Если Hydrogram сломан/сдох (ошибки последовательно), помечаем
-      degradation flag `hydrogram_failed=True` и в дальнейшем используем
-      ТОЛЬКО Telethon — не делаем повторных попыток через убитый клиент.
-    • После TTL (5 минут) флаг автоматически снимается, чтобы дать ещё
-      один шанс на восстановление.
-
-Все публичные функции этого модуля сохраняют прежние сигнатуры — их
-вызывающие места не меняем.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -39,7 +25,7 @@ def _is_hydro_dead() -> bool:
     if _hydro_dead_until <= 0:
         return False
     if time.monotonic() >= _hydro_dead_until:
-        return False  # cooldown истёк — даём шанс
+        return False
     return True
 
 
@@ -204,7 +190,6 @@ async def send_file(
         except Exception as exc:
             exc_str = str(exc)
             if "PEER_ID_INVALID" in exc_str:
-                # PEER_ID_INVALID — это не системный сбой, не считаем provideй failure
                 logger.debug("hydro_media: Hydrogram PEER_ID_INVALID for %s — falling back to Telethon", chat_id)
             else:
                 logger.warning("hydro_media: Hydrogram send failed (%s), falling back to Telethon", exc)

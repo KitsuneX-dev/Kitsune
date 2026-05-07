@@ -1,32 +1,3 @@
-"""
-Kitsune — Reliability subsystem (Phase 3).
-
-Модуль предоставляет компоненты надёжности:
-
-    • CircuitBreaker — классический паттерн «автоматический выключатель»
-      с тремя состояниями (CLOSED → OPEN → HALF_OPEN). После N таймаутов
-      подряд запросы блокируются на cooldown секунд, по истечении которого
-      breaker уходит в HALF_OPEN и пропускает один пробный запрос.
-
-    • RetryWithBackoff — экспоненциальный backoff с jitter для повторных
-      попыток сетевых операций (например, после отвала VPN).
-
-    • DegradationFlags — глобальные флаги graceful degradation, которые
-      потребители (hydro_media, database, log) читают чтобы решить
-      использовать ли деградированный путь.
-
-    • global_registry — единый реестр CircuitBreaker'ов, чтобы любой
-      модуль мог получить ссылку на breaker и команды `/health` могли
-      показать их состояние.
-
-Дизайн-принципы:
-    1) Никаких зависимостей вне stdlib и asyncio.
-    2) Потокобезопасно через asyncio.Lock — допустимо использовать
-       из любых корутин в одном event loop.
-    3) Все методы безопасны при многократных вызовах: lifecycle
-       идемпотентен.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -152,7 +123,6 @@ class CircuitBreaker:
                 )
                 return True
             return False
-        # HALF_OPEN — пускаем только одну пробу за раз. Дальнейшие
         # вызовы пока не пришёл результат блокируем.
         return True
 
@@ -176,7 +146,6 @@ class CircuitBreaker:
             st.consecutive_failures += 1
             st.last_failure_at = time.time()
             if st.state == STATE_HALF_OPEN:
-                # Проба провалилась — снова OPEN, обновляем opened_at.
                 st.state = STATE_OPEN
                 st.opened_at = time.monotonic()
                 logger.warning(
@@ -215,8 +184,6 @@ class CircuitBreaker:
             raise
         except Exception:
             # Непредвиденные ошибки тоже считаем провалом (это безопаснее),
-            # но не пушим breaker слишком агрессивно — без consecutive_failures++.
-            # На практике почти любой сетевой Exception — это сбой.
             await self.record_failure()
             raise
         else:
@@ -260,7 +227,6 @@ class _CircuitBreakerRegistry:
         self._items: dict[str, CircuitBreaker] = {}
 
     def register(self, cb: CircuitBreaker) -> None:
-        # Если уже зарегистрирован — НЕ перетираем (idempotent), просто
         # игнорируем повтор. Это нужно для hot-reload модулей.
         self._items.setdefault(cb.name, cb)
 
@@ -394,7 +360,6 @@ async def retry_with_backoff(
                     logger.exception("retry[%s]: on_retry callback raised", name)
             continue
         except Exception:
-            # Неожиданное исключение — не наша территория, пробрасываем.
             raise
     # Все попытки исчерпаны.
     assert last_exc is not None  # для типизации
@@ -499,7 +464,6 @@ class DegradationFlags:
         )
 
 
-# Глобальный объект флагов — единый на процесс.
 flags = DegradationFlags()
 
 

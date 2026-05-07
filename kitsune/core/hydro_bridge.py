@@ -234,7 +234,6 @@ class HydrogramBridge:
 
             async def _on_message(client, message) -> None:
 
-                # Phase 3: если Hydrogram помечен сломанным — сообщения из этого
                 # клиента не обрабатываем (Telethon всё равно их видит через свои events).
                 try:
                     from ..core.reliability import flags as _deg_flags

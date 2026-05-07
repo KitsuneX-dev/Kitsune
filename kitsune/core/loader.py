@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import hashlib
 import importlib
 import importlib.util
 import inspect
@@ -296,6 +297,16 @@ def _scan_ast(source: str, filename: str = "<module>") -> None:
         )
 
 
+_ast_cache: dict[str, ast.AST] = {}
+
+
+def _scan_ast_with_cache(source: str, filename: str = "<module>") -> None:
+    key = hashlib.md5(source.encode()).hexdigest()
+    if key not in _ast_cache:
+        _scan_ast(source, filename)
+        _ast_cache[key] = ast.parse(source, filename=filename)
+
+
 def _extract_missing_package(exc: ImportError) -> str | None:
     name = getattr(exc, "name", None)
     if name:
@@ -441,7 +452,7 @@ class Loader:
             async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as resp:
                 resp.raise_for_status()
                 source = await resp.text()
-        _scan_ast(source, filename=url)
+        _scan_ast_with_cache(source, filename=url)
         user_dir = Path.home() / ".kitsune" / "modules"
         user_dir.mkdir(parents=True, exist_ok=True)
         filename = url.rstrip("/").split("/")[-1]
@@ -456,7 +467,7 @@ class Loader:
 
     async def load_from_file(self, path: Path, progress_cb=None) -> KitsuneModule:
         source = path.read_text(encoding="utf-8")
-        _scan_ast(source, filename=str(path))
+        _scan_ast_with_cache(source, filename=str(path))
         return await self._load_from_path(
             path, is_builtin=False, progress_cb=progress_cb,
             already_scanned=True, prefetched_source=source,
@@ -511,7 +522,7 @@ class Loader:
 
         source = prefetched_source if prefetched_source is not None else path.read_text(encoding="utf-8")
         if not is_builtin and not already_scanned:
-            _scan_ast(source, filename=str(path))
+            _scan_ast_with_cache(source, filename=str(path))
 
         spec = importlib.util.spec_from_file_location(
             module_name, path,

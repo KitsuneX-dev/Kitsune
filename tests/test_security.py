@@ -51,7 +51,6 @@ async def manager():
 
 
 # ======================================================================
-# 1. Bitmap permissions — корректность констант
 # ======================================================================
 
 def test_bitmap_constants_unique():
@@ -95,7 +94,6 @@ def test_default_permissions_is_owner():
 
 
 # ======================================================================
-# 2. SecurityManager — owner check
 # ======================================================================
 
 @pytest.mark.asyncio
@@ -137,7 +135,6 @@ async def test_none_sender_id_returns_false(manager):
 
 
 # ======================================================================
-# 3. Sudo / Support users — добавление, удаление, чтение
 # ======================================================================
 
 @pytest.mark.asyncio
@@ -192,7 +189,6 @@ async def test_sudo_user_check_passes(manager):
     from kitsune.core.security import SUDO
     await manager.add_sudo(777)
     msg = _msg(sender_id=777, chat_id=999)
-    # private chat ≠ user (777) — group context, get_permissions empty
     manager._client.get_permissions = AsyncMock(side_effect=Exception("not a participant"))
     assert await manager.check(msg, SUDO) is True
 
@@ -212,7 +208,6 @@ async def test_get_support_users_default(manager):
 
 
 # ======================================================================
-# 4. PM bit — личные сообщения
 # ======================================================================
 
 @pytest.mark.asyncio
@@ -295,7 +290,6 @@ async def test_get_permissions_exception_returns_member_only(manager):
 
 
 # ======================================================================
-# 6. Cache — invalidation, TTL
 # ======================================================================
 
 @pytest.mark.asyncio
@@ -424,7 +418,6 @@ async def test_check_with_combined_required(manager):
     """check может принимать комбинацию битов — должен вернуть True если ХОТЯ БЫ один совпал."""
     from kitsune.core.security import OWNER, SUDO
     msg = _msg(sender_id=1000, chat_id=1000)
-    # Пользователь — owner, проверяем OWNER|SUDO → True
     assert await manager.check(msg, OWNER | SUDO) is True
 
 

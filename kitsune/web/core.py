@@ -180,7 +180,6 @@ class WebCore:
 
     async def _handle_health(self, request):
 
-        # Phase 3: расширенный health-check — делегируем в health-модуль.
         try:
             from ..modules.health import collect_health
             snapshot = await collect_health(self._client, self._db)

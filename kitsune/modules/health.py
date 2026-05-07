@@ -1,18 +1,3 @@
-"""
-Kitsune — Health module (Phase 3).
-
-Команды:
-    .health         — расширенный health-check всех подсистем:
-                      SQLite alive? Redis alive? Telegram session active?
-                      uptime, RAM, CPU, disk, circuit breakers, degradation.
-    .monitor on|off [N] — фоновый мониторинг RAM/CPU с алертами в logchat.
-    .breakers       — состояние всех CircuitBreaker'ов.
-    .resetbreaker <name> — ручной сброс breaker'а в CLOSED.
-
-Этот же модуль предоставляет helper'ы, используемые web/core.py для
-публикации /health JSON endpoint.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -40,7 +25,6 @@ _DEFAULT_CPU_LIMIT = 90
 
 
 # ---------------------------------------------------------------------------
-# Health-probes — переиспользуются и веб-эндпоинтом
 # ---------------------------------------------------------------------------
 
 async def probe_sqlite(db: typing.Any) -> dict:
@@ -58,7 +42,6 @@ async def probe_sqlite(db: typing.Any) -> dict:
     if backend is None:
         return {"alive": False, "error": "no backend"}
     if not isinstance(backend, SQLiteBackend):
-        # SQLite используется как fallback — если активен Redis, возвращаем
         # «n/a» но без ошибки.
         return {"alive": False, "error": "not active (redis primary)", "active": False}
 
@@ -120,7 +103,6 @@ async def probe_redis(db: typing.Any) -> dict:
             "latency_ms": round(latency_ms, 2),
         }
     except asyncio.TimeoutError:
-        # отметим деградацию — потребители могут заметить и переключиться
         _degradation_flags.mark_redis_unavailable("PING timeout >5s")
         return {"alive": False, "active": True, "configured": True, "error": "timeout (>5s)"}
     except Exception as exc:
@@ -151,14 +133,12 @@ async def probe_telegram(client: typing.Any) -> dict:
     if not connected:
         return {"alive": False, "connected": False}
 
-    # Если у клиента нет sender — линк ещё не поднят
     sender = getattr(client, "_sender", None)
     if sender is None:
         return {"alive": False, "connected": True, "error": "no sender"}
 
     t0 = time.monotonic()
     try:
-        # Используем GetStateRequest как «ping» — он лёгкий
         from telethon.tl.functions.updates import GetStateRequest
         # Защищаем circuit breaker'ом
         from ..core.reliability import get_breaker, CircuitBreakerOpenError
@@ -224,7 +204,6 @@ def collect_system() -> dict:
     except Exception:
         pass
     try:
-        # interval=0 — мгновенно (не блокирующий замер)
         out["cpu_pct"] = round(float(psutil.cpu_percent(interval=0.0)), 1)
     except Exception:
         pass
@@ -246,7 +225,6 @@ def collect_system() -> dict:
 async def collect_health(client: typing.Any, db: typing.Any) -> dict:
     """Собрать полный health-snapshot. Используется и .health командой,
     и /health endpoint'ом."""
-    # Системные ресурсы — синхронны и быстры
     system = collect_system()
 
     # Параллельно опросим все три бэкенда
@@ -463,7 +441,6 @@ class HealthModule(KitsuneModule):
         try:
             await msg.edit(render_health_text(snapshot), parse_mode="html")
         except Exception:
-            # Если edit упал (например, message_not_modified) — игнорируем
             await event.reply(render_health_text(snapshot), parse_mode="html")
 
     # -------- .monitor on/off ----------------------------------------------

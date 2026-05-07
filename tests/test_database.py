@@ -52,7 +52,6 @@ class _FakeClient:
 
 
 # ======================================================================
-# 1. SQLiteBackend — базовый CRUD
 # ======================================================================
 
 def test_save_and_load(backend):
@@ -199,7 +198,6 @@ def test_table_schema_correct(backend):
 
 
 # ======================================================================
-# 4. DatabaseManager — высокоуровневые тесты
 # ======================================================================
 
 @pytest_asyncio.fixture
@@ -207,7 +205,6 @@ async def manager(tmp_path, monkeypatch):
     """Создаёт DatabaseManager с SQLite-бэкендом во временной папке."""
     from kitsune.database import manager as dbm
 
-    # Подменим путь для базы — кладём её во временную директорию
     fake_root = tmp_path
     monkeypatch.setattr(dbm, "__file__", str(fake_root / "fake" / "manager.py"))
 
@@ -288,13 +285,11 @@ async def test_manager_export_data(manager):
     await manager.set("b", "2", "y")
     snap = manager.export_data()
     assert snap == {"a": {"1": "x"}, "b": {"2": "y"}}
-    # Снимок — это копия
     snap["a"]["1"] = "MUTATED"
     assert manager.get("a", "1") == "x"
 
 
 # ======================================================================
-# 5. Revision system — снапшоты и откат
 # ======================================================================
 
 @pytest.mark.asyncio
