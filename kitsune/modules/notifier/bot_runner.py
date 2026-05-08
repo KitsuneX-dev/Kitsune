@@ -100,7 +100,9 @@ def _build_welcome_text(db) -> str:
 
         f"<code>{prefix}cfg</code> — настройка модулей\n"
 
-        f"<code>{prefix}dlm &lt;url&gt;</code> — установить модуль"
+        f"<code>{prefix}dlm &lt;url&gt;</code> — установить модуль по ссылке\\n"\
+
+        f"<code>{prefix}lm</code> — установить модуль файлом (ответом на файл)"
 
         "</blockquote>\n"
 
@@ -133,6 +135,41 @@ def _build_welcome_text(db) -> str:
         f"🖥 <b>Платформа:</b> {platform}"
 
     )
+
+_LANG_OPTIONS: dict[str, str] = {
+    "ru":   "🇷🇺 Русский",
+    "en":   "🇬🇧 English",
+    "de":   "🇩🇪 Deutsch",
+    "ua":   "🇺🇦 Українська",
+    "jp":   "🇯🇵 日本語",
+    "uwu":  "🐾 UwU",
+    "leet": "👾 1337",
+}
+
+async def _show_lang_setup(bot, owner_id: int) -> None:
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    try:
+        buttons, row = [], []
+        for code, label in _LANG_OPTIONS.items():
+            row.append(InlineKeyboardButton(text=label, callback_data=f"lang_select:{code}"))
+            if len(row) == 2:
+                buttons.append(row)
+                row = []
+        if row:
+            buttons.append(row)
+        await bot.send_message(
+            chat_id=owner_id,
+            text=(
+                "🌐 <b>Выберите язык интерфейса</b>\n\n"
+                "Выберите язык, который будет использоваться в командах "
+                "и уведомлениях Kitsune.\n\n"
+                "<i>Изменить позже:</i> <code>.setlang</code>"
+            ),
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
+            parse_mode="HTML",
+        )
+    except Exception as _exc:
+        logger.warning("BotRunner: не удалось отправить выбор языка: %s", _exc)
 
 async def _run_asset_setup(client, db) -> None:
 
@@ -300,15 +337,7 @@ class BotRunner:
 
                         logger.warning("BotRunner: не удалось отправить welcome: %s", _wexc)
 
-                    loader = getattr(self._client, "_kitsune_loader", None)
-
-                    backup = loader.modules.get("backup") if loader else None
-
-                    if backup:
-
-                        await backup.show_interval_setup(self.bot, int(owner_id))
-
-                        await self._db.set(_DB_KEY, "backup_interval_asked", True)
+                    await _show_lang_setup(self.bot, int(owner_id))
 
         except Exception as exc:
 
@@ -405,6 +434,12 @@ class BotRunner:
         async def on_update_cb(call: CallbackQuery) -> None:
 
             await ref._on_update_cb(call)
+
+        @router.callback_query(lambda c: c.data and c.data.startswith("lang_select:"))
+
+        async def on_lang_select(call: CallbackQuery) -> None:
+
+            await ref._on_lang_select(call)
 
         @router.callback_query(lambda c: c.data and c.data.startswith("backup_interval:"))
 
@@ -577,6 +612,56 @@ class BotRunner:
                 await edit(f"❌ Ошибка / Error:\n<code>{err}</code>")
 
                 return
+
+    async def _on_lang_select(self, call) -> None:
+
+        owner_id = self._db.get(_DB_KEY, "owner_id", None)
+
+        try:
+
+            if owner_id is None or call.from_user.id != int(owner_id):
+
+                await call.answer("🔒 Нет доступа.", show_alert=True)
+
+                return
+
+        except Exception:
+
+            return
+
+        lang_code = call.data.split(":", 1)[1]
+
+        label = _LANG_OPTIONS.get(lang_code, lang_code)
+
+        try:
+
+            await self._db.set("kitsune.core", "lang", lang_code)
+
+            await call.message.edit_text(
+
+                f"✅ Язык установлен: <b>{label}</b>\n\n"
+
+                "<i>Изменить в любой момент:</i> <code>.setlang</code>",
+
+                parse_mode="HTML",
+
+            )
+
+            await call.answer()
+
+        except Exception as _exc:
+
+            logger.warning("BotRunner: _on_lang_select edit failed — %s", _exc)
+
+        loader = getattr(self._client, "_kitsune_loader", None)
+
+        backup = loader.modules.get("backup") if loader else None
+
+        if backup:
+
+            await backup.show_interval_setup(self.bot, int(owner_id))
+
+            await self._db.set(_DB_KEY, "backup_interval_asked", True)
 
     async def _on_backup_interval(self, call) -> None:
 
