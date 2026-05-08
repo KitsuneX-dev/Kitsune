@@ -166,18 +166,47 @@ fi
 step "Исходный код"
 INSTALL_DIR="$HOME/Kitsune"
 
+# Гарантированно создаём родительскую директорию (на случай нестандартного $HOME)
+mkdir -p "$HOME" 2>/dev/null || true
+
 if [[ -d "$INSTALL_DIR/.git" ]]; then
     info "Репозиторий уже есть — обновляю..."
-    cd "$INSTALL_DIR"
+    cd "$INSTALL_DIR" || err "Не удалось перейти в $INSTALL_DIR"
     git pull --ff-only origin main 2>/dev/null || warn "git pull не удался, продолжаю с текущей версией"
     ok "Код обновлён"
 else
-    info "Клонирую репозиторий..."
+    # Если папка существует, но без .git (повреждённая/пустая) — удаляем
+    if [[ -e "$INSTALL_DIR" ]]; then
+        warn "Папка $INSTALL_DIR существует, но не является git-репозиторием — пересоздаю..."
+        rm -rf "$INSTALL_DIR" || err "Не удалось удалить старую папку $INSTALL_DIR"
+    fi
+
+    info "Клонирую репозиторий в $INSTALL_DIR ..."
     git clone https://github.com/KitsuneX-dev/Kitsune "$INSTALL_DIR" \
         || err "Не удалось клонировать репозиторий. Проверь интернет-соединение."
-    cd "$INSTALL_DIR"
+
+    # Страховка: если git по какой-то причине не создал папку — создаём вручную
+    if [[ ! -d "$INSTALL_DIR" ]]; then
+        warn "Папка $INSTALL_DIR не создана git'ом — создаю вручную и повторяю клон..."
+        mkdir -p "$INSTALL_DIR" || err "Не удалось создать папку $INSTALL_DIR"
+        git clone https://github.com/KitsuneX-dev/Kitsune "$INSTALL_DIR" \
+            || err "Повторный клон не удался. Проверь интернет и права доступа к $HOME."
+    fi
+
+    # Финальная проверка
+    if [[ ! -d "$INSTALL_DIR/.git" ]]; then
+        err "Папка $INSTALL_DIR создана, но репозиторий внутри не инициализирован."
+    fi
+
+    cd "$INSTALL_DIR" || err "Не удалось перейти в $INSTALL_DIR"
     ok "Репозиторий склонирован: $INSTALL_DIR"
 fi
+
+# Дополнительная гарантия: папка точно есть
+if [[ ! -d "$INSTALL_DIR" ]]; then
+    err "Критическая ошибка: папка $INSTALL_DIR отсутствует после установки."
+fi
+ok "Папка Kitsune подтверждена: $INSTALL_DIR"
 
 step "Виртуальное окружение"
 VENV_DIR="$INSTALL_DIR/venv"

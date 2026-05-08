@@ -57,15 +57,38 @@ pip_install "Pillow" && ok "Pillow установлен" || warn "Pillow не у
 
 step "Клонирование репозитория"
 INSTALL_DIR="$HOME/Kitsune"
+
+# Гарантируем, что $HOME существует
+mkdir -p "$HOME" 2>/dev/null || true
+
 if [[ -d "$INSTALL_DIR/.git" ]]; then
     info "Обновляю существующий репозиторий..."
     cd "$INSTALL_DIR" && git pull --ff-only origin main || \
         warn "git pull не удался, продолжаю с текущей версией"
 else
-    rm -rf "$INSTALL_DIR"
-    git clone https://github.com/KitsuneX-dev/Kitsune "$INSTALL_DIR"
+    if [[ -e "$INSTALL_DIR" ]]; then
+        warn "Папка $INSTALL_DIR существует, но без .git — удаляю и пересоздаю..."
+        rm -rf "$INSTALL_DIR" || err "Не удалось удалить $INSTALL_DIR (проверь права)"
+    fi
+
+    info "Клонирую в $INSTALL_DIR ..."
+    git clone https://github.com/KitsuneX-dev/Kitsune "$INSTALL_DIR" \
+        || err "Не удалось клонировать репозиторий. Проверь интернет-соединение."
+
+    # Страховка на случай, если git не создал папку
+    if [[ ! -d "$INSTALL_DIR" ]]; then
+        warn "Папка $INSTALL_DIR не создана — создаю вручную и повторяю клон..."
+        mkdir -p "$INSTALL_DIR" || err "Не удалось создать $INSTALL_DIR"
+        git clone https://github.com/KitsuneX-dev/Kitsune "$INSTALL_DIR" \
+            || err "Повторный клон не удался."
+    fi
 fi
-cd "$INSTALL_DIR"
+
+# Финальная проверка
+if [[ ! -d "$INSTALL_DIR" ]]; then
+    err "Критическая ошибка: папка $INSTALL_DIR не создана."
+fi
+cd "$INSTALL_DIR" || err "Не удалось перейти в $INSTALL_DIR"
 ok "Репозиторий готов: $INSTALL_DIR"
 
 step "Telethon (основная библиотека)"
