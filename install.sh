@@ -117,7 +117,6 @@ if [[ -z "$PYTHON" ]]; then
     if $IS_TERMUX; then
         pkg install python -y; PYTHON="python3"
     elif $IS_UBUNTU; then
-        # сначала пытаемся ставить 3.13 через deadsnakes PPA, fallback — то, что есть в репозитории
         if command -v add-apt-repository &>/dev/null; then
             ${SUDO:-} add-apt-repository -y ppa:deadsnakes/ppa 2>/dev/null || true
             ${SUDO:-} apt-get update -qq 2>/dev/null || true
@@ -277,8 +276,6 @@ rm -rf "$_PYAES_TMP"
     || err "Не удалось установить зависимости. Проверь requirements.txt"
 ok "Зависимости установлены"
 
-# python-socks нужен Telethon >=1.36 для всех типов прокси (включая MTProto).
-# Дублируем явную установку — на случай старых requirements.txt у обновляющихся пользователей.
 "$PIP" install --no-cache-dir --no-warn-script-location --disable-pip-version-check --quiet \
     "python-socks[asyncio]>=2.4.4" PySocks \
     && ok "python-socks[asyncio] установлен (нужен для прокси и обхода РКН)" \
