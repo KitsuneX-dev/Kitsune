@@ -13,6 +13,9 @@ class HelpModule(KitsuneModule):
 
     description = "Список команд и модулей"
 
+
+    version     = "1.3.0"
+
     author      = "@Mikasu32"
 
     _builtin    = True
@@ -130,6 +133,8 @@ class HelpModule(KitsuneModule):
     @command("help", required=OWNER)
 
     async def help_cmd(self, event) -> None:
+
+        """help — показать список модулей или подробную справку по конкретному модулю."""
 
         args = self.get_args(event).strip()
 
@@ -424,6 +429,8 @@ class HelpModule(KitsuneModule):
     @command("helphide", required=OWNER)
 
     async def helphide_cmd(self, event) -> None:
+
+        """helphide — скрыть/показать модуль в выдаче .help."""
 
         args = self.get_args(event).strip().lower()
 

@@ -97,7 +97,7 @@ class ConfigModule(KitsuneModule):
 
     author      = "@Mikasu32"
 
-    version     = "3.0-kitsune"
+    version     = "1.3.0"
 
     strings_ru = {
 
@@ -699,6 +699,8 @@ class ConfigModule(KitsuneModule):
 
     async def config_cmd(self, event) -> None:
 
+        """config — интерактивная настройка конфигурации модулей."""
+
         inline = self._inline()
 
         if not inline or not inline._bot:
@@ -776,6 +778,8 @@ class ConfigModule(KitsuneModule):
     @command("fconfig", required=OWNER, aliases=["fcfg"])
 
     async def fconfig_cmd(self, event) -> None:
+
+        """fconfig — быстрая настройка конфигурации без интерактивного меню."""
 
         full_args = self.get_args(event)
 

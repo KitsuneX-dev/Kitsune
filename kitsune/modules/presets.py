@@ -106,7 +106,7 @@ class PresetsModule(KitsuneModule):
 
     author      = "@Mikasu32"
 
-    version     = "1.0"
+    version     = "1.3.0"
 
     _builtin    = True
 
@@ -215,6 +215,8 @@ class PresetsModule(KitsuneModule):
     @command("presets", required=OWNER)
 
     async def presets_cmd(self, event) -> None:
+
+        """presets — показать список доступных пресетов модулей."""
 
         arg = self.get_args(event).strip().lower()
 
@@ -356,6 +358,8 @@ class PresetsModule(KitsuneModule):
 
     async def loadpreset_cmd(self, event) -> None:
 
+        """loadpreset — загрузить пресет модулей по имени или ссылке."""
+
         reply = await event.message.get_reply_message()
 
         msg = reply if (reply and reply.file) else (event.message if event.message.file else None)
@@ -428,6 +432,8 @@ class PresetsModule(KitsuneModule):
 
     async def addtofolder_cmd(self, event) -> None:
 
+        """addtofolder — добавить чат в Telegram-папку."""
+
         args = self.get_args(event).split()
 
         if len(args) < 2:
@@ -487,6 +493,8 @@ class PresetsModule(KitsuneModule):
     @command("removefromfolder", required=OWNER)
 
     async def removefromfolder_cmd(self, event) -> None:
+
+        """removefromfolder — убрать чат из Telegram-папки."""
 
         args = self.get_args(event).split()
 
@@ -549,6 +557,8 @@ class PresetsModule(KitsuneModule):
     @command("folderload", required=OWNER)
 
     async def folderload_cmd(self, event) -> None:
+
+        """folderload — загрузить набор модулей из папки в репозитории."""
 
         args = self.get_args(event).split()
 
@@ -624,6 +634,8 @@ class PresetsModule(KitsuneModule):
 
     async def aliasload_cmd(self, event) -> None:
 
+        """aliasload — загрузить набор алиасов из файла."""
+
         dispatcher = self._get_dispatcher()
 
         if not dispatcher:
@@ -665,6 +677,8 @@ class PresetsModule(KitsuneModule):
     @command("loadaliases", required=OWNER)
 
     async def loadaliases_cmd(self, event) -> None:
+
+        """loadaliases — восстановить алиасы из бэкап-файла."""
 
         reply = await event.message.get_reply_message()
 

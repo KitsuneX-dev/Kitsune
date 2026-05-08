@@ -10,7 +10,7 @@ class PasteModule(KitsuneModule):
 
     author      = "Yushi"
 
-    version     = "1.0"
+    version     = "1.3.0"
 
     strings_ru = {
 
@@ -27,6 +27,8 @@ class PasteModule(KitsuneModule):
     @command("paste", required=OWNER)
 
     async def paste_cmd(self, event) -> None:
+
+        """paste — опубликовать текст или файл на Telegraph и получить ссылку."""
 
         text = self.get_args(event) or None
 

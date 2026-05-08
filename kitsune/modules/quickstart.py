@@ -52,7 +52,7 @@ class QuickstartModule(KitsuneModule):
 
     author      = "Kitsune Team"
 
-    version     = "1.3"
+    version     = "1.3.0"
 
     icon        = "🎉"
 
@@ -441,6 +441,8 @@ class QuickstartModule(KitsuneModule):
     @command("quickstart", required=OWNER)
 
     async def quickstart_cmd(self, event) -> None:
+
+        """quickstart — запустить мастер первичной настройки UserBot."""
 
         args = self.get_args(event).strip().lower()
 

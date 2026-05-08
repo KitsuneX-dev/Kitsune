@@ -29,7 +29,7 @@ class ProxyCtl(KitsuneModule):
 
     author      = "Kitsune Team"
 
-    version     = "1.1"
+    version     = "1.3.0"
 
     icon        = "🛰"
 
@@ -38,6 +38,8 @@ class ProxyCtl(KitsuneModule):
     @command("setproxy", required=OWNER)
 
     async def setproxy_cmd(self, event) -> None:
+
+        """setproxy — установить MTPROTO-прокси для Telethon."""
 
         args = (self.get_args(event) or "").split()
 
@@ -113,6 +115,8 @@ class ProxyCtl(KitsuneModule):
 
     async def delproxy_cmd(self, event) -> None:
 
+        """delproxy — удалить настроенный MTPROTO-прокси."""
+
         cfg = _load_cfg()
 
         if "proxy" in cfg:
@@ -136,6 +140,8 @@ class ProxyCtl(KitsuneModule):
     @command("setsocks", required=OWNER)
 
     async def setsocks_cmd(self, event) -> None:
+
+        """setsocks — установить SOCKS5-прокси (для Telethon и aiogram)."""
 
         args = (self.get_args(event) or "").split()
 
@@ -285,6 +291,8 @@ class ProxyCtl(KitsuneModule):
 
     async def delsocks_cmd(self, event) -> None:
 
+        """delsocks — удалить настроенный SOCKS5-прокси."""
+
         cfg = _load_cfg()
 
         if "proxy_socks" in cfg:
@@ -308,6 +316,8 @@ class ProxyCtl(KitsuneModule):
     @command("testsocks", required=OWNER)
 
     async def testsocks_cmd(self, event) -> None:
+
+        """testsocks — проверить работоспособность SOCKS5-прокси."""
 
         m = await event.reply("⏳ Проверяю SOCKS5 → api.telegram.org…", parse_mode="html")
 
@@ -428,6 +438,8 @@ class ProxyCtl(KitsuneModule):
     @command("proxyinfo", required=OWNER, aliases=["proxystatus"])
 
     async def proxyinfo_cmd(self, event) -> None:
+
+        """proxyinfo — показать текущие настройки прокси (alias: proxystatus)."""
 
         cfg = _load_cfg()
 

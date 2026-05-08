@@ -177,7 +177,7 @@ class WeatherModule(KitsuneModule):
 
     author      = "Yushi"
 
-    version     = "1.0"
+    version     = "1.3.0"
 
     icon        = "🌤"
 
@@ -230,6 +230,8 @@ class WeatherModule(KitsuneModule):
     @command("weather", required=OWNER, aliases=["погода", "w"])
 
     async def weather_cmd(self, event) -> None:
+
+        """weather — показать погоду в указанном городе (aliases: погода, w)."""
 
         args = self.get_args(event)
 

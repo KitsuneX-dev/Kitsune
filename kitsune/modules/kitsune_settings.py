@@ -21,7 +21,7 @@ class KitsuneSettingsModule(KitsuneModule):
 
     author      = "@Mikasu32"
 
-    version     = "1.0"
+    version     = "1.3.0"
 
     _builtin    = True
 
@@ -95,6 +95,8 @@ class KitsuneSettingsModule(KitsuneModule):
 
     async def nonick_cmd(self, event) -> None:
 
+        """nonick — включить/выключить режим без ника (анонимный)."""
+
         cur = self.db.get(_DB_MAIN, "no_nickname", False)
 
         await self.db.set(_DB_MAIN, "no_nickname", not cur)
@@ -106,6 +108,8 @@ class KitsuneSettingsModule(KitsuneModule):
     @command("nonickuser", required=OWNER)
 
     async def nonickuser_cmd(self, event) -> None:
+
+        """nonickuser — добавить/удалить пользователя в список без ника."""
 
         reply = await event.message.get_reply_message()
 
@@ -155,6 +159,8 @@ class KitsuneSettingsModule(KitsuneModule):
 
     async def nonickchat_cmd(self, event) -> None:
 
+        """nonickchat — добавить/удалить чат в список без ника."""
+
         cid = event.message.chat_id
 
         chats = self.db.get(_DB_MAIN, "nonick_chats", [])
@@ -178,6 +184,8 @@ class KitsuneSettingsModule(KitsuneModule):
     @command("nonickcmd", required=OWNER)
 
     async def nonickcmd_cmd(self, event) -> None:
+
+        """nonickcmd — добавить/удалить команду в список без ника."""
 
         cmd = self.get_args(event).strip().lower()
 
@@ -215,6 +223,8 @@ class KitsuneSettingsModule(KitsuneModule):
 
     async def nonickusers_cmd(self, event) -> None:
 
+        """nonickusers — показать список пользователей без ника."""
+
         users = self.db.get(_DB_MAIN, "nonick_users", [])
 
         if not users:
@@ -244,6 +254,8 @@ class KitsuneSettingsModule(KitsuneModule):
     @command("nonickchats", required=OWNER)
 
     async def nonickchats_cmd(self, event) -> None:
+
+        """nonickchats — показать список чатов без ника."""
 
         chats = self.db.get(_DB_MAIN, "nonick_chats", [])
 
@@ -275,6 +287,8 @@ class KitsuneSettingsModule(KitsuneModule):
 
     async def nonickcmds_cmd(self, event) -> None:
 
+        """nonickcmds — показать список команд без ника."""
+
         cmds = self.db.get(_DB_MAIN, "nonick_cmds", [])
 
         if not cmds:
@@ -294,6 +308,8 @@ class KitsuneSettingsModule(KitsuneModule):
     @command("watchers", required=OWNER)
 
     async def watchers_cmd(self, event) -> None:
+
+        """watchers — показать список зарегистрированных watcher'ов."""
 
         disp = getattr(self.client, "_kitsune_dispatcher", None)
 
@@ -333,6 +349,8 @@ class KitsuneSettingsModule(KitsuneModule):
 
     async def watcher_cmd(self, event) -> None:
 
+        """watcher — включить/выключить конкретный watcher."""
+
         name = self.get_args(event).strip()
 
         if not name:
@@ -367,6 +385,8 @@ class KitsuneSettingsModule(KitsuneModule):
 
     async def enable_core_protection_cmd(self, event) -> None:
 
+        """enable_core_protection — включить защиту core-модулей от случайной выгрузки."""
+
         await self.db.set(_DB_MAIN, "remove_core_protection", False)
 
         await event.message.edit(self.strings("core_protect_on"), parse_mode="html")
@@ -375,6 +395,8 @@ class KitsuneSettingsModule(KitsuneModule):
 
     async def remove_core_protection_cmd(self, event) -> None:
 
+        """remove_core_protection — отключить защиту core-модулей."""
+
         await self.db.set(_DB_MAIN, "remove_core_protection", True)
 
         await event.message.edit(self.strings("core_protect_off"), parse_mode="html")
@@ -382,6 +404,8 @@ class KitsuneSettingsModule(KitsuneModule):
     @command("settings", required=OWNER)
 
     async def settings_cmd(self, event) -> None:
+
+        """settings — показать общие настройки UserBot."""
 
         nonick  = "✅" if self.db.get(_DB_MAIN, "no_nickname", False) else "❌"
 
@@ -406,6 +430,8 @@ class KitsuneSettingsModule(KitsuneModule):
     @command("togglecmd", required=OWNER)
 
     async def togglecmd_cmd(self, event) -> None:
+
+        """togglecmd — включить/выключить отдельную команду."""
 
         args = self.get_args(event).split()
 
@@ -481,6 +507,8 @@ class KitsuneSettingsModule(KitsuneModule):
 
     async def togglemod_cmd(self, event) -> None:
 
+        """togglemod — включить/выключить целый модуль."""
+
         mod_name = self.get_args(event).strip()
 
         if not mod_name:
@@ -546,6 +574,8 @@ class KitsuneSettingsModule(KitsuneModule):
     @command("clearmodule", required=OWNER)
 
     async def clearmodule_cmd(self, event) -> None:
+
+        """clearmodule — очистить данные модуля в базе данных."""
 
         mod_name = self.get_args(event).strip()
 

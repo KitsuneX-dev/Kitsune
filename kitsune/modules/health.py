@@ -391,7 +391,7 @@ class HealthModule(KitsuneModule):
     name        = "health"
     description = "Расширенный мониторинг и health-check всех подсистем"
     author      = "Yushi"
-    version     = "3.0"
+    version     = "1.3.0"
     icon        = "💗"
     category    = "system"
 
@@ -427,6 +427,8 @@ class HealthModule(KitsuneModule):
 
     @command("health", required=OWNER)
     async def health_cmd(self, event) -> None:
+        """health — общий health-check всех подсистем (БД, сеть, Telethon, aiogram)."""
+
         msg = await event.reply("⏳ <i>Проверяю подсистемы...</i>", parse_mode="html")
         snapshot = await collect_health(self.client, self.db)
         try:
@@ -438,6 +440,8 @@ class HealthModule(KitsuneModule):
 
     @command("monitor", required=OWNER)
     async def monitor_cmd(self, event) -> None:
+        """monitor — развернутый мониторинг ресурсов (CPU/RAM/диск/uptime)."""
+
         parts = (event.message.text or "").split()
         action = parts[1].lower() if len(parts) > 1 else "on"
         if action == "off":
@@ -462,6 +466,8 @@ class HealthModule(KitsuneModule):
 
     @command("breakers", required=OWNER)
     async def breakers_cmd(self, event) -> None:
+        """breakers — показать состояние circuit breaker'ов модулей."""
+
         items = _cb_registry.to_list()
         if not items:
             await event.reply(self.strings("breakers_empty"), parse_mode="html")
@@ -487,6 +493,8 @@ class HealthModule(KitsuneModule):
 
     @command("resetbreaker", required=OWNER)
     async def resetbreaker_cmd(self, event) -> None:
+        """resetbreaker — сбросить circuit breaker конкретной подсистемы."""
+
         parts = (event.message.text or "").split()
         if len(parts) < 2:
             await event.reply(

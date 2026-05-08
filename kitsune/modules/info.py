@@ -21,6 +21,9 @@ class InfoModule(KitsuneModule):
 
     description = "Информация о UserBot с кастомизацией"
 
+
+    version     = "1.3.0"
+
     author      = "@Mikasu32"
 
     _builtin    = True
@@ -385,6 +388,8 @@ class InfoModule(KitsuneModule):
 
     async def info_cmd(self, event) -> None:
 
+        """info — показать информационную карточку UserBot."""
+
         import asyncio as _asyncio
 
         loop = _asyncio.get_event_loop()
@@ -481,6 +486,8 @@ class InfoModule(KitsuneModule):
 
     async def cdn_cmd(self, event) -> None:
 
+        """cdn — загрузить медиа на CDN и получить ссылку."""
+
         args = self.get_args(event).strip()
 
         if not args:
@@ -539,6 +546,8 @@ class InfoModule(KitsuneModule):
 
     async def setinfo_cmd(self, event) -> None:
 
+        """setinfo — задать кастомный текст для карточки .info."""
+
         args = self.get_args(event)
 
         if not args:
@@ -557,6 +566,8 @@ class InfoModule(KitsuneModule):
 
     async def resetinfo_cmd(self, event) -> None:
 
+        """resetinfo — сбросить кастомный текст карточки .info к значению по умолчанию."""
+
         self.config["custom_message"] = None
 
         await self.db.delete(_DB_CONFIG, "custom_message")
@@ -566,6 +577,8 @@ class InfoModule(KitsuneModule):
     @command("fmt", required=OWNER)
 
     async def fmt_cmd(self, event) -> None:
+
+        """fmt — переключить формат карточки (краткий/расширенный)."""
 
         args = self.get_args(event).strip()
 

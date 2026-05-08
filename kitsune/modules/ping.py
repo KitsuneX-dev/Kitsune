@@ -68,7 +68,7 @@ class PingModule(KitsuneModule):
 
     author      = "Yushi"
 
-    version     = "2.0"
+    version     = "1.3.0"
 
     def __init__(self, *args, **kwargs) -> None:
 
@@ -174,6 +174,8 @@ class PingModule(KitsuneModule):
 
     async def ping_cmd(self, event) -> None:
 
+        """ping — показать задержку, аптайм и базовую информацию о боте."""
+
         from ..version import __version_str__
 
         start = time.perf_counter()
@@ -234,6 +236,8 @@ class PingModule(KitsuneModule):
 
     async def me_cmd(self, event) -> None:
 
+        """me — показать информацию о текущем аккаунте (ID, имя, username, premium)."""
+
         me = await self.client.get_me()
 
         name = me.first_name
@@ -263,6 +267,8 @@ class PingModule(KitsuneModule):
     @command("id", required=OWNER)
 
     async def id_cmd(self, event) -> None:
+
+        """id — показать ID сообщения, чата и отправителя (ответом на сообщение)."""
 
         reply = await event.message.get_reply_message()
 

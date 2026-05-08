@@ -74,7 +74,7 @@ class SecurityModule(KitsuneModule):
 
     author      = "@Mikasu32"
 
-    version     = "1.0"
+    version     = "1.3.0"
 
     _builtin    = True
 
@@ -188,6 +188,8 @@ class SecurityModule(KitsuneModule):
 
     async def owneradd_cmd(self, event) -> None:
 
+        """owneradd — добавить пользователя в список владельцев (полные права)."""
+
         inline = self._inline()
 
         if not inline or not inline._bot:
@@ -290,6 +292,8 @@ class SecurityModule(KitsuneModule):
 
     async def ownerrm_cmd(self, event) -> None:
 
+        """ownerrm — удалить пользователя из списка владельцев."""
+
         inline = self._inline()
 
         if not inline or not inline._bot:
@@ -386,6 +390,8 @@ class SecurityModule(KitsuneModule):
 
     async def ownerlist_cmd(self, event) -> None:
 
+        """ownerlist — показать список владельцев UserBot."""
+
         owners = self.db.get(_DB_OWNER, "co_owners", [])
 
         if not owners:
@@ -415,6 +421,8 @@ class SecurityModule(KitsuneModule):
     @command("sudoadd", required=OWNER)
 
     async def sudoadd_cmd(self, event) -> None:
+
+        """sudoadd — выдать пользователю права sudo (ограниченный доступ)."""
 
         user = await self._resolve_user(event)
 
@@ -454,6 +462,8 @@ class SecurityModule(KitsuneModule):
 
     async def sudorm_cmd(self, event) -> None:
 
+        """sudorm — забрать у пользователя права sudo."""
+
         user = await self._resolve_user(event)
 
         if not user:
@@ -486,6 +496,8 @@ class SecurityModule(KitsuneModule):
 
     async def sudolist_cmd(self, event) -> None:
 
+        """sudolist — показать список sudo-пользователей."""
+
         sudo = self.db.get(_DB_OWNER, "sudo", [])
 
         if not sudo:
@@ -516,6 +528,8 @@ class SecurityModule(KitsuneModule):
 
     async def blacklist_cmd(self, event) -> None:
 
+        """blacklist — добавить/удалить чат из чёрного списка (бот игнорирует команды)."""
+
         chat_id = event.message.chat_id
 
         bl = self.db.get(_DB_OWNER, "blacklist_chats", [])
@@ -532,6 +546,8 @@ class SecurityModule(KitsuneModule):
 
     async def unblacklist_cmd(self, event) -> None:
 
+        """unblacklist — убрать чат из чёрного списка."""
+
         chat_id = event.message.chat_id
 
         bl = self.db.get(_DB_OWNER, "blacklist_chats", [])
@@ -547,6 +563,8 @@ class SecurityModule(KitsuneModule):
     @command("blacklistuser", required=OWNER)
 
     async def blacklistuser_cmd(self, event) -> None:
+
+        """blacklistuser — заблокировать пользователю выполнение команд через бота."""
 
         user = await self._resolve_user(event)
 
@@ -576,6 +594,8 @@ class SecurityModule(KitsuneModule):
 
     async def unblacklistuser_cmd(self, event) -> None:
 
+        """unblacklistuser — снять блокировку пользователя."""
+
         user = await self._resolve_user(event)
 
         if not user:
@@ -603,6 +623,8 @@ class SecurityModule(KitsuneModule):
     @command("tsec", required=OWNER)
 
     async def tsec_cmd(self, event) -> None:
+
+        """tsec — настроить временный доступ (target-security) к команде/модулю."""
 
         args = self.get_args(event).split()
 
@@ -708,6 +730,8 @@ class SecurityModule(KitsuneModule):
 
     async def tsecrm_cmd(self, event) -> None:
 
+        """tsecrm — удалить правило временного доступа."""
+
         args = self.get_args(event).split()
 
         if len(args) < 2:
@@ -758,6 +782,8 @@ class SecurityModule(KitsuneModule):
 
     async def tsecclr_cmd(self, event) -> None:
 
+        """tsecclr — очистить все правила временного доступа."""
+
         await self.db.set(_DB_OWNER, "tsec_rules", [])
 
         await event.message.edit("✅ Все временные правила удалены.", parse_mode="html")
@@ -765,6 +791,8 @@ class SecurityModule(KitsuneModule):
     @command("security", required=OWNER)
 
     async def security_cmd(self, event) -> None:
+
+        """security — показать общие настройки безопасности."""
 
         sudo = self.db.get(_DB_OWNER, "sudo", [])
 
@@ -782,6 +810,8 @@ class SecurityModule(KitsuneModule):
 
     async def inlinesec_cmd(self, event) -> None:
 
+        """inlinesec — настроить уровень безопасности inline-команд."""
+
         await event.message.edit(
 
             "ℹ️ В Kitsune inline-хендлеры не используются, команда недоступна.",
@@ -793,6 +823,8 @@ class SecurityModule(KitsuneModule):
     @command("querysec", required=OWNER)
 
     async def querysec_cmd(self, event) -> None:
+
+        """querysec — настроить уровень безопасности inline-запросов."""
 
         await event.message.edit(
 

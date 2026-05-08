@@ -79,7 +79,7 @@ class APILimiterModule(KitsuneModule):
 
     author      = "@Mikasu32"
 
-    version     = "1.1"
+    version     = "1.3.0"
 
     _builtin    = True
 
@@ -379,6 +379,8 @@ class APILimiterModule(KitsuneModule):
 
     async def suspend_cmd(self, event) -> None:
 
+        """suspend_api_protect — приостановить защиту от FloodWait на N секунд (по умолчанию 3600)."""
+
         arg = self.get_args(event).strip()
 
         if not arg.isdigit():
@@ -408,6 +410,8 @@ class APILimiterModule(KitsuneModule):
     @command("api_fw_protection", required=OWNER)
 
     async def toggle_cmd(self, event) -> None:
+
+        """api_fw_protection — включить/выключить защиту Telegram API от FloodWait."""
 
         current = self.config["enabled"]
 

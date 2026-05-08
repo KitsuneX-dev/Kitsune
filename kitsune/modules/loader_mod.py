@@ -19,7 +19,7 @@ class LoaderModule(KitsuneModule):
 
     author      = "@Mikasu32"
 
-    version     = "1.0"
+    version     = "1.3.0"
 
     _builtin    = True
 
@@ -171,6 +171,8 @@ class LoaderModule(KitsuneModule):
 
     async def dlmod_cmd(self, event) -> None:
 
+        """dlmod — скачать и установить модуль по ссылке (alias: dlm)."""
+
         arg = self.get_args(event).strip()
 
         if not arg:
@@ -250,6 +252,8 @@ class LoaderModule(KitsuneModule):
     @command("loadmod", required=OWNER, aliases=["lm"])
 
     async def loadmod_cmd(self, event) -> None:
+
+        """loadmod — загрузить модуль из приложенного .py файла (alias: lm)."""
 
         reply = await event.message.get_reply_message()
 
@@ -331,6 +335,8 @@ class LoaderModule(KitsuneModule):
 
     async def unloadmod_cmd(self, event) -> None:
 
+        """unloadmod — выгрузить установленный модуль."""
+
         name = self.get_args(event).strip()
 
         if not name:
@@ -374,6 +380,8 @@ class LoaderModule(KitsuneModule):
     @command("ml", required=OWNER)
 
     async def ml_cmd(self, event) -> None:
+
+        """ml — показать список загруженных модулей."""
 
         name = self.get_args(event).strip()
 
@@ -475,6 +483,8 @@ class LoaderModule(KitsuneModule):
 
     async def clearmodules_cmd(self, event) -> None:
 
+        """clearmodules — удалить все пользовательские модули."""
+
         loader = self._loader()
 
         if not loader:
@@ -511,6 +521,8 @@ class LoaderModule(KitsuneModule):
 
     async def addrepo_cmd(self, event) -> None:
 
+        """addrepo — добавить репозиторий модулей в список доверенных."""
+
         url = self.get_args(event).strip().rstrip("/")
 
         if not url or not url.startswith("http"):
@@ -542,6 +554,8 @@ class LoaderModule(KitsuneModule):
     @command("delrepo", required=OWNER)
 
     async def delrepo_cmd(self, event) -> None:
+
+        """delrepo — удалить репозиторий из списка доверенных."""
 
         url = self.get_args(event).strip().rstrip("/")
 

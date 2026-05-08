@@ -13,11 +13,16 @@ class EvalModule(KitsuneModule):
 
     description = "Python eval/exec и терминал"
 
+
+    version     = "1.3.0"
+
     author      = "Yushi"
 
     @command("e", required=OWNER)
 
     async def eval_cmd(self, event) -> None:
+
+        """e — выполнить Python-код (eval) и показать результат."""
 
         code = event.message.text.split(maxsplit=1)
 
@@ -65,6 +70,8 @@ class EvalModule(KitsuneModule):
 
     async def exec_cmd(self, event) -> None:
 
+        """ex — выполнить Python-код (exec) с поддержкой нескольких выражений."""
+
         parts = event.message.text.split(maxsplit=1)
 
         if len(parts) < 2:
@@ -94,6 +101,8 @@ class EvalModule(KitsuneModule):
     @command("sh", required=OWNER)
 
     async def shell_cmd(self, event) -> None:
+
+        """sh — выполнить shell-команду в системном терминале."""
 
         parts = event.message.text.split(maxsplit=1)
 

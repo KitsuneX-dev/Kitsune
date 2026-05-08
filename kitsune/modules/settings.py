@@ -9,6 +9,9 @@ class SettingsModule(KitsuneModule):
 
     description = "Настройки Kitsune"
 
+
+    version     = "1.3.0"
+
     author      = "Yushi"
 
     def __init__(self, *args, **kwargs) -> None:
@@ -46,6 +49,8 @@ class SettingsModule(KitsuneModule):
     @command("prefix", required=OWNER)
 
     async def prefix_cmd(self, event) -> None:
+
+        """prefix — показать или изменить префикс команд."""
 
         dispatcher = getattr(self.client, "_kitsune_dispatcher", None)
 
@@ -112,11 +117,15 @@ class SettingsModule(KitsuneModule):
 
     async def setprefix_cmd(self, event) -> None:
 
+        """setprefix — установить новый префикс команд."""
+
         await self.prefix_cmd(event)
 
     @command("assetcheck", required=OWNER)
 
     async def assetcheck_cmd(self, event) -> None:
+
+        """assetcheck — проверить наличие и целостность asset-файлов."""
 
         try:
 
@@ -137,6 +146,8 @@ class SettingsModule(KitsuneModule):
     @command("lang", required=OWNER)
 
     async def lang_cmd(self, event) -> None:
+
+        """lang — сменить язык интерфейса."""
 
         dispatcher = getattr(self.client, "_kitsune_dispatcher", None)
 
@@ -159,6 +170,8 @@ class SettingsModule(KitsuneModule):
     @command("autodel", required=OWNER)
 
     async def autodel_cmd(self, event) -> None:
+
+        """autodel — настроить автоудаление сообщений (тайм-аут в секундах)."""
 
         arg = self.get_args(event).strip().lower()
 
@@ -223,6 +236,8 @@ class SettingsModule(KitsuneModule):
     @command("sysinfo", required=OWNER)
 
     async def sysinfo_cmd(self, event) -> None:
+
+        """sysinfo — показать системную информацию (ОС, Python, ресурсы)."""
 
         import platform, sys, psutil
         from ..version import __version_str__

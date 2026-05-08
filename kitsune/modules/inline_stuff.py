@@ -16,7 +16,7 @@ class InlineStuffModule(KitsuneModule):
 
     author      = "@Mikasu32"
 
-    version     = "1.0"
+    version     = "1.3.0"
 
     _builtin    = True
 
@@ -60,6 +60,8 @@ class InlineStuffModule(KitsuneModule):
 
     async def ch_bot_token_cmd(self, event) -> None:
 
+        """ch_bot_token — сменить токен inline-бота для уведомлений."""
+
         token = self.get_args(event).strip()
 
         if not token:
@@ -81,6 +83,8 @@ class InlineStuffModule(KitsuneModule):
     @command("ch_kitsune_bot", required=OWNER)
 
     async def ch_kitsune_bot_cmd(self, event) -> None:
+
+        """ch_kitsune_bot — сменить inline-бота Kitsune (создать нового)."""
 
         username = self.get_args(event).strip().lstrip("@")
 

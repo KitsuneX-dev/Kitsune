@@ -18,6 +18,9 @@ class UpdaterModule(KitsuneModule):
 
     description = "Обновление и перезапуск"
 
+
+    version     = "1.3.0"
+
     author      = "Yushi"
 
     REPO_URL = "https://github.com/KitsuneX-dev/Kitsune"
@@ -213,6 +216,8 @@ class UpdaterModule(KitsuneModule):
     @command("update", required=OWNER)
 
     async def update_cmd(self, event) -> None:
+
+        """update — проверить и установить обновление Kitsune (с GitHub)."""
 
         args = self.get_args(event).strip().lower()
 
@@ -714,6 +719,8 @@ class UpdaterModule(KitsuneModule):
     @command("restart", required=OWNER)
 
     async def restart_cmd(self, event) -> None:
+
+        """restart — перезапустить процесс UserBot."""
 
         m = await event.reply("🔄 Перезапускаю...", parse_mode="html")
 

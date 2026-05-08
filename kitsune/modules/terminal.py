@@ -25,7 +25,7 @@ class TerminalModule(KitsuneModule):
 
     author      = "Yushi"
 
-    version     = "1.0"
+    version     = "1.3.0"
 
     icon        = "🖥"
 
@@ -65,6 +65,8 @@ class TerminalModule(KitsuneModule):
 
     async def term_cmd(self, event) -> None:
 
+        """term — выполнить shell-команду интерактивно (aliases: sh, shell)."""
+
         args = self.get_args(event)
 
         if not args:
@@ -81,6 +83,8 @@ class TerminalModule(KitsuneModule):
 
     async def sudo_term_cmd(self, event) -> None:
 
+        """sterms — показать список активных shell-сессий."""
+
         args = self.get_args(event)
 
         if not args:
@@ -96,6 +100,8 @@ class TerminalModule(KitsuneModule):
     @command("termkill", required=OWNER)
 
     async def termkill_cmd(self, event) -> None:
+
+        """termkill — завершить активную shell-сессию по ID."""
 
         if self._current_proc is None or self._current_pid is None:
 

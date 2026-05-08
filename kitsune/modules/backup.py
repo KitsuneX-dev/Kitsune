@@ -233,6 +233,9 @@ class BackupModule(KitsuneModule):
 
     description = "Резервное копирование — без шифрования, совместимо с Hikka/Heroku"
 
+
+    version     = "1.3.0"
+
     author      = "Yushi"
 
     strings_ru = {
@@ -1080,6 +1083,8 @@ class BackupModule(KitsuneModule):
 
     async def backupdb_cmd(self, event) -> None:
 
+        """backupdb — создать резервную копию базы данных (Hikka/Heroku-совместимый формат)."""
+
         async with ProgressMessage(event, self.strings("creating")) as prog:
 
             data    = self._db_bytes()
@@ -1148,6 +1153,8 @@ class BackupModule(KitsuneModule):
 
     async def restoredb_cmd(self, event) -> None:
 
+        """restoredb — восстановить базу данных из бэкап-файла (отправь в ответ на файл)."""
+
         reply = await event.message.get_reply_message()
 
         if not reply or not reply.media:
@@ -1179,6 +1186,8 @@ class BackupModule(KitsuneModule):
     @command("backupmods", required=OWNER)
 
     async def backupmods_cmd(self, event) -> None:
+
+        """backupmods — создать резервную копию списка установленных модулей."""
 
         async with ProgressMessage(event, self.strings("mods_creating"), total=3) as prog:
 
@@ -1236,6 +1245,8 @@ class BackupModule(KitsuneModule):
 
     async def restoremods_cmd(self, event) -> None:
 
+        """restoremods — восстановить модули из файла бэкапа (отправь в ответ на файл)."""
+
         reply = await event.message.get_reply_message()
 
         if not reply or not reply.media:
@@ -1267,6 +1278,8 @@ class BackupModule(KitsuneModule):
     @command("backupall", required=OWNER)
 
     async def backupall_cmd(self, event) -> None:
+
+        """backupall — создать полный бэкап (БД + модули) одним архивом."""
 
         async with ProgressMessage(event, self.strings("all_creating"), total=4) as prog:
 
@@ -1339,6 +1352,8 @@ class BackupModule(KitsuneModule):
     @command("restoreall", required=OWNER)
 
     async def restoreall_cmd(self, event) -> None:
+
+        """restoreall — восстановить полный бэкап (БД + модули) из архива."""
 
         reply = await event.message.get_reply_message()
 
@@ -1497,6 +1512,8 @@ class BackupModule(KitsuneModule):
     @command("setbackupinterval", required=OWNER)
 
     async def setbackupinterval_cmd(self, event) -> None:
+
+        """setbackupinterval — настроить интервал автоматического резервного копирования (часы)."""
 
         dispatcher = getattr(self.client, "_kitsune_dispatcher", None)
 

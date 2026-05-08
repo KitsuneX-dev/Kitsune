@@ -19,7 +19,7 @@ class SecurityModule(KitsuneModule):
 
     author      = "Yushi"
 
-    version     = "2.1"
+    version     = "1.3.0"
 
     icon        = "🛡"
 
@@ -169,6 +169,8 @@ class SecurityModule(KitsuneModule):
 
     async def addsudo_cmd(self, event) -> None:
 
+        """addsudo — добавить пользователя в sudo-список."""
+
         uid, name = await self._resolve_user(event)
 
         if uid is None:
@@ -200,6 +202,8 @@ class SecurityModule(KitsuneModule):
     @command("delsudo", required=OWNER)
 
     async def delsudo_cmd(self, event) -> None:
+
+        """delsudo — удалить пользователя из sudo-списка."""
 
         uid, name = await self._resolve_user(event)
 
@@ -241,6 +245,8 @@ class SecurityModule(KitsuneModule):
 
     async def sudolist_cmd(self, event) -> None:
 
+        """sudolist — показать sudo-пользователей."""
+
         sec = self._sec()
 
         uids = sec.get_sudo_users() if sec else []
@@ -280,6 +286,8 @@ class SecurityModule(KitsuneModule):
     @command("owneradd", required=OWNER)
 
     async def owneradd_cmd(self, event) -> None:
+
+        """owneradd — добавить владельца UserBot."""
 
         if event.sender_id != self.client.tg_id:
 
@@ -391,6 +399,8 @@ class SecurityModule(KitsuneModule):
 
     async def ownerrm_cmd(self, event) -> None:
 
+        """ownerrm — удалить владельца из списка."""
+
         if event.sender_id != self.client.tg_id:
 
             return
@@ -501,6 +511,8 @@ class SecurityModule(KitsuneModule):
 
     async def ownerlist_cmd(self, event) -> None:
 
+        """ownerlist — показать всех владельцев."""
+
         owners = self._get_co_owners()
 
         if not owners:
@@ -538,6 +550,8 @@ class SecurityModule(KitsuneModule):
     @command("checkperms", required=OWNER)
 
     async def checkperms_cmd(self, event) -> None:
+
+        """checkperms — проверить права доступа пользователя к командам."""
 
         uid, name = await self._resolve_user(event)
 

@@ -36,7 +36,7 @@ class TranslationsModule(KitsuneModule):
 
     author      = "@Mikasu32"
 
-    version     = "1.0"
+    version     = "1.3.0"
 
     _builtin    = True
 
@@ -77,6 +77,8 @@ class TranslationsModule(KitsuneModule):
     @command("setlang", required=OWNER)
 
     async def setlang_cmd(self, event) -> None:
+
+        """setlang — установить язык интерфейса UserBot."""
 
         lang = self.get_args(event).strip().lower()
 
@@ -125,6 +127,8 @@ class TranslationsModule(KitsuneModule):
     @command("dllangpack", required=OWNER)
 
     async def dllangpack_cmd(self, event) -> None:
+
+        """dllangpack — скачать и установить пакет переводов с сервера."""
 
         url = self.get_args(event).strip()
 

@@ -13,7 +13,7 @@ class TranslatorModule(KitsuneModule):
 
     author      = "@Mikasu32"
 
-    version     = "1.0"
+    version     = "1.3.0"
 
     _builtin    = True
 
@@ -84,6 +84,8 @@ class TranslatorModule(KitsuneModule):
     @command("tr", required=OWNER)
 
     async def tr_cmd(self, event) -> None:
+
+        """tr — перевести текст на указанный язык (по умолчанию авто)."""
 
         raw = self.get_args(event).strip()
 
