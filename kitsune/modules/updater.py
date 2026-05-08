@@ -152,7 +152,7 @@ class UpdaterModule(KitsuneModule):
 
             asyncio.ensure_future(
 
-                self._post_restart_edit(chat_id, msg_id, report, loader, total_time, restart_time, mod_count)
+                self._post_restart_edit(chat_id, msg_id, report, loader, total_time, restart_time, mod_count, is_update)
 
             )
 
@@ -174,6 +174,8 @@ class UpdaterModule(KitsuneModule):
 
         mod_count: int,
 
+        is_update: bool = False,
+
     ) -> None:
 
         await asyncio.sleep(3)
@@ -191,6 +193,10 @@ class UpdaterModule(KitsuneModule):
             except Exception:
 
                 pass
+
+        if is_update:
+
+            return
 
         notifier = loader.modules.get("notifier") if loader else None
 
