@@ -100,7 +100,7 @@ def _build_welcome_text(db) -> str:
 
         f"<code>{prefix}cfg</code> — настройка модулей\n"
 
-        f"<code>{prefix}dlm &lt;url&gt;</code> — установить модуль по ссылке\\n"\
+        f"<code>{prefix}dlm &lt;url&gt;</code> — установить модуль по ссылке\n"
 
         f"<code>{prefix}lm</code> — установить модуль файлом (ответом на файл)"
 
