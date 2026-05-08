@@ -1,13 +1,8 @@
 from __future__ import annotations
-
 import logging
-
 import re
-
 import time
-
 from ..core.loader import KitsuneModule, command, ModuleConfig, ConfigValue
-
 from ..core.security import OWNER
 
 logger = logging.getLogger(__name__)
@@ -127,7 +122,6 @@ class InfoModule(KitsuneModule):
     def _get_platform(self) -> str:
 
         import platform as pf
-
         import os
 
         if os.environ.get("TERMUX_VERSION") or os.path.isdir("/data/data/com.termux"):
@@ -179,7 +173,6 @@ class InfoModule(KitsuneModule):
         try:
 
             import git
-
             from ..version import branch as vbranch
 
             repo   = git.Repo(search_parent_directories=True)
@@ -297,9 +290,7 @@ class InfoModule(KitsuneModule):
     def _parse_html_with_tg_emoji(html_text: str):
 
         import re
-
         from telethon.extensions import html as tl_html
-
         from telethon.tl.types import MessageEntityCustomEmoji
 
         tg_pattern = re.compile(
@@ -771,4 +762,3 @@ class InfoModule(KitsuneModule):
             parse_mode="html",
 
         )
-

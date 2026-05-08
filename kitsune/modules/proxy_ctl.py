@@ -1,9 +1,6 @@
 from __future__ import annotations
-
 import logging
-
 from ..core.loader import KitsuneModule, command
-
 from ..core.security import OWNER
 
 logger = logging.getLogger(__name__)
@@ -472,7 +469,6 @@ class ProxyCtl(KitsuneModule):
 
                 lines.append(f"   • user: <code>{_esc(sx.get('username'))}</code>")
 
-                                            
             try:
 
                 p = int(port_v)
@@ -518,4 +514,3 @@ class ProxyCtl(KitsuneModule):
             )
 
         await event.reply("\n".join(lines), parse_mode="html")
-

@@ -1,11 +1,7 @@
 from __future__ import annotations
-
 import asyncio
-
 import logging
-
 import typing
-
 from .ssh_tunnel import SSHTunnel
 
 logger = logging.getLogger(__name__)
@@ -93,4 +89,3 @@ class ProxyPasser:
             except Exception:
 
                 logger.debug("ProxyPasser: ошибка в on_url callback", exc_info=True)
-

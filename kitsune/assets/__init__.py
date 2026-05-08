@@ -1,9 +1,6 @@
 from __future__ import annotations
-
 import logging
-
 from pathlib import Path
-
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -171,7 +168,6 @@ async def ensure_channel_photo(
     try:
 
         from telethon.tl.functions.channels import EditPhotoRequest, JoinChannelRequest
-
         from telethon.tl.types import InputChatUploadedPhoto
 
         entity = await client.get_entity(channel_id)
@@ -345,9 +341,7 @@ async def setup_all_avatars(client: "TelegramClient", db) -> None:
         try:
 
             from telethon.tl.functions.channels import CreateChannelRequest
-
             from telethon.tl.functions.account import UpdateNotifySettingsRequest
-
             from telethon.tl.types import InputNotifyPeer, InputPeerNotifySettings
 
             logger.debug("assets: создаём канал kitsune-assets...")
@@ -369,7 +363,6 @@ async def setup_all_avatars(client: "TelegramClient", db) -> None:
             try:
 
                 from telethon.tl.functions.folders import EditPeerFoldersRequest
-
                 from telethon.tl.types import InputFolderPeer
 
                 await client(EditPeerFoldersRequest(folder_peers=[
@@ -581,4 +574,3 @@ async def diagnose(client: "TelegramClient", db) -> str:
         lines.append("  inline-модуль не найден")
 
     return "\n".join(lines)
-

@@ -1,11 +1,7 @@
 from __future__ import annotations
-
 import logging
-
 import time
-
 import typing
-
 from collections import deque
 
 logger = logging.getLogger(__name__)
@@ -229,7 +225,6 @@ class HydrogramBridge:
         try:
 
             from hydrogram import filters
-
             from hydrogram.handlers import MessageHandler
 
             async def _on_message(client, message) -> None:
@@ -329,4 +324,3 @@ async def setup_hydrogram_bridge(
     bridge.attach()
 
     return bridge
-

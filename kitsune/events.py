@@ -1,13 +1,8 @@
 from __future__ import annotations
-
 import asyncio
-
 import logging
-
 import typing
-
 import weakref
-
 from ._types import KitsuneEvent
 
 logger = logging.getLogger(__name__)
@@ -111,4 +106,3 @@ class EventBus:
             pass
 
 bus: EventBus = EventBus()
-

@@ -1,15 +1,9 @@
 from __future__ import annotations
-
 import asyncio
-
 import logging
-
 import re
-
 import ssl
-
 import sys
-
 import typing
 
 logger = logging.getLogger(__name__)
@@ -394,7 +388,6 @@ def _get_socks_connector_cls():
 
     except ImportError:
 
-                                                                         
         if ensure_aiohttp_socks():
 
             try:
@@ -433,7 +426,6 @@ def _build_socks_connector(ssl_ctx: ssl.SSLContext | None = None):
 
     except TypeError:
 
-                                                         
         try:
 
             return cls.from_url(proxy_url, ssl=ssl_ctx)
@@ -548,7 +540,6 @@ async def test_socks_proxy(timeout: float = 15.0) -> tuple[bool, str]:
 
             ) as resp:
 
-                                                                            
                 return True, f"SOCKS5 OK (HTTP {resp.status}) → {proxy_url}"
 
     except Exception as exc:
@@ -560,7 +551,6 @@ def get_aiogram_session(timeout: int = 30):
     try:
 
         from aiogram.client.session.aiohttp import AiohttpSession
-
         import aiohttp
 
         ssl_ctx = make_ssl_ctx_no_verify()
@@ -605,7 +595,6 @@ def get_aiogram_session(timeout: int = 30):
 
                     except TypeError:
 
-                                                       
                         connector = socks_connector_cls.from_url(
 
                             proxy_url, ssl=ssl_ctx,
@@ -633,9 +622,7 @@ def get_aiogram_session(timeout: int = 30):
 def make_aiogram_bot(token: str, *, parse_mode: str = "HTML", timeout: int = 30):
 
     from aiogram import Bot
-
     from aiogram.client.default import DefaultBotProperties
-
     from aiogram.enums import ParseMode
 
     if _build_socks_url_from_cfg():
@@ -796,7 +783,6 @@ async def mtproxy_handshake_check(
 
     except ConnectionError:
 
-                                                     
         return False
 
     except Exception as exc:
@@ -1032,4 +1018,3 @@ def apply_bypass_to_config(cfg: dict) -> dict:
         logger.info("rkn_bypass: прокси применён к конфигу")
 
     return cfg
-

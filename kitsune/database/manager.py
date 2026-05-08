@@ -1,17 +1,10 @@
 from __future__ import annotations
-
 import asyncio
-
 import logging
-
 import sqlite3
-
 import time
-
 import typing
-
 from pathlib import Path
-
 from .._json import dumps as json_dumps, loads as json_loads, is_serializable
 
 logger = logging.getLogger(__name__)
@@ -342,7 +335,6 @@ class DatabaseManager:
     async def init(self) -> None:
 
         import os as _os
-
         from pathlib import Path as _Path
 
         redis_uri = _os.environ.get("REDIS_URL")
@@ -419,9 +411,7 @@ class DatabaseManager:
         try:
 
             from .. import utils
-
             from telethon.errors import ChannelsTooMuchError, FloodWaitError
-
             import asyncio as _aio
 
             for _attempt in range(3):
@@ -917,4 +907,3 @@ class DatabaseManager:
     def __repr__(self) -> str:
 
         return f"<DatabaseManager owners={list(self._data.keys())}>"
-

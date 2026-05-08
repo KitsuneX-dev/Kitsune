@@ -1,5 +1,4 @@
 from __future__ import annotations
-
 import ast
 import asyncio
 import hashlib
@@ -42,10 +41,8 @@ _BUILTIN_MODULES_DIR = Path(__file__).parent.parent / "modules"
 class ModuleLoadError(Exception):
     pass
 
-
 class ASTSecurityError(ModuleLoadError):
     pass
-
 
 class ConfigValue:
     def __init__(
@@ -70,7 +67,6 @@ class ConfigValue:
                 raise
         else:
             self.value = raw_value
-
 
 class ModuleConfig:
     def __init__(self, *values: ConfigValue) -> None:
@@ -105,7 +101,6 @@ class ModuleConfig:
 
     def get_config_value(self, key: str) -> ConfigValue:
         return self._config[key]
-
 
 class KitsuneModule:
     name: str = ""
@@ -169,7 +164,6 @@ class KitsuneModule:
                 except Exception:
                     pass
 
-
 def command(
     name: str | None = None,
     *,
@@ -184,7 +178,6 @@ def command(
         return func
     return decorator
 
-
 def watcher(
     filter_func: typing.Callable | None = None,
     **tags: typing.Any,
@@ -196,7 +189,6 @@ def watcher(
             setattr(func, tag_name, tag_value)
         return func
     return decorator
-
 
 class _ASTScanner(ast.NodeVisitor):
     def __init__(self) -> None:
@@ -317,7 +309,6 @@ class _ASTScanner(ast.NodeVisitor):
             )
         self.generic_visit(node)
 
-
 def _scan_ast(source: str, filename: str = "<module>") -> None:
     try:
         tree = ast.parse(source, filename=filename)
@@ -330,16 +321,13 @@ def _scan_ast(source: str, filename: str = "<module>") -> None:
             "Security scan failed:\n" + "\n".join(f"  • {e}" for e in scanner.errors)
         )
 
-
 _ast_cache: dict[str, ast.AST] = {}
-
 
 def _scan_ast_with_cache(source: str, filename: str = "<module>") -> None:
     key = hashlib.sha256(source.encode()).hexdigest()
     if key not in _ast_cache:
         _scan_ast(source, filename)
         _ast_cache[key] = ast.parse(source, filename=filename)
-
 
 def _extract_missing_package(exc: ImportError) -> str | None:
     name = getattr(exc, "name", None)
@@ -351,7 +339,6 @@ def _extract_missing_package(exc: ImportError) -> str | None:
     if m:
         return m.group(1).split(".")[0]
     return None
-
 
 _IMPORT_TO_PIP: dict[str, str] = {
     "PIL": "Pillow",
@@ -369,7 +356,6 @@ _IMPORT_TO_PIP: dict[str, str] = {
     "serial": "pyserial",
     "google": "google-generativeai",
 }
-
 
 async def _pip_install(package: str) -> bool:
     pip_name = _IMPORT_TO_PIP.get(package, package)
@@ -398,9 +384,7 @@ async def _pip_install(package: str) -> bool:
         logger.warning("Loader: pip install %r exception: %s", pip_name, exc)
         return False
 
-
 _INIT_SIGNATURE_CACHE: dict[type, int] = {}
-
 
 def _module_param_count(mod_class: type) -> int:
     cached = _INIT_SIGNATURE_CACHE.get(mod_class)
@@ -413,7 +397,6 @@ def _module_param_count(mod_class: type) -> int:
         count = 2
     _INIT_SIGNATURE_CACHE[mod_class] = count
     return count
-
 
 class Loader:
     def __init__(

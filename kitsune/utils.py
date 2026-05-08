@@ -1,21 +1,12 @@
 from __future__ import annotations
-
 import asyncio
-
 import html
-
 import inspect
-
 import io
-
 import logging
-
 import os
-
 import shlex
-
 import typing
-
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -85,7 +76,6 @@ def get_args_html(message: typing.Any) -> str:
     try:
 
         from telethon.extensions import html as tl_html
-
         import copy
 
         raw_text = getattr(message, "text", "") or getattr(message, "message", "")
@@ -333,13 +323,9 @@ async def asset_channel(
 ) -> tuple[int, bool]:
 
     import contextlib
-
     from telethon.tl.functions.channels import CreateChannelRequest
-
     from telethon.tl.functions.account import UpdateNotifySettingsRequest
-
     from telethon.tl.types import InputNotifyPeer, InputPeerNotifySettings
-
     from telethon.errors import ChannelsTooMuchError
 
     async for dialog in client.iter_dialogs():
@@ -379,7 +365,6 @@ async def asset_channel(
             with contextlib.suppress(Exception):
 
                 from telethon.tl.functions.folders import EditPeerFoldersRequest
-
                 from telethon.tl.types import InputFolderPeer
 
                 await client(
@@ -747,7 +732,6 @@ class ProgressMessage:
 def detect_environment() -> dict[str, bool]:
 
     import contextlib
-
     import platform
 
     is_wsl = False
@@ -787,4 +771,3 @@ IS_DOCKER = ENV["docker"]
 IS_RAILWAY = ENV["railway"]
 
 IS_LINUX = ENV["linux"]
-

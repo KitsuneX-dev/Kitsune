@@ -1,11 +1,7 @@
 from __future__ import annotations
-
 import asyncio
-
 import logging
-
 import re
-
 import typing
 
 logger = logging.getLogger(__name__)
@@ -215,4 +211,3 @@ class SSHTunnel:
             except Exception:
 
                 pass
-

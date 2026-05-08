@@ -1,5 +1,4 @@
 from ..core.loader import KitsuneModule, command, ModuleConfig, ConfigValue
-
 from ..core.security import OWNER
 
 _DB_OWNER = "kitsune.core"
@@ -91,7 +90,6 @@ class SettingsModule(KitsuneModule):
         try:
 
             import toml
-
             from pathlib import Path
 
             cfg_path = Path(__file__).parent.parent.parent / "config.toml"
@@ -227,9 +225,7 @@ class SettingsModule(KitsuneModule):
     async def sysinfo_cmd(self, event) -> None:
 
         import platform, sys, psutil
-
         from ..version import __version_str__
-
         from ..utils import IS_TERMUX, IS_DOCKER
 
         try:
@@ -279,4 +275,3 @@ class SettingsModule(KitsuneModule):
         ]
 
         await event.reply("".join(lines), parse_mode="html")
-

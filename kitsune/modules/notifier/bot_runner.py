@@ -1,9 +1,6 @@
 from __future__ import annotations
-
 import asyncio
-
 import logging
-
 import typing
 
 logger = logging.getLogger(__name__)
@@ -418,7 +415,6 @@ class BotRunner:
     def _register_handlers(self, router) -> None:
 
         from aiogram.filters import Command
-
         from aiogram.types import Message, CallbackQuery
 
         ref = self
@@ -710,7 +706,6 @@ class BotRunner:
             return
 
         from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-
         from ..config import _get_configurable, _mod_text, _list_text
 
         data = call.data
@@ -914,7 +909,6 @@ class BotRunner:
         mod_name, key, value = pending["mod"], pending["key"], msg.text or ""
 
         from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-
         from ..config import _get_configurable
 
         configurable = _get_configurable(self._client)
@@ -970,4 +964,3 @@ class BotRunner:
         except Exception:
 
             pass
-

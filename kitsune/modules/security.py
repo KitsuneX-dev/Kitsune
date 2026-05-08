@@ -1,13 +1,8 @@
 from __future__ import annotations
-
 import asyncio
-
 import contextlib
-
 import logging
-
 from ..core.loader import KitsuneModule, command
-
 from ..core.security import OWNER, SUDO
 
 logger = logging.getLogger(__name__)
@@ -577,4 +572,3 @@ class SecurityModule(KitsuneModule):
             parse_mode="html",
 
         )
-

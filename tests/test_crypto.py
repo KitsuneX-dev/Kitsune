@@ -17,11 +17,9 @@ def isolate_key(monkeypatch, tmp_path):
     monkeypatch.delenv("KITSUNE_KEY", raising=False)
     yield
 
-
 def _crypto():
     import kitsune.crypto as crypto
     return crypto
-
 
 # ======================================================================
 # 1. Базовый roundtrip и публичный API
@@ -35,30 +33,25 @@ def test_encrypt_decrypt_roundtrip():
     assert c.is_encrypted(enc)
     assert c.decrypt(enc) == data
 
-
 def test_encrypt_has_magic():
     c = _crypto()
     enc = c.encrypt(b"test")
     assert enc.startswith(c.MAGIC)
 
-
 def test_is_encrypted_true():
     c = _crypto()
     assert c.is_encrypted(c.encrypt(b"x")) is True
-
 
 def test_is_encrypted_false():
     c = _crypto()
     assert c.is_encrypted(b"plain") is False
     assert c.is_encrypted(b"") is False
 
-
 def test_key_path_returns_path():
     c = _crypto()
     p = c.key_path()
     assert p is not None
     assert hasattr(p, "exists")
-
 
 # ======================================================================
 # 2. AES-256-GCM-конкретные тесты (если доступен)
@@ -70,7 +63,6 @@ def test_aes_gcm_used_when_available():
         pytest.skip("AES-GCM not available")
     enc = c.encrypt(b"some payload")
     assert b"AESGCM1:" in enc[:32]
-
 
 def test_aes_gcm_random_nonce_unique_ciphertexts():
     """AES-GCM с уникальным nonce → одинаковый plaintext → разный ciphertext."""
@@ -84,7 +76,6 @@ def test_aes_gcm_random_nonce_unique_ciphertexts():
     assert c.decrypt(enc1) == data
     assert c.decrypt(enc2) == data
 
-
 def test_aes_gcm_nonce_length_is_12():
     """Стандарт: nonce для GCM — 12 байт."""
     c = _crypto()
@@ -97,7 +88,6 @@ def test_aes_gcm_nonce_length_is_12():
     nonce_len = struct.unpack(">I", body[:4])[0]
     assert nonce_len == 12
 
-
 def test_aes_gcm_tampered_ciphertext_fails():
     """Изменение ciphertext должно ронять при decrypt (auth tag не сходится)."""
     c = _crypto()
@@ -108,7 +98,6 @@ def test_aes_gcm_tampered_ciphertext_fails():
     enc[-1] ^= 0xFF
     with pytest.raises(Exception):
         c.decrypt(bytes(enc))
-
 
 def test_aes_gcm_tampered_nonce_fails():
     c = _crypto()
@@ -121,14 +110,12 @@ def test_aes_gcm_tampered_nonce_fails():
     with pytest.raises(Exception):
         c.decrypt(bytes(enc))
 
-
 def test_aes_gcm_empty_data():
     c = _crypto()
     if not c._AES_GCM_AVAILABLE:
         pytest.skip("AES-GCM not available")
     enc = c.encrypt(b"")
     assert c.decrypt(enc) == b""
-
 
 def test_aes_gcm_large_data():
     c = _crypto()
@@ -138,20 +125,17 @@ def test_aes_gcm_large_data():
     enc = c.encrypt(big)
     assert c.decrypt(enc) == big
 
-
 def test_aes_gcm_binary_data_with_zero_bytes():
     c = _crypto()
     data = b"\x00\x01\x02\x00\xff\x00binary\x00data\x00"
     enc = c.encrypt(data)
     assert c.decrypt(enc) == data
 
-
 def test_aes_gcm_unicode_payload():
     c = _crypto()
     data = "🦊 кицунэ 狐 🌸".encode("utf-8")
     enc = c.encrypt(data)
     assert c.decrypt(enc) == data
-
 
 def test_aes_gcm_internal_helpers():
     """Прямой вызов внутренних helpers."""
@@ -161,7 +145,6 @@ def test_aes_gcm_internal_helpers():
     key = base64.urlsafe_b64encode(os.urandom(32))
     enc = c._aes_gcm_encrypt(b"hello", key)
     assert c._aes_gcm_decrypt(enc, key) == b"hello"
-
 
 def test_aes_gcm_wrong_key_fails():
     c = _crypto()
@@ -173,7 +156,6 @@ def test_aes_gcm_wrong_key_fails():
     with pytest.raises(Exception):
         c._aes_gcm_decrypt(enc, key2)
 
-
 # ======================================================================
 # 3. Decrypt негативные сценарии
 # ======================================================================
@@ -183,12 +165,10 @@ def test_decrypt_no_magic_raises():
     with pytest.raises(ValueError):
         c.decrypt(b"not a valid backup")
 
-
 def test_decrypt_empty_raises():
     c = _crypto()
     with pytest.raises(ValueError):
         c.decrypt(b"")
-
 
 def test_decrypt_truncated_data_raises():
     c = _crypto()
@@ -196,7 +176,6 @@ def test_decrypt_truncated_data_raises():
     truncated = enc[:len(c.MAGIC) + 4]
     with pytest.raises(Exception):
         c.decrypt(truncated)
-
 
 # ======================================================================
 # 4. XOR backward-compatibility
@@ -209,7 +188,6 @@ def test_xor_backward_compat():
     enc = c.MAGIC + b"XOR1:" + c._xor_encrypt(data, key)
     assert c.decrypt(enc) == data
 
-
 def test_xor_hmac_authentication():
     """XOR-вариант защищён HMAC: правка любого байта должна провалиться."""
     c = _crypto()
@@ -220,13 +198,11 @@ def test_xor_hmac_authentication():
     with pytest.raises(ValueError, match="HMAC mismatch"):
         c.decrypt(bytes(bad))
 
-
 def test_xor_internal_helpers_roundtrip():
     c = _crypto()
     key = base64.urlsafe_b64encode(os.urandom(32))
     enc = c._xor_encrypt(b"abc", key)
     assert c._xor_decrypt(enc, key) == b"abc"
-
 
 # ======================================================================
 # 5. Управление ключом
@@ -239,7 +215,6 @@ def test_key_created_on_disk(tmp_path, monkeypatch):
     crypto._load_or_create_key()
     assert key_path.exists()
 
-
 def test_key_file_permissions(tmp_path, monkeypatch):
     """Ключевой файл должен иметь права 0600."""
     import kitsune.crypto as crypto
@@ -250,7 +225,6 @@ def test_key_file_permissions(tmp_path, monkeypatch):
         mode = os.stat(key_path).st_mode & 0o777
         assert mode == 0o600
 
-
 def test_key_loaded_from_env(monkeypatch, tmp_path):
     import kitsune.crypto as crypto
     monkeypatch.setattr(crypto, "KEY_PATH", tmp_path / "env.key")
@@ -260,14 +234,12 @@ def test_key_loaded_from_env(monkeypatch, tmp_path):
     assert loaded == custom_key
     assert not (tmp_path / "env.key").exists()
 
-
 def test_key_persists_across_calls(tmp_path, monkeypatch):
     import kitsune.crypto as crypto
     monkeypatch.setattr(crypto, "KEY_PATH", tmp_path / "persist.key")
     k1 = crypto._load_or_create_key()
     k2 = crypto._load_or_create_key()
     assert k1 == k2
-
 
 def test_different_keys_produce_different_ciphertexts(tmp_path, monkeypatch):
     """Разные ключи → разный ciphertext."""
@@ -278,7 +250,6 @@ def test_different_keys_produce_different_ciphertexts(tmp_path, monkeypatch):
     monkeypatch.setenv(crypto.KEY_ENV, base64.urlsafe_b64encode(b"b" * 32).decode())
     enc2 = crypto.encrypt(b"data")
     assert enc1 != enc2
-
 
 # ======================================================================
 # 6. Производный ключ из credentials
@@ -298,7 +269,6 @@ def test_derived_key_from_credentials(tmp_path, monkeypatch):
     # Тот же config → тот же ключ (детерминизм)
     derived2 = crypto._derive_key_from_credentials()
     assert derived == derived2
-
 
 def test_derived_key_returns_none_without_config(tmp_path, monkeypatch):
     import kitsune.crypto as crypto

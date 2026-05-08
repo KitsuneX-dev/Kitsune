@@ -1,9 +1,6 @@
 from __future__ import annotations
-
 import logging
-
 from ..core.loader import KitsuneModule, command, ModuleConfig, ConfigValue
-
 from ..core.security import OWNER
 
 logger = logging.getLogger(__name__)
@@ -603,4 +600,3 @@ class KitsuneSettingsModule(KitsuneModule):
                 parse_mode="html",
 
             )
-

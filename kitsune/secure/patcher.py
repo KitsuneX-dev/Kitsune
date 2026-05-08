@@ -1,15 +1,9 @@
 import functools
-
 import logging
-
 import re
-
 from pathlib import Path
-
 from herokutl.sessions import SQLiteSession
-
 from ..tl_cache import KitsuneTelegramClient
-
 from .customtl import ConnectionTcpFull, MTProtoState
 
 logger = logging.getLogger(__name__)
@@ -53,4 +47,3 @@ def patch(client: KitsuneTelegramClient, session: SQLiteSession) -> None:
         "secure/patcher: клиент пропатчен → unix-сокет %s", socket_path
 
     )
-

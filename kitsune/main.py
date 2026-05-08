@@ -1,23 +1,13 @@
 from __future__ import annotations
-
 import argparse
-
 import asyncio
-
 import contextlib
-
 import json
-
 import logging
-
 import os
-
 import signal
-
 import sys
-
 from pathlib import Path
-
 from typing import Any
 
 try:
@@ -247,7 +237,6 @@ async def _interactive_login(client: Any) -> None:
 _HYDRO_LOCK_FILE = DATA_DIR / ".hydrogram.lock"
 _hydro_lock_fd: int | None = None
 
-
 def _acquire_hydro_lock() -> bool:
     global _hydro_lock_fd
     try:
@@ -268,7 +257,6 @@ def _acquire_hydro_lock() -> bool:
     except Exception:
         return True
 
-
 def _release_hydro_lock() -> None:
     global _hydro_lock_fd
     if _hydro_lock_fd is None:
@@ -285,7 +273,6 @@ def _release_hydro_lock() -> None:
     _hydro_lock_fd = None
     with contextlib.suppress(Exception):
         _HYDRO_LOCK_FILE.unlink(missing_ok=True)
-
 
 async def _start_hydrogram(api_id: int, api_hash: str, session_name: str) -> Any | None:
 
@@ -314,7 +301,6 @@ async def _start_hydrogram(api_id: int, api_hash: str, session_name: str) -> Any
     try:
 
         from hydrogram import Client as HydroClient
-
         from hydrogram.errors import AuthKeyUnregistered
 
     except ImportError:
@@ -444,17 +430,11 @@ async def _start_hydrogram(api_id: int, api_hash: str, session_name: str) -> Any
 async def _startup(args: argparse.Namespace) -> None:
 
     from . import log, utils
-
     from .tl_cache import KitsuneTelegramClient
-
     from .database import DatabaseManager
-
     from .core.security import SecurityManager
-
     from .core.dispatcher import CommandDispatcher
-
     from .core.loader import Loader
-
     from .translations import Translator
 
     log.init()
@@ -1347,7 +1327,6 @@ async def _setup_kitsune_folder(client: Any, db: Any) -> None:
 def _print_banner(me: Any) -> None:
 
     from .version import __version_str__
-
     from colorama import Fore, Style, init as colorama_init
 
     colorama_init(autoreset=True)
@@ -1393,4 +1372,3 @@ def main() -> None:
     except KeyboardInterrupt:
 
         pass
-

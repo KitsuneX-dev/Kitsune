@@ -1,17 +1,10 @@
 from __future__ import annotations
-
 import asyncio
-
 import logging
-
 import socket
-
 import time
-
 import typing
-
 from telethon import TelegramClient
-
 from telethon.sessions import SQLiteSession, MemorySession
 
 logger = logging.getLogger(__name__)
@@ -121,4 +114,3 @@ class KitsuneTelegramClient(TelegramClient):
         for k in stale:
 
             del self._entity_cache[k]
-

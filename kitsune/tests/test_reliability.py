@@ -9,11 +9,9 @@ Unit-тесты для Phase 3 reliability subsystem.
     • Глобальный реестр breaker'ов: get_breaker идемпотентен.
 """
 from __future__ import annotations
-
 import asyncio
 import time
 import unittest
-
 from kitsune.core.reliability import (
     CircuitBreaker,
     CircuitBreakerOpenError,
@@ -31,7 +29,6 @@ from kitsune.core.reliability import (
 
 def _arun(coro):
     return asyncio.get_event_loop().run_until_complete(coro)
-
 
 class CircuitBreakerTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -126,7 +123,6 @@ class CircuitBreakerTests(unittest.TestCase):
         ):
             self.assertIn(required, d)
 
-
 class RetryWithBackoffTests(unittest.TestCase):
     def test_succeeds_first_try(self) -> None:
         calls = {"n": 0}
@@ -203,7 +199,6 @@ class RetryWithBackoffTests(unittest.TestCase):
         # attempt=10 → capped at max_delay
         self.assertLessEqual(pol.delay_for(10), 10.0)
 
-
 class DegradationFlagsTests(unittest.TestCase):
     def test_default_all_clear(self) -> None:
         f = DegradationFlags()
@@ -233,7 +228,6 @@ class DegradationFlagsTests(unittest.TestCase):
         self.assertTrue(hasattr(global_flags, "hydrogram_failed"))
         self.assertTrue(hasattr(global_flags, "redis_unavailable"))
 
-
 class RegistryTests(unittest.TestCase):
     def test_get_breaker_idempotent(self) -> None:
         name = f"reg_{time.monotonic_ns()}"
@@ -249,7 +243,6 @@ class RegistryTests(unittest.TestCase):
         listed = [item["name"] for item in global_registry.to_list()]
         self.assertIn(name, listed)
         global_registry.unregister(name)
-
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,11 +1,7 @@
 from __future__ import annotations
-
 import asyncio
-
 import logging
-
 import typing
-
 from .events import FSMState
 
 logger = logging.getLogger(__name__)
@@ -161,4 +157,3 @@ class BotPM:
     def is_waiting(self, user_id: int) -> bool:
 
         return self._fsm.get(user_id) == "waiting_answer"
-

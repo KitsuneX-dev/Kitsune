@@ -1,17 +1,10 @@
 from __future__ import annotations
-
 import asyncio
-
 import logging
-
 import os
-
 import shutil
-
 import sys
-
 import tempfile
-
 import time
 
 logger = logging.getLogger(__name__)
@@ -20,7 +13,7 @@ _DB_KEY = "kitsune.notifier"
 
 _CHECK_INTERVAL = 3600
 
-                                            
+
 _FIRST_CHECK_DELAY = 300
 
 class UpdateChecker:
@@ -194,7 +187,6 @@ class UpdateChecker:
         try:
 
             from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-
             from kitsune.modules.notifier.bot_runner import _make_bot
 
             kb = InlineKeyboardMarkup(inline_keyboard=[[
@@ -247,7 +239,6 @@ class UpdateChecker:
 
             import aiohttp
 
-                                                              
             from kitsune.rkn_bypass import get_aiohttp_connector_with_proxy
 
             async with aiohttp.ClientSession(
@@ -299,7 +290,6 @@ class UpdateChecker:
                 return                    
 
             from telethon.tl.functions.channels import InviteToChannelRequest
-
             from telethon.tl.functions.messages import AddChatUserRequest
 
             bot_entity = await asyncio.wait_for(self._client.get_entity(bot_username), timeout=15)
@@ -428,7 +418,6 @@ class UpdateChecker:
 
             if os.path.exists(config_path):
 
-                                                                                          
                 backup_dir = os.path.join(self._repo_path, ".kitsune_update_backup")
 
                 try:
@@ -439,7 +428,6 @@ class UpdateChecker:
 
                 except OSError:
 
-                                                                                  
                     fd, config_backup = tempfile.mkstemp(suffix=".toml")
 
                     os.close(fd)
@@ -763,4 +751,3 @@ def _fmt_time(seconds: float) -> str:
         m, s = divmod(int(seconds), 60)
 
         return f"{m}м {s}с"
-

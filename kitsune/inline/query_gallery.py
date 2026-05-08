@@ -1,11 +1,7 @@
 from __future__ import annotations
-
 import logging
-
 import time
-
 import typing
-
 import uuid
 
 logger = logging.getLogger(__name__)
@@ -183,4 +179,3 @@ class QueryGallery:
             logger.exception("QueryGallery: ошибка ответа на inline query")
 
             return False
-

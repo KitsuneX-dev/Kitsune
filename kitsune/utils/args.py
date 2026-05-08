@@ -1,7 +1,5 @@
 from __future__ import annotations
-
 import shlex
-
 import typing
 
 def get_args(message: typing.Any) -> list[str]:
@@ -37,7 +35,6 @@ def get_args_html(message: typing.Any) -> str:
     try:
 
         from telethon.extensions import html as tl_html
-
         import copy
 
         raw_text = getattr(message, "text", "") or getattr(message, "message", "")
@@ -107,4 +104,3 @@ def split_args(message: typing.Any, n: int = 1) -> tuple[list[str], str]:
     rest = head[n] if len(head) > n else ""
 
     return head[:n], rest
-

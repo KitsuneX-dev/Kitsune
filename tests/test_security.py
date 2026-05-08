@@ -26,18 +26,15 @@ class _FakeDB:
         self._d.setdefault(owner, {})[key] = value
         return True
 
-
 def _msg(sender_id=None, chat_id=None):
     """Создать фейковое сообщение."""
     return SimpleNamespace(sender_id=sender_id, chat_id=chat_id)
-
 
 def _client(me_id=1000):
     c = MagicMock()
     c.get_me = AsyncMock(return_value=SimpleNamespace(id=me_id))
     c.get_permissions = AsyncMock()
     return c
-
 
 @pytest_asyncio.fixture
 async def manager():
@@ -48,7 +45,6 @@ async def manager():
     mgr = SecurityManager(cl, db)
     await mgr.init()
     return mgr
-
 
 # ======================================================================
 # ======================================================================
@@ -67,14 +63,12 @@ def test_bitmap_constants_unique():
         assert b > 0
         assert (b & (b - 1)) == 0
 
-
 def test_bitmap_dict_populated():
     from kitsune.core import security as sec
     assert "OWNER" in sec.BITMAP
     assert sec.BITMAP["OWNER"] == sec.OWNER
     assert "SUDO" in sec.BITMAP
     assert "EVERYONE" in sec.BITMAP
-
 
 def test_group_admin_any_includes_all():
     """GROUP_ADMIN_ANY должен включать ВСЕ admin-разрешения."""
@@ -87,11 +81,9 @@ def test_group_admin_any_includes_all():
     )
     assert sec.GROUP_ADMIN_ANY == expected
 
-
 def test_default_permissions_is_owner():
     from kitsune.core import security as sec
     assert sec.DEFAULT_PERMISSIONS == sec.OWNER
-
 
 # ======================================================================
 # ======================================================================
@@ -102,13 +94,11 @@ async def test_owner_can_pass_owner_check(manager):
     msg = _msg(sender_id=1000, chat_id=1000)
     assert await manager.check(msg, OWNER) is True
 
-
 @pytest.mark.asyncio
 async def test_non_owner_fails_owner_check(manager):
     from kitsune.core.security import OWNER
     msg = _msg(sender_id=2000, chat_id=2000)
     assert await manager.check(msg, OWNER) is False
-
 
 @pytest.mark.asyncio
 async def test_owner_implies_pm_in_private_chat(manager):
@@ -116,7 +106,6 @@ async def test_owner_implies_pm_in_private_chat(manager):
     from kitsune.core.security import OWNER, PM, EVERYONE
     msg = _msg(sender_id=1000, chat_id=1000)
     assert await manager.check(msg, OWNER) is True
-
 
 @pytest.mark.asyncio
 async def test_co_owner_resolved_as_owner(manager):
@@ -126,13 +115,11 @@ async def test_co_owner_resolved_as_owner(manager):
     msg = _msg(sender_id=555, chat_id=555)
     assert await manager.check(msg, OWNER) is True
 
-
 @pytest.mark.asyncio
 async def test_none_sender_id_returns_false(manager):
     from kitsune.core.security import OWNER
     msg = _msg(sender_id=None, chat_id=1)
     assert await manager.check(msg, OWNER) is False
-
 
 # ======================================================================
 # ======================================================================
@@ -141,12 +128,10 @@ async def test_none_sender_id_returns_false(manager):
 async def test_get_sudo_users_default_empty(manager):
     assert manager.get_sudo_users() == []
 
-
 @pytest.mark.asyncio
 async def test_add_sudo(manager):
     await manager.add_sudo(123)
     assert 123 in manager.get_sudo_users()
-
 
 @pytest.mark.asyncio
 async def test_add_sudo_idempotent(manager):
@@ -156,7 +141,6 @@ async def test_add_sudo_idempotent(manager):
     sudo = manager.get_sudo_users()
     assert sudo.count(123) == 1
 
-
 @pytest.mark.asyncio
 async def test_add_multiple_sudo(manager):
     await manager.add_sudo(111)
@@ -164,7 +148,6 @@ async def test_add_multiple_sudo(manager):
     await manager.add_sudo(333)
     sudo = manager.get_sudo_users()
     assert {111, 222, 333}.issubset(set(sudo))
-
 
 @pytest.mark.asyncio
 async def test_remove_sudo(manager):
@@ -175,13 +158,11 @@ async def test_remove_sudo(manager):
     assert 123 not in sudo
     assert 456 in sudo
 
-
 @pytest.mark.asyncio
 async def test_remove_nonexistent_sudo_safe(manager):
     """Удаление не существующего ID не должно крашить."""
     await manager.remove_sudo(99999)
     assert manager.get_sudo_users() == []
-
 
 @pytest.mark.asyncio
 async def test_sudo_user_check_passes(manager):
@@ -192,7 +173,6 @@ async def test_sudo_user_check_passes(manager):
     manager._client.get_permissions = AsyncMock(side_effect=Exception("not a participant"))
     assert await manager.check(msg, SUDO) is True
 
-
 @pytest.mark.asyncio
 async def test_support_user_check_passes(manager):
     from kitsune.core.security import SUPPORT
@@ -201,11 +181,9 @@ async def test_support_user_check_passes(manager):
     manager._client.get_permissions = AsyncMock(side_effect=Exception("nope"))
     assert await manager.check(msg, SUPPORT) is True
 
-
 @pytest.mark.asyncio
 async def test_get_support_users_default(manager):
     assert manager.get_support_users() == []
-
 
 # ======================================================================
 # ======================================================================
@@ -217,7 +195,6 @@ async def test_pm_bit_set_in_private_chat(manager):
     msg = _msg(sender_id=2000, chat_id=2000)
     assert await manager.check(msg, PM) is True
 
-
 @pytest.mark.asyncio
 async def test_pm_bit_not_set_in_group(manager):
     """В группе (chat_id != sender_id) бит PM не выставлен."""
@@ -226,14 +203,12 @@ async def test_pm_bit_not_set_in_group(manager):
     msg = _msg(sender_id=2000, chat_id=-100123)
     assert await manager.check(msg, PM) is False
 
-
 @pytest.mark.asyncio
 async def test_everyone_bit_always_set_with_chat(manager):
     """EVERYONE выставляется когда есть chat_id."""
     from kitsune.core.security import EVERYONE
     msg = _msg(sender_id=2000, chat_id=2000)
     assert await manager.check(msg, EVERYONE) is True
-
 
 # ======================================================================
 # 5. Group permissions resolution
@@ -248,7 +223,6 @@ async def test_group_creator_gets_owner_bit(manager):
     msg = _msg(sender_id=2000, chat_id=-100999)
     assert await manager.check(msg, GROUP_OWNER) is True
     assert await manager.check(msg, GROUP_MEMBER) is True
-
 
 @pytest.mark.asyncio
 async def test_group_admin_with_rights(manager):
@@ -267,7 +241,6 @@ async def test_group_admin_with_rights(manager):
     assert await manager.check(msg, GROUP_ADMIN_BAN_USERS) is True
     assert await manager.check(msg, GROUP_ADMIN_PIN_MESSAGES) is True
 
-
 @pytest.mark.asyncio
 async def test_regular_group_member(manager):
     from kitsune.core.security import GROUP_MEMBER, GROUP_ADMIN
@@ -278,7 +251,6 @@ async def test_regular_group_member(manager):
     assert await manager.check(msg, GROUP_MEMBER) is True
     assert await manager.check(msg, GROUP_ADMIN) is False
 
-
 @pytest.mark.asyncio
 async def test_get_permissions_exception_returns_member_only(manager):
     """Если get_permissions падает — выдаём только GROUP_MEMBER."""
@@ -287,7 +259,6 @@ async def test_get_permissions_exception_returns_member_only(manager):
     msg = _msg(sender_id=5000, chat_id=-100666)
     assert await manager.check(msg, GROUP_MEMBER) is True
     assert await manager.check(msg, GROUP_ADMIN) is False
-
 
 # ======================================================================
 # ======================================================================
@@ -302,7 +273,6 @@ async def test_cache_populated_after_check(manager):
     msg = _msg(sender_id=6000, chat_id=-100555)
     await manager.check(msg, GROUP_MEMBER)
     assert (-100555, 6000) in manager._cache
-
 
 @pytest.mark.asyncio
 async def test_cache_hit_avoids_second_call(manager):
@@ -319,7 +289,6 @@ async def test_cache_hit_avoids_second_call(manager):
     # Должен быть вызван только 1 раз благодаря кэшу
     assert mock_perm.call_count == 1
 
-
 @pytest.mark.asyncio
 async def test_invalidate_cache_clears_all(manager):
     from kitsune.core.security import GROUP_MEMBER
@@ -334,7 +303,6 @@ async def test_invalidate_cache_clears_all(manager):
 
     manager.invalidate_cache()
     assert len(manager._cache) == 0
-
 
 @pytest.mark.asyncio
 async def test_invalidate_cache_specific_chat(manager):
@@ -353,7 +321,6 @@ async def test_invalidate_cache_specific_chat(manager):
     manager.invalidate_cache(chat_id=-1001)
     assert (-1001, 10001) not in manager._cache
     assert (-1002, 10002) in manager._cache
-
 
 @pytest.mark.asyncio
 async def test_cache_expires_after_ttl(manager, monkeypatch):
@@ -377,7 +344,6 @@ async def test_cache_expires_after_ttl(manager, monkeypatch):
     # Должно быть 2 вызова (кэш протух)
     assert mock_perm.call_count == 2
 
-
 # ======================================================================
 # 7. Init / state
 # ======================================================================
@@ -393,7 +359,6 @@ async def test_init_loads_me():
     assert mgr._me is not None
     assert mgr._me.id == 42
 
-
 @pytest.mark.asyncio
 async def test_check_lazy_inits_me():
     """check() должен вызывать init() автоматически если _me не установлен."""
@@ -408,7 +373,6 @@ async def test_check_lazy_inits_me():
     assert result is True
     assert mgr._me is not None
 
-
 # ======================================================================
 # 8. Combined permissions
 # ======================================================================
@@ -419,7 +383,6 @@ async def test_check_with_combined_required(manager):
     from kitsune.core.security import OWNER, SUDO
     msg = _msg(sender_id=1000, chat_id=1000)
     assert await manager.check(msg, OWNER | SUDO) is True
-
 
 @pytest.mark.asyncio
 async def test_persistent_sudo_across_instances(tmp_path):

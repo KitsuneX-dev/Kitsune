@@ -1,17 +1,10 @@
 from __future__ import annotations
-
 import asyncio
-
 import io
-
 import sys
-
 import traceback
-
 from ..core.loader import KitsuneModule, command
-
 from ..core.security import OWNER
-
 from ..utils import escape_html, truncate
 
 class EvalModule(KitsuneModule):
@@ -207,4 +200,3 @@ class EvalModule(KitsuneModule):
         finally:
 
             sys.stdout = old_stdout
-

@@ -1,15 +1,9 @@
 from __future__ import annotations
-
 import logging
-
 import os
-
 import stat
-
 import sqlite3
-
 from pathlib import Path
-
 from .crypto import encrypt, decrypt
 
 logger = logging.getLogger(__name__)
@@ -263,4 +257,3 @@ def session_ready() -> bool:
         return True
 
     return decrypt_session_file()
-

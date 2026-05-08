@@ -1,27 +1,15 @@
 from __future__ import annotations
-
 import asyncio
-
 import base64
-
 import hashlib
-
 import hmac
-
 import logging
-
 import random
-
 import re
-
 import socket
-
 import time
-
 from cryptography.hazmat.backends import default_backend
-
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-
 from telethon.network.connection.tcpmtproxy import (
 
     ConnectionTcpMTProxyRandomizedIntermediate,
@@ -544,14 +532,12 @@ class FakeTLSStreamReader(_LayeredStreamReaderBase):
 
             if tls_rec_type == b"\x14":
 
-                                                               
                 continue
 
             return data
 
     async def read(self, n, ignore_buf=False):
 
-                                                                           
         if self.buf and not ignore_buf:
 
             data = bytes(self.buf[:n])
@@ -564,12 +550,10 @@ class FakeTLSStreamReader(_LayeredStreamReaderBase):
 
         if ignore_buf:
 
-                                                                    
             return data
 
         if len(data) > n:
 
-                                                                
             self.buf += data[n:]
 
             data = data[:n]
@@ -592,7 +576,6 @@ class FakeTLSStreamReader(_LayeredStreamReaderBase):
 
             if not tls_data:
 
-                                                                         
                 raise ConnectionError("FakeTLS: empty TLS record from proxy")
 
             self.buf += tls_data
@@ -725,7 +708,6 @@ class ConnectionTcpMTProxyFakeTLS(ConnectionTcpMTProxyRandomizedIntermediate):
 
         logger.info("mtproto_faketls: waiting for FakeTLS server hello")
 
-                                                                       
         wrapped_reader = FakeTLSStreamReader(raw_reader)
 
         if not self.fake_tls_cdc.verify_server_hello(
@@ -749,4 +731,3 @@ class ConnectionTcpMTProxyFakeTLS(ConnectionTcpMTProxyRandomizedIntermediate):
         self._init_conn()
 
         await self._writer.drain()
-

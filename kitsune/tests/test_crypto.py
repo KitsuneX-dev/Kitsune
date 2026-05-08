@@ -3,9 +3,7 @@ import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
-
 import os as _os
-
 import tempfile, pathlib
 
 @pytest.fixture(autouse=True)
@@ -93,4 +91,3 @@ def test_key_created_on_disk(tmp_path, monkeypatch):
     crypto._load_or_create_key()
 
     assert key_path.exists()
-

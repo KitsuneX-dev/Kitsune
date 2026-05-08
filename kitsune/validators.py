@@ -1,9 +1,6 @@
 from __future__ import annotations
-
 import functools
-
 import re
-
 import typing
 
 ConfigAllowedTypes = typing.Union[tuple, list, str, int, float, bool, None]
@@ -711,4 +708,3 @@ class Union(Validator):
                 pass
 
         raise ValidationError(f"«{value}» did not pass any validator")
-

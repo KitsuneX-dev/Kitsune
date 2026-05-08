@@ -1,9 +1,6 @@
 from __future__ import annotations
-
 import logging
-
 import typing
-
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -69,4 +66,3 @@ class Translator:
     def __call__(self, key: str, **kwargs: object) -> str:
 
         return self.translate(key, **kwargs)
-

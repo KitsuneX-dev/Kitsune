@@ -1,7 +1,5 @@
 from __future__ import annotations
-
 import typing
-
 from dataclasses import dataclass, field
 
 @dataclass
@@ -93,4 +91,3 @@ class SecurityChangedEvent(KitsuneEvent):
     user_id: int
 
     role: str
-

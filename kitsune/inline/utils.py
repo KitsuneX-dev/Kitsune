@@ -1,15 +1,9 @@
 from __future__ import annotations
-
 import asyncio
-
 import logging
-
 import os
-
 import time
-
 import typing
-
 from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
@@ -353,4 +347,3 @@ def nav_row(
         })
 
     return row
-

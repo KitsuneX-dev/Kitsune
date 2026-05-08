@@ -1,19 +1,11 @@
 from __future__ import annotations
-
 import asyncio
-
 import logging
-
 import re
-
 from ...core.loader import KitsuneModule, command
-
 from ...core.security import OWNER
-
 from .bot_setup import BotSetup
-
 from .bot_runner import BotRunner
-
 from .update_checker import UpdateChecker
 
 logger = logging.getLogger(__name__)
@@ -198,7 +190,6 @@ class NotifierModule(KitsuneModule):
 
                 import aiohttp
 
-                                                                         
                 from ...rkn_bypass import get_aiohttp_connector_with_proxy
 
                 async with aiohttp.ClientSession(
@@ -396,7 +387,6 @@ class NotifierModule(KitsuneModule):
                 return
 
             from ...inline.core import InlineManager
-
             from aiogram import Router as _Router
 
             inline = InlineManager(self.client, self.db, token)
@@ -438,4 +428,3 @@ class NotifierModule(KitsuneModule):
                 logger.warning("Notifier: polling died (%s) — restarting", exc)
 
                 await self._runner.start(token, first_run=False)
-

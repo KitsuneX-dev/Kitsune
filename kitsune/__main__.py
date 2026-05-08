@@ -1,11 +1,7 @@
 from __future__ import annotations
-
 import os
-
 import sys
-
 import warnings
-
 from pathlib import Path
 
 # --- Python 3.13 готовность ---
@@ -73,4 +69,3 @@ from .main import main
 if __name__ == "__main__":
 
     main()
-

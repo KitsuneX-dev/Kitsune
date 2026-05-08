@@ -1,9 +1,6 @@
 import io
-
 import logging
-
 import shlex
-
 import typing
 
 logger = logging.getLogger(__name__)
@@ -159,7 +156,6 @@ async def answer(
         try:
 
             from telethon.extensions.html import parse as _tl_parse
-
             from .utils import smart_split as _smart_split
 
             text, entities = _tl_parse(response)
@@ -411,4 +407,3 @@ def get_chat_id(message) -> typing.Optional[int]:
         return getattr(chat, "id", None)
 
     return getattr(message, "chat_id", None)
-

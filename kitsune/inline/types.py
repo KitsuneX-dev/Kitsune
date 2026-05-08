@@ -1,9 +1,6 @@
 from __future__ import annotations
-
 import asyncio
-
 import typing
-
 from dataclasses import dataclass, field
 
 @dataclass
@@ -105,4 +102,3 @@ def markup_from_buttons(
         result.append(result_row)
 
     return result
-

@@ -1,25 +1,14 @@
 from __future__ import annotations
-
 import asyncio
-
 import atexit
-
 import logging
-
 import os
-
 import platform
-
 import random
-
 import signal
-
 import subprocess
-
 import sys
-
 import typing
-
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -249,4 +238,3 @@ def print_banner(
         f"{magenta}{line}{reset}\n"
 
     )
-

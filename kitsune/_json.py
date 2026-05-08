@@ -1,5 +1,4 @@
 from __future__ import annotations
-
 import typing
 
 try:
@@ -45,4 +44,3 @@ def is_serializable(value: typing.Any) -> bool:
     except (TypeError, ValueError):
 
         return False
-

@@ -1,11 +1,7 @@
 from __future__ import annotations
-
 import logging
-
 import os
-
 import typing
-
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -137,4 +133,3 @@ def get_changelog(n: int = 5) -> list[dict]:
         logger.debug("get_changelog: ошибка", exc_info=True)
 
         return []
-

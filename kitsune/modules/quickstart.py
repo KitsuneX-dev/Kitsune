@@ -1,11 +1,7 @@
 from __future__ import annotations
-
 import logging
-
 from ..core.loader import KitsuneModule, command
-
 from ..core.security import OWNER
-
 from .._internal import get_platform
 
 logger = logging.getLogger(__name__)
@@ -111,7 +107,6 @@ class QuickstartModule(KitsuneModule):
     async def _sync_kitsune_folder(self) -> dict:
 
         import asyncio as _asyncio
-
         from telethon.tl.functions.messages import (
 
             GetDialogFiltersRequest,
@@ -121,7 +116,6 @@ class QuickstartModule(KitsuneModule):
         )
 
         from telethon.tl.types import DialogFilter, InputPeerSelf
-
         from telethon.errors import FloodWaitError
 
         _CACHE_KEY = "kitsune.quickstart"
@@ -344,7 +338,6 @@ class QuickstartModule(KitsuneModule):
 
             if chat_type == "group" and (d.is_group or d.is_channel):
 
-                                                                    
                 return d.entity
 
         return None
@@ -352,9 +345,7 @@ class QuickstartModule(KitsuneModule):
     async def _create_chat(self, cfg: dict):
 
         import asyncio as _asyncio
-
         from telethon.tl.functions.channels import CreateChannelRequest
-
         from telethon.errors import FloodWaitError
 
         for attempt in range(3):
@@ -557,6 +548,4 @@ def _filter_title_str(f) -> str:
 
         return t
 
-                                                              
     return getattr(t, "text", str(t))
-

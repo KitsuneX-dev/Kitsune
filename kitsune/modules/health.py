@@ -1,5 +1,4 @@
 from __future__ import annotations
-
 import asyncio
 import logging
 import time
@@ -67,7 +66,6 @@ async def probe_sqlite(db: typing.Any) -> dict:
     except Exception as exc:
         return {"alive": False, "active": True, "error": f"{type(exc).__name__}: {exc}"}
 
-
 async def probe_redis(db: typing.Any) -> dict:
     """Проверить доступность Redis-бэкенда.
 
@@ -113,7 +111,6 @@ async def probe_redis(db: typing.Any) -> dict:
             "configured": True,
             "error": f"{type(exc).__name__}: {exc}",
         }
-
 
 async def probe_telegram(client: typing.Any) -> dict:
     """Проверить активность Telegram-сессии.
@@ -180,7 +177,6 @@ async def probe_telegram(client: typing.Any) -> dict:
             "error": f"{type(exc).__name__}: {exc}",
         }
 
-
 def collect_system() -> dict:
     """Снять снимок системных ресурсов (RAM/CPU/disk/uptime процесса)."""
     out: dict = {
@@ -220,7 +216,6 @@ def collect_system() -> dict:
     except Exception:
         pass
     return out
-
 
 async def collect_health(client: typing.Any, db: typing.Any) -> dict:
     """Собрать полный health-snapshot. Используется и .health командой,
@@ -279,7 +274,6 @@ async def collect_health(client: typing.Any, db: typing.Any) -> dict:
         "timestamp": int(time.time()),
     }
 
-
 # ---------------------------------------------------------------------------
 # Format helpers
 # ---------------------------------------------------------------------------
@@ -296,10 +290,8 @@ def _fmt_uptime(sec: int) -> str:
     parts.append(f"{s:02d}с")
     return " ".join(parts)
 
-
 def _emoji_bool(ok: bool) -> str:
     return "✅" if ok else "❌"
-
 
 def render_health_text(snapshot: dict) -> str:
     sys_ = snapshot["system"]
@@ -389,7 +381,6 @@ def render_health_text(snapshot: dict) -> str:
             lines.append(f"  • VPN/proxy down ({reasons.get('vpn', '—')})")
 
     return "\n".join(lines)
-
 
 # ---------------------------------------------------------------------------
 # Module

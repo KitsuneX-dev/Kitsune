@@ -1,7 +1,5 @@
 from __future__ import annotations
-
 from ..core.loader import KitsuneModule, command
-
 from ..core.security import OWNER
 
 class PasteModule(KitsuneModule):
@@ -149,4 +147,3 @@ class PasteModule(KitsuneModule):
         await self.db.set("kitsune.paste", "telegraph_token", token)
 
         return token
-

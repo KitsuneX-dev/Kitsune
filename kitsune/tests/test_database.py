@@ -3,9 +3,7 @@ import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import asyncio
-
 import pytest
-
 import pathlib
 
 @pytest.fixture
@@ -117,4 +115,3 @@ def test_json_types(backend):
     loaded = run(backend.load())
 
     assert loaded["o"] == data["o"]
-

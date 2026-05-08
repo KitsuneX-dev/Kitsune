@@ -1,19 +1,11 @@
 from __future__ import annotations
-
 import asyncio
-
 import logging
-
 import re
-
 import typing
-
 from telethon import events
-
 from telethon.tl.types import Message
-
 from .rate_limiter import RateLimiter
-
 from .security import SecurityManager, OWNER, SUDO
 
 logger = logging.getLogger(__name__)
@@ -751,4 +743,3 @@ class CommandDispatcher:
         except Exception:
 
             logger.exception("Dispatcher: unhandled exception in %s", label)
-

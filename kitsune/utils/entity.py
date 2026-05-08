@@ -1,5 +1,4 @@
 from __future__ import annotations
-
 import typing
 
 def get_display_name(entity: typing.Any) -> str:
@@ -91,4 +90,3 @@ def is_group(entity: typing.Any) -> bool:
     except ImportError:
 
         return hasattr(entity, "participants_count") and not is_channel(entity)
-

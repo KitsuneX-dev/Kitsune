@@ -1,5 +1,4 @@
 from __future__ import annotations
-
 import asyncio
 import logging
 import random
@@ -25,7 +24,6 @@ STATE_HALF_OPEN = "half_open" # пробный запрос после cooldown
 class CircuitBreakerOpenError(RuntimeError):
     """Бросается, когда breaker в состоянии OPEN и запрос блокируется."""
 
-
 @dataclass
 class CircuitBreakerStats:
     state: str = STATE_CLOSED
@@ -37,7 +35,6 @@ class CircuitBreakerStats:
     last_success_at: float = 0.0
     total_calls: int = 0
     blocked_calls: int = 0
-
 
 class CircuitBreaker:
     """Async-friendly circuit breaker.
@@ -217,7 +214,6 @@ class CircuitBreaker:
             ) if st.state == STATE_OPEN else 0.0,
         }
 
-
 # ---------------------------------------------------------------------------
 # Глобальный реестр CircuitBreaker'ов
 # ---------------------------------------------------------------------------
@@ -264,9 +260,7 @@ class _CircuitBreakerRegistry:
     def to_list(self) -> list[dict]:
         return [cb.to_dict() for cb in self._items.values()]
 
-
 global_registry = _CircuitBreakerRegistry()
-
 
 def get_breaker(
     name: str,
@@ -282,7 +276,6 @@ def get_breaker(
         cooldown=cooldown,
         expected_exceptions=expected_exceptions,
     )
-
 
 # ---------------------------------------------------------------------------
 # Retry с экспоненциальным backoff
@@ -314,7 +307,6 @@ class RetryPolicy:
         if self.jitter > 0:
             d *= 1.0 + random.uniform(-self.jitter, self.jitter)
         return max(0.0, d)
-
 
 async def retry_with_backoff(
     func: typing.Callable[..., typing.Awaitable[typing.Any]],
@@ -364,7 +356,6 @@ async def retry_with_backoff(
     # Все попытки исчерпаны.
     assert last_exc is not None  # для типизации
     raise last_exc
-
 
 # ---------------------------------------------------------------------------
 # Graceful degradation flags
@@ -463,9 +454,7 @@ class DegradationFlags:
             or self.vpn_down
         )
 
-
 flags = DegradationFlags()
-
 
 # ---------------------------------------------------------------------------
 # Экспорт

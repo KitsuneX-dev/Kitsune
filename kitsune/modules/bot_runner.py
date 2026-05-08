@@ -1,11 +1,7 @@
 from __future__ import annotations
-
 import asyncio
-
 import logging
-
 import ssl
-
 import typing
 
 logger = logging.getLogger(__name__)
@@ -15,13 +11,9 @@ _DB_KEY = "kitsune.notifier"
 def _make_bot(token: str) -> typing.Any:
 
     from aiogram import Bot
-
     from aiogram.client.default import DefaultBotProperties
-
     from aiogram.enums import ParseMode
-
     import aiohttp
-
     from aiogram.client.session.aiohttp import AiohttpSession
 
     ssl_ctx = ssl.create_default_context()
@@ -195,7 +187,6 @@ class BotRunner:
     def _register_handlers(self, router) -> None:
 
         from aiogram.filters import Command
-
         from aiogram.types import Message, CallbackQuery
 
         ref = self
@@ -397,7 +388,6 @@ class BotRunner:
         await call.answer()
 
         from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-
         from ..config import _get_configurable, _mod_text, _list_text
 
         data = call.data
@@ -601,7 +591,6 @@ class BotRunner:
         mod_name, key, value = pending["mod"], pending["key"], msg.text or ""
 
         from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-
         from ..config import _get_configurable
 
         configurable = _get_configurable(self._client)
@@ -657,4 +646,3 @@ class BotRunner:
         except Exception:
 
             pass
-

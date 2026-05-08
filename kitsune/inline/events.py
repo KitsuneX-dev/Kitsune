@@ -1,11 +1,7 @@
 from __future__ import annotations
-
 import asyncio
-
 import logging
-
 import time
-
 import typing
 
 logger = logging.getLogger(__name__)
@@ -259,4 +255,3 @@ class FSMState:
     def __len__(self) -> int:
 
         return sum(1 for uid in list(self._states) if self.get(uid) is not None)
-

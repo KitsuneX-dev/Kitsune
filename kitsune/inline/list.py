@@ -1,11 +1,7 @@
 from __future__ import annotations
-
 import asyncio
-
 import logging
-
 import time
-
 import typing
 
 logger = logging.getLogger(__name__)
@@ -297,4 +293,3 @@ class InlineList:
         markup = unit.pop("_pending_markup", [])
 
         return text, markup
-

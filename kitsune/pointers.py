@@ -1,5 +1,4 @@
 from __future__ import annotations
-
 import typing
 
 class Pointer:
@@ -135,4 +134,3 @@ class IntPointer(Pointer):
     async def decrement(self, by: int = 1) -> int:
 
         return await self.increment(-by)
-

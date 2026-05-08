@@ -1,11 +1,7 @@
 from __future__ import annotations
-
 import re
-
 import string
-
 import sys
-
 import typing
 
 def _is_tty() -> bool:
@@ -249,4 +245,3 @@ def configure_proxy(tty: bool | None = None) -> dict | None:
             cfg["password"] = pwd
 
     return cfg
-

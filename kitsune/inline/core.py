@@ -1,13 +1,8 @@
 from __future__ import annotations
-
 import asyncio
-
 import logging
-
 import typing
-
 import uuid
-
 import time
 
 logger = logging.getLogger(__name__)
@@ -15,11 +10,8 @@ logger = logging.getLogger(__name__)
 try:
 
     from aiogram import Bot, Dispatcher, Router
-
     from aiogram.client.default import DefaultBotProperties
-
     from aiogram.enums import ParseMode
-
     from aiogram.types import (
 
         CallbackQuery,
@@ -88,7 +80,6 @@ class InlineManager:
 
             return
 
-                                                                              
         try:
 
             from ..rkn_bypass import make_aiogram_bot
@@ -286,7 +277,6 @@ class InlineManager:
             try:
 
                 import os
-
                 from urllib.parse import urlparse
 
                 ext = os.path.splitext(urlparse(media_url).path)[1].lower()
@@ -319,7 +309,6 @@ class InlineManager:
 
         sent = await self._invoke_unit(unit_id, message)
 
-                                                                             
         if sent is not None and unit_id in self._units:
 
             self._units[unit_id]["telethon_msg"] = sent
@@ -412,12 +401,10 @@ class InlineManager:
 
             else:
 
-                                                                       
                 telethon_msg = getattr(call_or_msg, "_telethon_msg", None)
 
                 if telethon_msg is None:
 
-                                                                 
                     for unit in self._units.values():
 
                         if unit.get("telethon_msg") is not None:
@@ -953,4 +940,3 @@ class InlineManager:
             logger.exception("InlineManager callback error (data=%s)", call.data)
 
             await call.answer("❌ Ошибка.", show_alert=True)
-

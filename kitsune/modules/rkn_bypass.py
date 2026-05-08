@@ -1,13 +1,8 @@
 from __future__ import annotations
-
 import logging
-
 import re
-
 import ssl
-
 import sys
-
 import typing
 
 logger = logging.getLogger(__name__)
@@ -120,7 +115,6 @@ def _patch_telethon_mtproxy() -> None:
 
     async def readexactly_safe(self, n):
 
-                                                                        
         if n is None or n < 0:
 
             raise ConnectionError(
@@ -256,7 +250,6 @@ def get_aiogram_session(timeout: int = 30):
     try:
 
         from aiogram.client.session.aiohttp import AiohttpSession
-
         import aiohttp
 
         ssl_ctx = make_ssl_ctx_no_verify()
@@ -552,4 +545,3 @@ def apply_bypass_to_config(cfg: dict) -> dict:
         logger.info("rkn_bypass: прокси применён к конфигу")
 
     return cfg
-

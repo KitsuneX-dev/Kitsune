@@ -1,19 +1,11 @@
 from __future__ import annotations
-
 import asyncio
-
 import os
-
 import sys
-
 import time
-
 import typing
-
 from ..core.loader import KitsuneModule, command
-
 from ..core.security import OWNER
-
 from ..utils import escape_html
 
 _DB_OWNER = "kitsune.updater"
@@ -396,7 +388,6 @@ class UpdaterModule(KitsuneModule):
 
             if not shown_inline:
 
-                                                            
                 notifier = self._get_notifier()
 
                 sent_to = None
@@ -550,7 +541,6 @@ class UpdaterModule(KitsuneModule):
     async def _do_update(self, repo_path: str, chat_id: int, msg_id: int) -> None:
 
         import shutil
-
         import tempfile
 
         async def edit(text: str) -> None:
@@ -766,4 +756,3 @@ def _fmt_time(seconds: float) -> str:
         m, s = divmod(int(seconds), 60)
 
         return f"{m}м {s}с"
-

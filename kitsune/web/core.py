@@ -1,13 +1,8 @@
 from __future__ import annotations
-
 import asyncio
-
 import json
-
 import logging
-
 import typing
-
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -15,7 +10,6 @@ logger = logging.getLogger(__name__)
 try:
 
     import aiohttp
-
     import aiohttp.web
 
     WEB_AVAILABLE = True
@@ -125,7 +119,6 @@ class WebCore:
     async def _handle_status(self, request):
 
         import time
-
         from ..version import __version_str__
 
         try:
@@ -1116,4 +1109,3 @@ async function loadLogs(){
 </body>
 
 </html>"""
-

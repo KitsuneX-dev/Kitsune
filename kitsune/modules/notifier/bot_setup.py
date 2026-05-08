@@ -1,9 +1,6 @@
 from __future__ import annotations
-
 import logging
-
 import re
-
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -383,4 +380,3 @@ class BotSetup:
             logger.debug("BotSetup: _get_token_via_conv failed for %s — %s", username, exc)
 
             return None
-

@@ -1,15 +1,9 @@
 from __future__ import annotations
-
 import base64
-
 import hashlib
-
 import hmac
-
 import os
-
 import struct
-
 from pathlib import Path
 
 KEY_ENV  = "KITSUNE_KEY"
@@ -267,4 +261,3 @@ def is_encrypted(data: bytes) -> bool:
 def key_path() -> Path:
 
     return KEY_PATH
-

@@ -1,5 +1,4 @@
 from __future__ import annotations
-
 import logging as _logging
 
 __author__ = "Yushi"
@@ -141,4 +140,3 @@ def install_patches() -> None:
         _log.debug("kitsune: IntermediatePacketCodec patch skipped — %s", _exc)
 
     _PATCHES_INSTALLED = True
-

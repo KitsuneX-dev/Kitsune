@@ -1,7 +1,5 @@
 from __future__ import annotations
-
 import contextlib
-
 import os
 
 __version__ = (1, 3, 0)
@@ -17,4 +15,3 @@ with contextlib.suppress(Exception):
     _repo_path = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
     branch = git.Repo(path=_repo_path).active_branch.name
-

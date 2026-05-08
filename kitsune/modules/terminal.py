@@ -1,17 +1,10 @@
 from __future__ import annotations
-
 import asyncio
-
 import logging
-
 import os
-
 import signal
-
 from ..core.loader import KitsuneModule, command
-
 from ..core.security import OWNER
-
 from ..utils import escape_html, auto_delete, truncate
 
 logger = logging.getLogger(__name__)
@@ -251,4 +244,3 @@ class TerminalModule(KitsuneModule):
         await event.edit(text, parse_mode="html")
 
         await auto_delete(event)
-

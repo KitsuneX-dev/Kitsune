@@ -1,27 +1,15 @@
 from __future__ import annotations
-
 import asyncio
-
 import inspect
-
 import io
-
 import linecache
-
 import logging
-
 import os
-
 import re
-
 import sys
-
 import traceback
-
 import typing
-
 from logging.handlers import RotatingFileHandler
-
 from pathlib import Path
 
 LOG_DIR = Path.home() / ".kitsune" / "logs"
@@ -499,7 +487,6 @@ class KitsuneLogsHandler(logging.Handler):
     async def _show_full_trace(self, call: typing.Any, bot: typing.Any, item: KitsuneException) -> None:
 
         from . import utils
-
         import telethon.extensions.html as tl_html
 
         chunks_text = item.message + "\n\n<b>🪐 Full traceback:</b>\n" + item.full_stack
@@ -724,7 +711,6 @@ class _NetworkNoiseFilter(logging.Filter):
 
         return True
 
-
 class _HydrogramSessionNoiseFilter(logging.Filter):
     """Подавляет бесконечные INFO-сообщения hydrogram о пере-подключении."""
 
@@ -863,7 +849,6 @@ async def _ensure_bot_in_group(client: typing.Any, group_id: int) -> bool:
         try:
 
             from telethon.tl.functions.channels import InviteToChannelRequest
-
             from telethon.errors import UserAlreadyParticipantError
 
             try:
@@ -882,7 +867,6 @@ async def _ensure_bot_in_group(client: typing.Any, group_id: int) -> bool:
 
         except Exception as invite_exc:
 
-                                                                                      
             if "admin" in str(invite_exc).lower() or "channel" in str(invite_exc).lower():
 
                 log.info("log: чат является каналом — добавляем бота как админа")
@@ -890,7 +874,6 @@ async def _ensure_bot_in_group(client: typing.Any, group_id: int) -> bool:
                 try:
 
                     from telethon.tl.functions.channels import EditAdminRequest
-
                     from telethon.tl.types import ChatAdminRights
 
                     rights = ChatAdminRights(post_messages=True, delete_messages=False,
@@ -929,7 +912,6 @@ def _to_bot_api_id(telethon_id: int) -> int:
 
     peer_id = abs(telethon_id)
 
-                                                                           
     if peer_id >= 1_000_000_000_000:
 
         return -peer_id
@@ -1035,7 +1017,6 @@ async def _send_startup_banner_via_bot(
 ) -> None:
 
     import contextlib
-
     import os
 
     log = logging.getLogger(__name__)
@@ -1257,4 +1238,3 @@ def init() -> None:
         logging.getLogger(_hydro_logger).setLevel(logging.WARNING)
 
     logging.captureWarnings(True)
-

@@ -1,5 +1,4 @@
 from __future__ import annotations
-
 import asyncio
 import io
 import logging
@@ -28,7 +27,6 @@ def _is_hydro_dead() -> bool:
         return False
     return True
 
-
 def _hydro_record_failure(reason: str) -> None:
     global _hydro_consecutive_fails, _hydro_dead_until
     _hydro_consecutive_fails += 1
@@ -44,7 +42,6 @@ def _hydro_record_failure(reason: str) -> None:
         except Exception:
             pass
 
-
 def _hydro_record_success() -> None:
     global _hydro_consecutive_fails, _hydro_dead_until
     if _hydro_consecutive_fails > 0 or _hydro_dead_until > 0:
@@ -58,7 +55,6 @@ def _hydro_record_success() -> None:
     except Exception:
         pass
 
-
 def _hydro(client: typing.Any) -> typing.Any | None:
     """Получить hydrogram-клиент с учётом degradation flag.
 
@@ -68,7 +64,6 @@ def _hydro(client: typing.Any) -> typing.Any | None:
     if _is_hydro_dead():
         return None
     return getattr(client, "hydrogram", None)
-
 
 def _file_size(file: typing.Any) -> int:
     if isinstance(file, (str, Path)):
@@ -89,13 +84,11 @@ def _file_size(file: typing.Any) -> int:
         return len(file)
     return 0
 
-
 def _make_progress_bar(done: int, total: int, width: int = 10) -> str:
     if total <= 0:
         return "░" * width
     filled = int(width * done / total)
     return "█" * filled + "░" * (width - filled)
-
 
 async def _edit_progress(
     client: typing.Any,
@@ -125,7 +118,6 @@ async def _edit_progress(
     except Exception:
         pass
 
-
 def _make_progress_cb(
     client: typing.Any,
     chat_id: int,
@@ -145,7 +137,6 @@ def _make_progress_cb(
         )
 
     return cb
-
 
 async def send_file(
     client: typing.Any,
@@ -211,7 +202,6 @@ async def send_file(
         kwargs_tl["reply_to"] = reply_to
     return await client.send_file(chat_id, file, **kwargs_tl)
 
-
 async def send_photo(
     client: typing.Any,
     chat_id: typing.Any,
@@ -263,7 +253,6 @@ async def send_photo(
         kwargs_tl["reply_to"] = reply_to
     return await client.send_file(chat_id, photo, **kwargs_tl)
 
-
 async def download_media(
     client: typing.Any,
     message: typing.Any,
@@ -298,7 +287,6 @@ async def download_media(
 
     return await message.download_media(bytes)
 
-
 def _msg_chat_id(message: typing.Any) -> int:
     cid = getattr(message, "chat_id", None)
     if cid:
@@ -312,7 +300,6 @@ def _msg_chat_id(message: typing.Any) -> int:
             or 0
         )
     return 0
-
 
 def _get_hydro_file_ref(message: typing.Any) -> str | None:
     media = getattr(message, "media", None)
@@ -330,7 +317,6 @@ def _get_hydro_file_ref(message: typing.Any) -> str | None:
             return str(raw_id)
     return None
 
-
 # ---------------------------------------------------------------------------
 # Public introspection helpers (для health endpoint)
 # ---------------------------------------------------------------------------
@@ -346,7 +332,6 @@ def hydro_status() -> dict:
         "revive_ttl_s": _HYDRO_REVIVE_TTL_S,
     }
 
-
 def hydro_force_revive() -> None:
     """Сбросить deg-флаг Hydrogram (для команды/тестов)."""
     global _hydro_consecutive_fails, _hydro_dead_until
@@ -357,7 +342,6 @@ def hydro_force_revive() -> None:
         _deg_flags.clear_hydrogram_failed()
     except Exception:
         pass
-
 
 __all__ = [
     "send_file",

@@ -1,13 +1,8 @@
 from __future__ import annotations
-
 import ast
-
 import logging
-
 import typing
-
 from ..core.loader import KitsuneModule, command, ModuleConfig
-
 from ..core.security import OWNER
 
 logger = logging.getLogger(__name__)
@@ -843,9 +838,7 @@ class ConfigModule(KitsuneModule):
             try:
 
                 from telethon.extensions import html as tl_html
-
                 from telethon.tl.types import MessageEntityCustomEmoji
-
                 import copy
 
                 msg = event.message
@@ -1005,4 +998,3 @@ class ConfigModule(KitsuneModule):
             parse_mode="html",
 
         )
-

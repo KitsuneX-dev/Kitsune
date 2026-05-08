@@ -1,9 +1,6 @@
 from __future__ import annotations
-
 import math
-
 import struct
-
 import typing
 
 _EXP = [0] * 512
@@ -511,4 +508,3 @@ def make_qr_image(text: str, ec: str = "M", scale: int = 10) -> bytes:
     img.save(buf, format="PNG")
 
     return buf.getvalue()
-

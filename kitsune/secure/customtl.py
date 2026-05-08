@@ -1,19 +1,11 @@
 import asyncio
-
 import logging
-
 import time
-
 from herokutl.errors import InvalidBufferError, SecurityError
-
 from herokutl.extensions import BinaryReader
-
 from herokutl.network import ConnectionTcpFull as _ConnectionTcpFullBase
-
 from herokutl.network.mtprotostate import MTProtoState as _MTProtoStateBase
-
 from herokutl.tl.core import TLMessage
-
 from herokutl.tl.types import BadMsgNotification, BadServerSalt
 
 logger = logging.getLogger(__name__)
@@ -137,4 +129,3 @@ class ConnectionTcpFull(_ConnectionTcpFullBase):
         self._init_conn()
 
         await self._writer.drain()
-

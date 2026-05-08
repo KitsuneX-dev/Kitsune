@@ -1,11 +1,7 @@
 from __future__ import annotations
-
 import re
-
 import time
-
 from ..core.loader import KitsuneModule, command, ModuleConfig, ConfigValue
-
 from ..core.security import OWNER
 
 _DEFAULT_PONG = (
@@ -297,4 +293,3 @@ class PingModule(KitsuneModule):
                 parse_mode="html",
 
             )
-

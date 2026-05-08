@@ -1,13 +1,8 @@
 from __future__ import annotations
-
 import asyncio
-
 import logging
-
 import webbrowser
-
 from typing import Any, Callable
-
 from aiohttp import web
 
 logger = logging.getLogger(__name__)
@@ -517,9 +512,7 @@ class SetupServer:
             self._save_config(cfg)
 
             from ..tl_cache import KitsuneTelegramClient
-
             from telethon.sessions import MemorySession
-
             from pathlib import Path
 
             DATA_DIR = Path.home() / ".kitsune"
@@ -713,9 +706,7 @@ class SetupServer:
             code = str(data["code"]).strip()
 
             from telethon.errors import SessionPasswordNeededError
-
             from telethon.sessions import SQLiteSession
-
             from pathlib import Path
 
             try:
@@ -783,7 +774,6 @@ class SetupServer:
     async def _save_session(self, me: Any) -> None:
 
         from telethon.sessions import SQLiteSession
-
         from pathlib import Path
 
         DATA_DIR = Path.home() / ".kitsune"
@@ -825,4 +815,3 @@ class SetupServer:
     def _err(msg: str) -> web.Response:
 
         return web.json_response({"ok": False, "error": msg})
-

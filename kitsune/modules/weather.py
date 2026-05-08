@@ -1,17 +1,10 @@
 from __future__ import annotations
-
 import asyncio
-
 import logging
-
 import typing
-
 from ..core.loader import KitsuneModule, command, ConfigValue, ModuleConfig
-
 from ..core.security import OWNER
-
 from ..utils import escape_html
-
 from ..validators import String, Choice
 
 logger = logging.getLogger(__name__)
@@ -311,4 +304,3 @@ class WeatherModule(KitsuneModule):
                 import json
 
                 return json.loads(text)
-

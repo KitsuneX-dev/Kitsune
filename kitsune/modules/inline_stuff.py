@@ -1,11 +1,7 @@
 from __future__ import annotations
-
 import logging
-
 import re
-
 from ..core.loader import KitsuneModule, command
-
 from ..core.security import OWNER
 
 logger = logging.getLogger(__name__)
@@ -119,4 +115,3 @@ class InlineStuffModule(KitsuneModule):
         await self.db.set(_DB_NOTIFIER, "bot_token", None)
 
         await event.message.edit(self.strings("bot_updated"), parse_mode="html")
-

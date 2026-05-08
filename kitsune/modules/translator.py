@@ -1,9 +1,6 @@
 from __future__ import annotations
-
 import logging
-
 from ..core.loader import KitsuneModule, command, ModuleConfig, ConfigValue
-
 from ..core.security import OWNER
 
 logger = logging.getLogger(__name__)
@@ -155,4 +152,3 @@ class TranslatorModule(KitsuneModule):
             logger.exception("Translator: translation failed")
 
             await event.message.edit(self.strings("error"), parse_mode="html")
-

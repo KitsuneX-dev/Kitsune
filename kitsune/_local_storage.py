@@ -1,15 +1,9 @@
 from __future__ import annotations
-
 import json
-
 import logging
-
 import os
-
 import threading
-
 import typing
-
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -181,4 +175,3 @@ def get_storage(path: Path | str | None = None) -> LocalStorage:
         _storage = LocalStorage(path)
 
     return _storage
-

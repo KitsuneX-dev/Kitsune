@@ -1,11 +1,7 @@
 from __future__ import annotations
-
 import os
-
 import platform
-
 import sys
-
 from pathlib import Path
 
 def is_docker() -> bool:
@@ -95,4 +91,3 @@ def get_python_version() -> str:
 def get_arch() -> str:
 
     return platform.machine() or "unknown"
-

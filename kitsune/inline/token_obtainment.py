@@ -1,11 +1,7 @@
 from __future__ import annotations
-
 import asyncio
-
 import logging
-
 import re
-
 import typing
 
 logger = logging.getLogger(__name__)
@@ -75,4 +71,3 @@ async def obtain_token(client: typing.Any, bot_name: str | None = None) -> str |
         logger.exception("token_obtainment: failed")
 
         return None
-

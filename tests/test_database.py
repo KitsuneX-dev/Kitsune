@@ -18,14 +18,12 @@ from pathlib import Path
 def db_path(tmp_path):
     return tmp_path / "test_kitsune.db"
 
-
 @pytest.fixture
 def backend(db_path):
     from kitsune.database.manager import SQLiteBackend
     be = SQLiteBackend(db_path)
     yield be
     be.close()
-
 
 def run(coro):
     """Универсальный sync-обёрточный запуск асинхронной операции."""
@@ -38,7 +36,6 @@ def run(coro):
         asyncio.set_event_loop(loop)
     return loop.run_until_complete(coro)
 
-
 class _FakeClient:
     """Минимальный фейковый Telethon-клиент для DatabaseManager."""
     def __init__(self, tg_id=12345):
@@ -50,7 +47,6 @@ class _FakeClient:
     async def get_messages(self, *a, **kw):
         return []
 
-
 # ======================================================================
 # ======================================================================
 
@@ -60,19 +56,16 @@ def test_save_and_load(backend):
     loaded = run(backend.load())
     assert loaded == data
 
-
 def test_empty_save_and_load(backend):
     run(backend.save({}))
     loaded = run(backend.load())
     assert loaded == {}
-
 
 def test_persistent_connection(backend):
     for i in range(5):
         run(backend.save({"o": {"k": str(i)}}))
     loaded = run(backend.load())
     assert loaded["o"]["k"] == "4"
-
 
 def test_close_and_reload(db_path):
     """Закрытие соединения и переоткрытие должно сохранить данные."""
@@ -84,7 +77,6 @@ def test_close_and_reload(db_path):
     loaded = run(be2.load())
     assert loaded["x"]["y"] == 1
     be2.close()
-
 
 def test_json_types_roundtrip(backend):
     """Все JSON-совместимые типы должны корректно roundtrip-иться."""
@@ -105,7 +97,6 @@ def test_json_types_roundtrip(backend):
     loaded = run(backend.load())
     assert loaded["o"] == data["o"]
 
-
 # ======================================================================
 # 2. UPSERT логика
 # ======================================================================
@@ -117,7 +108,6 @@ def test_upsert_updates_existing(backend):
     loaded = run(backend.load())
     assert loaded["owner"]["k"] == "new"
 
-
 def test_upsert_sync_inserts_new_rows(backend):
     """Прямой вызов upsert_sync — INSERT новых строк."""
     rows = [("ownerA", "k1", '"v1"'), ("ownerA", "k2", '"v2"')]
@@ -125,7 +115,6 @@ def test_upsert_sync_inserts_new_rows(backend):
     loaded = run(backend.load())
     assert loaded["ownerA"]["k1"] == "v1"
     assert loaded["ownerA"]["k2"] == "v2"
-
 
 def test_upsert_sync_overwrites_existing(backend):
     """upsert_sync обновляет существующие записи, не дублирует их."""
@@ -138,7 +127,6 @@ def test_upsert_sync_overwrites_existing(backend):
     n = conn.execute("SELECT COUNT(*) FROM kitsune_db WHERE owner='o' AND key='k'").fetchone()[0]
     assert n == 1
 
-
 def test_upsert_sync_deletes_keys(backend):
     """upsert_sync с deleted-списком должен удалять указанные ключи."""
     backend.upsert_sync([("o", "k1", '"v1"'), ("o", "k2", '"v2"')], [])
@@ -147,14 +135,12 @@ def test_upsert_sync_deletes_keys(backend):
     assert "k1" not in loaded.get("o", {})
     assert loaded["o"]["k2"] == "v2"
 
-
 def test_deleted_keys_removed_via_full_save(backend):
     """save() с уменьшенным набором ключей удаляет отсутствующие."""
     run(backend.save({"owner": {"k1": "v1", "k2": "v2"}}))
     run(backend.save({"owner": {"k1": "v1"}}))
     loaded = run(backend.load())
     assert "k2" not in loaded.get("owner", {})
-
 
 # ======================================================================
 # 3. WAL mode и PRAGMA-настройки
@@ -166,7 +152,6 @@ def test_wal_mode_active(backend):
     mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
     assert mode.lower() == "wal"
 
-
 def test_wal_files_created(db_path, backend):
     """После записи в WAL-режиме рядом с .db появляется .db-wal."""
     run(backend.save({"o": {"k": "v"}}))
@@ -175,19 +160,16 @@ def test_wal_files_created(db_path, backend):
     mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
     assert mode.lower() == "wal"
 
-
 def test_synchronous_mode_normal(backend):
     conn = backend._get_conn()
     sync = conn.execute("PRAGMA synchronous").fetchone()[0]
     # NORMAL == 1
     assert sync == 1
 
-
 def test_busy_timeout_set(backend):
     conn = backend._get_conn()
     timeout = conn.execute("PRAGMA busy_timeout").fetchone()[0]
     assert timeout == 5000
-
 
 def test_table_schema_correct(backend):
     """Таблица kitsune_db должна иметь PK (owner,key) и колонку value."""
@@ -195,7 +177,6 @@ def test_table_schema_correct(backend):
     cols = conn.execute("PRAGMA table_info(kitsune_db)").fetchall()
     col_names = {c[1] for c in cols}
     assert col_names == {"owner", "key", "value"}
-
 
 # ======================================================================
 # ======================================================================
@@ -221,18 +202,15 @@ async def manager(tmp_path, monkeypatch):
     # Cleanup
     await mgr.shutdown()
 
-
 @pytest.mark.asyncio
 async def test_manager_set_and_get(manager):
     await manager.set("ns", "k", "value")
     assert manager.get("ns", "k") == "value"
 
-
 @pytest.mark.asyncio
 async def test_manager_get_default(manager):
     assert manager.get("missing", "k", "DEF") == "DEF"
     assert manager.get("missing", "k") is None
-
 
 @pytest.mark.asyncio
 async def test_manager_set_validates_types(manager):
@@ -241,14 +219,12 @@ async def test_manager_set_validates_types(manager):
     with pytest.raises(TypeError):
         await manager.set("o", 456, "v")  # key not str
 
-
 @pytest.mark.asyncio
 async def test_manager_set_rejects_non_serializable(manager):
     class Custom:
         pass
     with pytest.raises(ValueError):
         await manager.set("o", "k", Custom())
-
 
 @pytest.mark.asyncio
 async def test_manager_delete(manager):
@@ -257,14 +233,12 @@ async def test_manager_delete(manager):
     await manager.delete("ns", "k")
     assert manager.get("ns", "k") is None
 
-
 @pytest.mark.asyncio
 async def test_manager_pointer_creates_default(manager):
     p = manager.pointer("ns", "list_key", default=[])
     p.append("item")
     # Mутация через pointer должна попадать в _data
     assert manager._data["ns"]["list_key"] == ["item"]
-
 
 @pytest.mark.asyncio
 async def test_manager_force_save_persists(manager, tmp_path):
@@ -278,7 +252,6 @@ async def test_manager_force_save_persists(manager, tmp_path):
     conn.close()
     assert any(o == "ns" and k == "k" for o, k, _ in rows)
 
-
 @pytest.mark.asyncio
 async def test_manager_export_data(manager):
     await manager.set("a", "1", "x")
@@ -287,7 +260,6 @@ async def test_manager_export_data(manager):
     assert snap == {"a": {"1": "x"}, "b": {"2": "y"}}
     snap["a"]["1"] = "MUTATED"
     assert manager.get("a", "1") == "x"
-
 
 # ======================================================================
 # ======================================================================
@@ -303,7 +275,6 @@ async def test_revisions_created_on_change(manager):
     flat = [entry for _, batch in manager._revisions for entry in batch]
     assert any(o == "ns" and k == "k" for o, k, _ in flat)
 
-
 @pytest.mark.asyncio
 async def test_revisions_capture_old_values(manager):
     """Снапшоты сохраняют PREVIOUS значение, не новое."""
@@ -314,7 +285,6 @@ async def test_revisions_capture_old_values(manager):
     # Среди старых значений должно быть None (для первого set) и "original" (для второго)
     assert "original" in old_values or None in old_values
 
-
 @pytest.mark.asyncio
 async def test_revisions_size_bounded(manager):
     """Количество снапшотов не должно превышать _MAX_REVISIONS."""
@@ -324,7 +294,6 @@ async def test_revisions_size_bounded(manager):
     for i in range(DatabaseManager._MAX_REVISIONS + 10):
         await manager.set("ns", f"k{i}", i)
     assert len(manager._revisions) <= DatabaseManager._MAX_REVISIONS
-
 
 @pytest.mark.asyncio
 async def test_revision_rollback_manual(manager):
@@ -345,7 +314,6 @@ async def test_revision_rollback_manual(manager):
     # Текущее значение должно отличаться от "third"
     cur = manager.get("ns", "k")
     assert cur != "third" or cur is None
-
 
 # ======================================================================
 # 6. Graceful shutdown
@@ -372,7 +340,6 @@ async def test_shutdown_persists_data(tmp_path):
     assert len(rows) == 1
     assert "preserved" in rows[0][0]
 
-
 @pytest.mark.asyncio
 async def test_shutdown_cancels_pending_save(tmp_path):
     """Shutdown должен дождаться/отменить _pending_save без повисших задач."""
@@ -391,7 +358,6 @@ async def test_shutdown_cancels_pending_save(tmp_path):
     pending = [t for t in mgr._bg_tasks if not t.done()]
     assert pending == []
 
-
 @pytest.mark.asyncio
 async def test_shutdown_idempotent(tmp_path):
     """Двойной shutdown() не должен падать."""
@@ -408,7 +374,6 @@ async def test_shutdown_idempotent(tmp_path):
     except Exception as e:
         pytest.fail(f"Double shutdown raised: {e}")
 
-
 @pytest.mark.asyncio
 async def test_set_sync_works(tmp_path):
     from kitsune.database import manager as dbm
@@ -422,7 +387,6 @@ async def test_set_sync_works(tmp_path):
     # Дадим время фоновому save
     await asyncio.sleep(0.4)
     await mgr.shutdown()
-
 
 # ======================================================================
 # 7. __contains__ / __getitem__ / __repr__

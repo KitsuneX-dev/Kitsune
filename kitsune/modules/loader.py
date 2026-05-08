@@ -1,25 +1,14 @@
 from __future__ import annotations
-
 import ast
-
 import asyncio
-
 import importlib
-
 import importlib.util
-
 import inspect
-
 import logging
-
 import os
-
 import sys
-
 import typing
-
 from pathlib import Path
-
 from types import ModuleType
 
 logger = logging.getLogger(__name__)
@@ -961,7 +950,6 @@ class Loader:
         self._register_module(mod)
 
         from .._types import ModuleLoadedEvent
-
         from ..events import bus
 
         bus.emit_sync(ModuleLoadedEvent(module_name=mod.name, is_builtin=is_builtin))
@@ -1049,4 +1037,3 @@ class Loader:
                             getattr(method, "__name__", "?"), _ce,
 
                         )
-

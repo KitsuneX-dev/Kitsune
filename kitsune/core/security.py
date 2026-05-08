@@ -1,11 +1,7 @@
 from __future__ import annotations
-
 import asyncio
-
 import logging
-
 import time
-
 import typing
 
 logger = logging.getLogger(__name__)
@@ -237,4 +233,3 @@ class SecurityManager:
             for key in [k for k in self._cache if k[0] == chat_id]:
 
                 del self._cache[key]
-

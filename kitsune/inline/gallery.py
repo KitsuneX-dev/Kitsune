@@ -1,11 +1,7 @@
 import asyncio
-
 import logging
-
 import os
-
 import typing
-
 from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
@@ -579,4 +575,3 @@ class Gallery:
                     logger.exception("gallery: ошибка ответа на inline query")
 
                 return
-
