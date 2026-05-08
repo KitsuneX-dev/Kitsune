@@ -4,7 +4,10 @@ __pycache__/
 *.py[cod]
 *.pyo
 *.pyd
+*.pyc
 .Python
+# Если .pyc уже попали в git — удали их один раз:
+#   git rm -r --cached **/__pycache__/ "*.pyc" && git commit -m "chore: remove cached .pyc files"
 
 # Virtual environments
 venv/
@@ -34,7 +37,7 @@ kitsune-assets/
 logs/
 
 # Config с секретами
-# config.toml — намеренно НЕ исключён (содержит шаблон без секретов)
+config.toml
 
 # OS
 .DS_Store

@@ -217,6 +217,40 @@ class _ASTScanner(ast.NodeVisitor):
         self.generic_visit(node)
 
     def visit_Call(self, node: ast.Call) -> None:
+        # importlib.import_module("subprocess") bypass
+        if isinstance(node.func, ast.Attribute) and node.func.attr == "import_module":
+            if isinstance(node.func.value, ast.Name) and node.func.value.id == "importlib":
+                if node.args and isinstance(node.args[0], ast.Constant):
+                    root = str(node.args[0].value).split(".")[0]
+                    if root in _BLOCKED_IMPORTS:
+                        self.errors.append(
+                            f"Blocked importlib.import_module: {node.args[0].value!r} (line {node.lineno})"
+                        )
+                else:
+                    self.errors.append(
+                        f"Blocked dynamic importlib.import_module call (line {node.lineno})"
+                    )
+
+        # base64.b64decode / codecs.decode obfuscation feeding exec/eval
+        if isinstance(node.func, ast.Name) and node.func.id in ("exec", "eval"):
+            for arg in node.args:
+                if isinstance(arg, ast.Call):
+                    # exec(base64.b64decode(...)) or exec(codecs.decode(...))
+                    if isinstance(arg.func, ast.Attribute) and arg.func.attr in (
+                        "b64decode", "b32decode", "b16decode", "decode",
+                        "decompress", "decodestring",
+                    ):
+                        self.errors.append(
+                            f"Blocked obfuscated {node.func.id}() with encoded payload (line {node.lineno})"
+                        )
+                    # exec(__import__("base64").b64decode(...))
+                    if isinstance(arg.func, ast.Attribute) and isinstance(arg.func.value, ast.Call):
+                        inner = arg.func.value
+                        if isinstance(inner.func, ast.Name) and inner.func.id == "__import__":
+                            self.errors.append(
+                                f"Blocked obfuscated {node.func.id}() via __import__ chain (line {node.lineno})"
+                            )
+
         if isinstance(node.func, ast.Name) and node.func.id == "__import__":
             if node.args and isinstance(node.args[0], ast.Constant):
                 root = str(node.args[0].value).split(".")[0]
@@ -301,7 +335,7 @@ _ast_cache: dict[str, ast.AST] = {}
 
 
 def _scan_ast_with_cache(source: str, filename: str = "<module>") -> None:
-    key = hashlib.md5(source.encode()).hexdigest()
+    key = hashlib.sha256(source.encode()).hexdigest()
     if key not in _ast_cache:
         _scan_ast(source, filename)
         _ast_cache[key] = ast.parse(source, filename=filename)
