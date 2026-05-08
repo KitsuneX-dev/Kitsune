@@ -244,6 +244,49 @@ async def _interactive_login(client: Any) -> None:
 
         sys.exit(1)
 
+_HYDRO_LOCK_FILE = DATA_DIR / ".hydrogram.lock"
+_hydro_lock_fd: int | None = None
+
+
+def _acquire_hydro_lock() -> bool:
+    global _hydro_lock_fd
+    try:
+        import fcntl
+    except ImportError:
+        return True
+    try:
+        fd = os.open(str(_HYDRO_LOCK_FILE), os.O_CREAT | os.O_RDWR, 0o644)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            os.close(fd)
+            return False
+        os.ftruncate(fd, 0)
+        os.write(fd, str(os.getpid()).encode())
+        _hydro_lock_fd = fd
+        return True
+    except Exception:
+        return True
+
+
+def _release_hydro_lock() -> None:
+    global _hydro_lock_fd
+    if _hydro_lock_fd is None:
+        return
+    try:
+        import fcntl
+        fcntl.flock(_hydro_lock_fd, fcntl.LOCK_UN)
+    except Exception:
+        pass
+    try:
+        os.close(_hydro_lock_fd)
+    except Exception:
+        pass
+    _hydro_lock_fd = None
+    with contextlib.suppress(Exception):
+        _HYDRO_LOCK_FILE.unlink(missing_ok=True)
+
+
 async def _start_hydrogram(api_id: int, api_hash: str, session_name: str) -> Any | None:
 
     hydro_session_file = DATA_DIR / f"{Path(session_name).name}_hydro.session"
@@ -251,6 +294,20 @@ async def _start_hydrogram(api_id: int, api_hash: str, session_name: str) -> Any
     if not hydro_session_file.exists():
 
         logger.info("main: Hydrogram session not found, skipping to avoid console prompt")
+
+        return None
+
+    if not _acquire_hydro_lock():
+
+        logger.warning(
+            "main: another Kitsune instance already holds Hydrogram lock — skipping to avoid session-id war"
+        )
+
+        try:
+            from .core.reliability import flags as _deg_flags
+            _deg_flags.mark_hydrogram_failed("another instance holds the session lock")
+        except Exception:
+            pass
 
         return None
 
@@ -269,13 +326,10 @@ async def _start_hydrogram(api_id: int, api_hash: str, session_name: str) -> Any
             _deg_flags.mark_hydrogram_failed("hydrogram package not installed")
         except Exception:
             pass
+        _release_hydro_lock()
         return None
 
     try:
-
-        import os as _os
-
-        is_termux = "com.termux" in _os.environ.get("PREFIX", "") or _os.path.isdir("/data/data/com.termux")
 
         kwargs: dict = dict(
 
@@ -287,7 +341,9 @@ async def _start_hydrogram(api_id: int, api_hash: str, session_name: str) -> Any
 
             workdir=str(DATA_DIR),
 
-            no_updates=is_termux,
+            no_updates=True,
+
+            takeout=False,
 
         )
 
@@ -305,15 +361,49 @@ async def _start_hydrogram(api_id: int, api_hash: str, session_name: str) -> Any
 
                 kwargs["max_concurrent_transmissions"] = 1
 
+            if "device_model" in sig.parameters:
+
+                kwargs["device_model"] = "Kitsune Userbot (media)"
+
+            if "app_version" in sig.parameters:
+
+                kwargs["app_version"] = "1.0.0"
+
+            if "system_version" in sig.parameters:
+
+                kwargs["system_version"] = "1.0"
+
+            if "lang_code" in sig.parameters:
+
+                kwargs["lang_code"] = "ru"
+
         except Exception:
 
             pass
 
         hydro = HydroClient(**kwargs)
 
-        await hydro.start()
+        try:
 
-        logger.info("main: Hydrogram client started (termux=%s, no_updates=%s)", is_termux, is_termux)
+            await asyncio.wait_for(hydro.start(), timeout=45.0)
+
+        except asyncio.TimeoutError:
+
+            logger.warning("main: Hydrogram start() timed out after 45s, skipping")
+
+            with contextlib.suppress(Exception):
+                await hydro.stop()
+
+            try:
+                from .core.reliability import flags as _deg_flags
+                _deg_flags.mark_hydrogram_failed("startup timeout")
+            except Exception:
+                pass
+
+            _release_hydro_lock()
+            return None
+
+        logger.info("main: Hydrogram client started (no_updates=True, lock acquired)")
 
         try:
             from .core.reliability import flags as _deg_flags
@@ -333,6 +423,8 @@ async def _start_hydrogram(api_id: int, api_hash: str, session_name: str) -> Any
         except Exception:
             pass
 
+        _release_hydro_lock()
+
         return None
 
     except Exception as _exc:
@@ -344,6 +436,8 @@ async def _start_hydrogram(api_id: int, api_hash: str, session_name: str) -> Any
             _deg_flags.mark_hydrogram_failed(f"startup: {type(_exc).__name__}")
         except Exception:
             pass
+
+        _release_hydro_lock()
 
         return None
 
@@ -974,6 +1068,8 @@ async def _startup(args: argparse.Namespace) -> None:
 
                 await client.hydrogram.stop()
 
+            _release_hydro_lock()
+
         try:
 
             await db.shutdown()
@@ -1002,31 +1098,47 @@ async def _safe_force_reconnect(client: Any) -> bool:
     помечаем degradation flag «vpn_down» пока идёт retry-цикл.
     """
 
-    with contextlib.suppress(Exception):
+    sender = getattr(client, "_sender", None)
+
+    if sender is not None:
+
+        for attr in ("_send_loop_handle", "_recv_loop_handle"):
+
+            handle = getattr(sender, attr, None)
+
+            if handle is None or handle.done():
+
+                continue
+
+            with contextlib.suppress(Exception):
+
+                handle.cancel()
+
+        for attr in ("_send_loop_handle", "_recv_loop_handle"):
+
+            handle = getattr(sender, attr, None)
+
+            if handle is None:
+
+                continue
+
+            with contextlib.suppress(Exception, asyncio.CancelledError, RuntimeError):
+
+                await asyncio.wait_for(asyncio.shield(handle), timeout=2.0)
+
+    with contextlib.suppress(Exception, RuntimeError):
 
         await client.disconnect()
 
-    sender = getattr(client, "_sender", None)
+    disc = getattr(sender, "_disconnected", None) if sender is not None else None
 
-    pending = []
+    if disc is not None:
 
-    for attr in ("_recv_loop_handle", "_send_loop_handle", "_disconnected"):
+        with contextlib.suppress(Exception, asyncio.CancelledError, RuntimeError):
 
-        t = getattr(sender, attr, None) if sender is not None else None
+            await asyncio.wait_for(asyncio.shield(disc), timeout=3.0)
 
-        if t is None:
-
-            continue
-
-        pending.append(t)
-
-    for t in pending:
-
-        with contextlib.suppress(Exception):
-
-            await asyncio.wait_for(asyncio.shield(t), timeout=5.0)
-
-    await asyncio.sleep(0.1)
+    await asyncio.sleep(0.2)
 
     # Phase 3: retry с backoff
     try:

@@ -262,7 +262,13 @@ class TelegramChannelHandler(logging.Handler):
 
         while True:
 
-            await asyncio.sleep(5)
+            try:
+
+                await asyncio.sleep(5)
+
+            except asyncio.CancelledError:
+
+                break
 
             lines: list[str] = []
 
@@ -280,6 +286,16 @@ class TelegramChannelHandler(logging.Handler):
 
                 continue
 
+            try:
+
+                if not self._client.is_connected():
+
+                    continue
+
+            except Exception:
+
+                continue
+
             from . import utils
 
             combined = "\n".join(lines)
@@ -292,7 +308,7 @@ class TelegramChannelHandler(logging.Handler):
 
                 buf.seek(0)
 
-                with contextlib.suppress(Exception):
+                with contextlib.suppress(Exception, RuntimeError, ConnectionError):
 
                     await self._client.send_file(
 
@@ -306,7 +322,7 @@ class TelegramChannelHandler(logging.Handler):
 
             else:
 
-                with contextlib.suppress(Exception):
+                with contextlib.suppress(Exception, RuntimeError, ConnectionError):
 
                     await self._client.send_message(
 
@@ -682,6 +698,18 @@ class _NetworkNoiseFilter(logging.Filter):
 
         "Reconnecting",
 
+        "Unexpected exception in the send loop",
+
+        "the handler is closed",
+
+        "TCPTransport closed",
+
+        "Server resent the older message",
+
+        "Server replied with a wrong session ID",
+
+        "Security error while unpacking",
+
     )
 
     def filter(self, record: logging.LogRecord) -> bool:
@@ -694,6 +722,28 @@ class _NetworkNoiseFilter(logging.Filter):
 
                 return False
 
+        return True
+
+
+class _HydrogramSessionNoiseFilter(logging.Filter):
+    """Подавляет бесконечные INFO-сообщения hydrogram о пере-подключении."""
+
+    _SUPPRESS_FRAGMENTS = (
+        "Connecting...",
+        "Connected!",
+        "Disconnected",
+        "NetworkTask started",
+        "NetworkTask stopped",
+        "Session stopped",
+        "Session started",
+    )
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.levelno > logging.INFO:
+            return True
+        msg = record.getMessage()
+        if any(frag in msg for frag in self._SUPPRESS_FRAGMENTS):
+            return False
         return True
 
 class _ConsoleStartupFilter(logging.Filter):
@@ -1160,13 +1210,14 @@ def init() -> None:
 
     root.setLevel(logging.NOTSET)
 
-    for noisy in ("telethon", "pyrogram", "matplotlib", "aiohttp", "aiogram", "httpx"):
+    for noisy in ("telethon", "pyrogram", "hydrogram", "matplotlib", "aiohttp", "aiogram", "httpx"):
 
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
     _network_noise_filter = _NetworkNoiseFilter()
 
-                                                                
+    _hydro_session_filter = _HydrogramSessionNoiseFilter()
+
     for _noisy_logger in (
 
         "aiogram.dispatcher",
@@ -1175,15 +1226,35 @@ def init() -> None:
 
         "telethon.network.mtprotosender",
 
+        "telethon.network.mtprotostate",
+
         "telethon.client.updates",
 
         "telethon.client.users",
 
         "telethon.extensions.messagepacker",
 
+        "hydrogram.session.session",
+
+        "hydrogram.connection.connection",
+
+        "hydrogram.session.auth",
+
     ):
 
         logging.getLogger(_noisy_logger).addFilter(_network_noise_filter)
+
+    for _hydro_logger in (
+
+        "hydrogram.session.session",
+
+        "hydrogram.connection.connection",
+
+    ):
+
+        logging.getLogger(_hydro_logger).addFilter(_hydro_session_filter)
+
+        logging.getLogger(_hydro_logger).setLevel(logging.WARNING)
 
     logging.captureWarnings(True)
 
