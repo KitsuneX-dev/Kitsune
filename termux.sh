@@ -58,7 +58,6 @@ pip_install "Pillow" && ok "Pillow установлен" || warn "Pillow не у
 step "Клонирование репозитория"
 INSTALL_DIR="$HOME/Kitsune"
 
-# Гарантируем, что $HOME существует
 mkdir -p "$HOME" 2>/dev/null || true
 
 if [[ -d "$INSTALL_DIR/.git" ]]; then
@@ -75,7 +74,6 @@ else
     git clone https://github.com/KitsuneX-dev/Kitsune "$INSTALL_DIR" \
         || err "Не удалось клонировать репозиторий. Проверь интернет-соединение."
 
-    # Страховка на случай, если git не создал папку
     if [[ ! -d "$INSTALL_DIR" ]]; then
         warn "Папка $INSTALL_DIR не создана — создаю вручную и повторяю клон..."
         mkdir -p "$INSTALL_DIR" || err "Не удалось создать $INSTALL_DIR"
@@ -84,7 +82,6 @@ else
     fi
 fi
 
-# Финальная проверка
 if [[ ! -d "$INSTALL_DIR" ]]; then
     err "Критическая ошибка: папка $INSTALL_DIR не создана."
 fi
