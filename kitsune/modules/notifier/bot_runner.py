@@ -122,6 +122,7 @@ def _build_welcome_text(db) -> str:
         "<blockquote>"
 
         "Репозиторий: github.com/KitsuneX-dev/Kitsune\n"
+        "Группа Kitsune Community - https://t.me/UserBot_Kitsune\n"
 
         "Разработчик: @Mikasu32"
 
