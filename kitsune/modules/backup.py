@@ -1793,7 +1793,15 @@ class BackupModule(KitsuneModule):
 
         except Exception as _exc:
 
-            if "Forbidden" in type(_exc).__name__ or "forbidden" in str(_exc).lower():
+            _exc_str = str(_exc).lower()
+
+            if (
+                "Forbidden" in type(_exc).__name__
+                or "forbidden" in _exc_str
+                or "chat not found" in _exc_str
+                or "bot was blocked" in _exc_str
+                or "user is deactivated" in _exc_str
+            ):
 
                 logger.warning(
 
