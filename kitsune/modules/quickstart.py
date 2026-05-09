@@ -84,7 +84,7 @@ class QuickstartModule(KitsuneModule):
 
             "<b>Полезные ссылки:</b>\n"
 
-            "• Репозиторий: github.com/youshi-dev/Kitsune\n"
+            "• Репозиторий: github.com/KitsuneX-dev/Kitsune\n"
 
             "• Разработчик: @Mikasu32\n\n"
 

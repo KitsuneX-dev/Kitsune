@@ -1,0 +1,530 @@
+{
+  "Version": 1,
+  "WorkspaceRootPath": "D:\\Archive\\Kitsune\\",
+  "Documents": [
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|D:\\Archive\\Kitsune\\kitsune\\modules\\quickstart.py||{8B382828-6202-11D1-8870-0000F87579D2}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:kitsune\\modules\\quickstart.py||{8B382828-6202-11D1-8870-0000F87579D2}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|D:\\Archive\\Kitsune\\kitsune\\modules\\notifier\\update_checker.py||{8B382828-6202-11D1-8870-0000F87579D2}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:kitsune\\modules\\notifier\\update_checker.py||{8B382828-6202-11D1-8870-0000F87579D2}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|D:\\Archive\\Kitsune\\kitsune\\modules\\notifier\\bot_setup.py||{8B382828-6202-11D1-8870-0000F87579D2}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:kitsune\\modules\\notifier\\bot_setup.py||{8B382828-6202-11D1-8870-0000F87579D2}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|D:\\Archive\\Kitsune\\kitsune\\modules\\notifier\\bot_runner.py||{8B382828-6202-11D1-8870-0000F87579D2}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:kitsune\\modules\\notifier\\bot_runner.py||{8B382828-6202-11D1-8870-0000F87579D2}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|D:\\Archive\\Kitsune\\kitsune\\modules\\notifier\\__init__.py||{8B382828-6202-11D1-8870-0000F87579D2}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:kitsune\\modules\\notifier\\__init__.py||{8B382828-6202-11D1-8870-0000F87579D2}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|D:\\Archive\\Kitsune\\kitsune\\modules\\proxy_ctl.py||{8B382828-6202-11D1-8870-0000F87579D2}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:kitsune\\modules\\proxy_ctl.py||{8B382828-6202-11D1-8870-0000F87579D2}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|D:\\Archive\\Kitsune\\kitsune\\modules\\ping.py||{8B382828-6202-11D1-8870-0000F87579D2}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:kitsune\\modules\\ping.py||{8B382828-6202-11D1-8870-0000F87579D2}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|D:\\Archive\\Kitsune\\kitsune\\modules\\paste.py||{8B382828-6202-11D1-8870-0000F87579D2}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:kitsune\\modules\\paste.py||{8B382828-6202-11D1-8870-0000F87579D2}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|D:\\Archive\\Kitsune\\kitsune\\modules\\loader_mod.py||{8B382828-6202-11D1-8870-0000F87579D2}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:kitsune\\modules\\loader_mod.py||{8B382828-6202-11D1-8870-0000F87579D2}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|D:\\Archive\\Kitsune\\kitsune\\modules\\loader.py||{8B382828-6202-11D1-8870-0000F87579D2}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:kitsune\\modules\\loader.py||{8B382828-6202-11D1-8870-0000F87579D2}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|D:\\Archive\\Kitsune\\kitsune\\modules\\kitsune_settings.py||{8B382828-6202-11D1-8870-0000F87579D2}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:kitsune\\modules\\kitsune_settings.py||{8B382828-6202-11D1-8870-0000F87579D2}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|D:\\Archive\\Kitsune\\kitsune\\modules\\kitsune_security.py||{8B382828-6202-11D1-8870-0000F87579D2}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:kitsune\\modules\\kitsune_security.py||{8B382828-6202-11D1-8870-0000F87579D2}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|D:\\Archive\\Kitsune\\kitsune\\modules\\inline_stuff.py||{8B382828-6202-11D1-8870-0000F87579D2}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:kitsune\\modules\\inline_stuff.py||{8B382828-6202-11D1-8870-0000F87579D2}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|D:\\Archive\\Kitsune\\kitsune\\modules\\info.py||{8B382828-6202-11D1-8870-0000F87579D2}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:kitsune\\modules\\info.py||{8B382828-6202-11D1-8870-0000F87579D2}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|D:\\Archive\\Kitsune\\kitsune\\modules\\help.py||{8B382828-6202-11D1-8870-0000F87579D2}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:kitsune\\modules\\help.py||{8B382828-6202-11D1-8870-0000F87579D2}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|D:\\Archive\\Kitsune\\kitsune\\modules\\health.py||{8B382828-6202-11D1-8870-0000F87579D2}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:kitsune\\modules\\health.py||{8B382828-6202-11D1-8870-0000F87579D2}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|D:\\Archive\\Kitsune\\kitsune\\modules\\eval.py||{8B382828-6202-11D1-8870-0000F87579D2}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:kitsune\\modules\\eval.py||{8B382828-6202-11D1-8870-0000F87579D2}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|D:\\Archive\\Kitsune\\kitsune\\modules\\config.py||{8B382828-6202-11D1-8870-0000F87579D2}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:kitsune\\modules\\config.py||{8B382828-6202-11D1-8870-0000F87579D2}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|D:\\Archive\\Kitsune\\kitsune\\modules\\backup.py||{8B382828-6202-11D1-8870-0000F87579D2}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:kitsune\\modules\\backup.py||{8B382828-6202-11D1-8870-0000F87579D2}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|D:\\Archive\\Kitsune\\kitsune\\modules\\api_limiter.py||{8B382828-6202-11D1-8870-0000F87579D2}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:kitsune\\modules\\api_limiter.py||{8B382828-6202-11D1-8870-0000F87579D2}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|D:\\Archive\\Kitsune\\kitsune\\modules\\_loader.py||{8B382828-6202-11D1-8870-0000F87579D2}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:kitsune\\modules\\_loader.py||{8B382828-6202-11D1-8870-0000F87579D2}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|D:\\Archive\\Kitsune\\kitsune\\modules\\__init__.py||{8B382828-6202-11D1-8870-0000F87579D2}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:kitsune\\modules\\__init__.py||{8B382828-6202-11D1-8870-0000F87579D2}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|D:\\Archive\\Kitsune\\kitsune\\modules\\weather.py||{8B382828-6202-11D1-8870-0000F87579D2}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:kitsune\\modules\\weather.py||{8B382828-6202-11D1-8870-0000F87579D2}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|D:\\Archive\\Kitsune\\kitsune\\modules\\updater.py||{8B382828-6202-11D1-8870-0000F87579D2}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:kitsune\\modules\\updater.py||{8B382828-6202-11D1-8870-0000F87579D2}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|D:\\Archive\\Kitsune\\kitsune\\modules\\translator.py||{8B382828-6202-11D1-8870-0000F87579D2}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:kitsune\\modules\\translator.py||{8B382828-6202-11D1-8870-0000F87579D2}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|D:\\Archive\\Kitsune\\kitsune\\modules\\translations.py||{8B382828-6202-11D1-8870-0000F87579D2}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:kitsune\\modules\\translations.py||{8B382828-6202-11D1-8870-0000F87579D2}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|D:\\Archive\\Kitsune\\kitsune\\modules\\terminal.py||{8B382828-6202-11D1-8870-0000F87579D2}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:kitsune\\modules\\terminal.py||{8B382828-6202-11D1-8870-0000F87579D2}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|D:\\Archive\\Kitsune\\kitsune\\modules\\settings.py||{8B382828-6202-11D1-8870-0000F87579D2}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:kitsune\\modules\\settings.py||{8B382828-6202-11D1-8870-0000F87579D2}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|D:\\Archive\\Kitsune\\kitsune\\modules\\security.py||{8B382828-6202-11D1-8870-0000F87579D2}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:kitsune\\modules\\security.py||{8B382828-6202-11D1-8870-0000F87579D2}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|D:\\Archive\\Kitsune\\kitsune\\modules\\rkn_bypass.py||{8B382828-6202-11D1-8870-0000F87579D2}",
+      "RelativeMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|solutionrelative:kitsune\\modules\\rkn_bypass.py||{8B382828-6202-11D1-8870-0000F87579D2}"
+    }
+  ],
+  "DocumentGroupContainers": [
+    {
+      "Orientation": 0,
+      "VerticalTabListWidth": 256,
+      "DocumentGroups": [
+        {
+          "DockedWidth": 200,
+          "SelectedChildIndex": 29,
+          "Children": [
+            {
+              "$type": "Document",
+              "DocumentIndex": 1,
+              "Title": "update_checker.py",
+              "DocumentMoniker": "D:\\Archive\\Kitsune\\kitsune\\modules\\notifier\\update_checker.py",
+              "RelativeDocumentMoniker": "kitsune\\modules\\notifier\\update_checker.py",
+              "ToolTip": "D:\\Archive\\Kitsune\\kitsune\\modules\\notifier\\update_checker.py",
+              "RelativeToolTip": "kitsune\\modules\\notifier\\update_checker.py",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAABQAAAArAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.002457|",
+              "WhenOpened": "2026-05-09T15:53:04.986Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 2,
+              "Title": "bot_setup.py",
+              "DocumentMoniker": "D:\\Archive\\Kitsune\\kitsune\\modules\\notifier\\bot_setup.py",
+              "RelativeDocumentMoniker": "kitsune\\modules\\notifier\\bot_setup.py",
+              "ToolTip": "D:\\Archive\\Kitsune\\kitsune\\modules\\notifier\\bot_setup.py",
+              "RelativeToolTip": "kitsune\\modules\\notifier\\bot_setup.py",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.002457|",
+              "WhenOpened": "2026-05-09T15:53:04.841Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 3,
+              "Title": "bot_runner.py",
+              "DocumentMoniker": "D:\\Archive\\Kitsune\\kitsune\\modules\\notifier\\bot_runner.py",
+              "RelativeDocumentMoniker": "kitsune\\modules\\notifier\\bot_runner.py",
+              "ToolTip": "D:\\Archive\\Kitsune\\kitsune\\modules\\notifier\\bot_runner.py",
+              "RelativeToolTip": "kitsune\\modules\\notifier\\bot_runner.py",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.002457|",
+              "WhenOpened": "2026-05-09T15:53:04.71Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 4,
+              "Title": "__init__.py",
+              "DocumentMoniker": "D:\\Archive\\Kitsune\\kitsune\\modules\\notifier\\__init__.py",
+              "RelativeDocumentMoniker": "kitsune\\modules\\notifier\\__init__.py",
+              "ToolTip": "D:\\Archive\\Kitsune\\kitsune\\modules\\notifier\\__init__.py",
+              "RelativeToolTip": "kitsune\\modules\\notifier\\__init__.py",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.002457|",
+              "WhenOpened": "2026-05-09T15:53:04.521Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 5,
+              "Title": "proxy_ctl.py",
+              "DocumentMoniker": "D:\\Archive\\Kitsune\\kitsune\\modules\\proxy_ctl.py",
+              "RelativeDocumentMoniker": "kitsune\\modules\\proxy_ctl.py",
+              "ToolTip": "D:\\Archive\\Kitsune\\kitsune\\modules\\proxy_ctl.py",
+              "RelativeToolTip": "kitsune\\modules\\proxy_ctl.py",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.002457|",
+              "WhenOpened": "2026-05-09T15:52:57.825Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 6,
+              "Title": "ping.py",
+              "DocumentMoniker": "D:\\Archive\\Kitsune\\kitsune\\modules\\ping.py",
+              "RelativeDocumentMoniker": "kitsune\\modules\\ping.py",
+              "ToolTip": "D:\\Archive\\Kitsune\\kitsune\\modules\\ping.py",
+              "RelativeToolTip": "kitsune\\modules\\ping.py",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.002457|",
+              "WhenOpened": "2026-05-09T15:52:57.757Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 7,
+              "Title": "paste.py",
+              "DocumentMoniker": "D:\\Archive\\Kitsune\\kitsune\\modules\\paste.py",
+              "RelativeDocumentMoniker": "kitsune\\modules\\paste.py",
+              "ToolTip": "D:\\Archive\\Kitsune\\kitsune\\modules\\paste.py",
+              "RelativeToolTip": "kitsune\\modules\\paste.py",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.002457|",
+              "WhenOpened": "2026-05-09T15:52:57.686Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 8,
+              "Title": "loader_mod.py",
+              "DocumentMoniker": "D:\\Archive\\Kitsune\\kitsune\\modules\\loader_mod.py",
+              "RelativeDocumentMoniker": "kitsune\\modules\\loader_mod.py",
+              "ToolTip": "D:\\Archive\\Kitsune\\kitsune\\modules\\loader_mod.py",
+              "RelativeToolTip": "kitsune\\modules\\loader_mod.py",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.002457|",
+              "WhenOpened": "2026-05-09T15:52:57.621Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 9,
+              "Title": "loader.py",
+              "DocumentMoniker": "D:\\Archive\\Kitsune\\kitsune\\modules\\loader.py",
+              "RelativeDocumentMoniker": "kitsune\\modules\\loader.py",
+              "ToolTip": "D:\\Archive\\Kitsune\\kitsune\\modules\\loader.py",
+              "RelativeToolTip": "kitsune\\modules\\loader.py",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.002457|",
+              "WhenOpened": "2026-05-09T15:52:57.554Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 10,
+              "Title": "kitsune_settings.py",
+              "DocumentMoniker": "D:\\Archive\\Kitsune\\kitsune\\modules\\kitsune_settings.py",
+              "RelativeDocumentMoniker": "kitsune\\modules\\kitsune_settings.py",
+              "ToolTip": "D:\\Archive\\Kitsune\\kitsune\\modules\\kitsune_settings.py",
+              "RelativeToolTip": "kitsune\\modules\\kitsune_settings.py",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.002457|",
+              "WhenOpened": "2026-05-09T15:52:57.486Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 11,
+              "Title": "kitsune_security.py",
+              "DocumentMoniker": "D:\\Archive\\Kitsune\\kitsune\\modules\\kitsune_security.py",
+              "RelativeDocumentMoniker": "kitsune\\modules\\kitsune_security.py",
+              "ToolTip": "D:\\Archive\\Kitsune\\kitsune\\modules\\kitsune_security.py",
+              "RelativeToolTip": "kitsune\\modules\\kitsune_security.py",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.002457|",
+              "WhenOpened": "2026-05-09T15:52:57.419Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 12,
+              "Title": "inline_stuff.py",
+              "DocumentMoniker": "D:\\Archive\\Kitsune\\kitsune\\modules\\inline_stuff.py",
+              "RelativeDocumentMoniker": "kitsune\\modules\\inline_stuff.py",
+              "ToolTip": "D:\\Archive\\Kitsune\\kitsune\\modules\\inline_stuff.py",
+              "RelativeToolTip": "kitsune\\modules\\inline_stuff.py",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.002457|",
+              "WhenOpened": "2026-05-09T15:52:57.352Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 13,
+              "Title": "info.py",
+              "DocumentMoniker": "D:\\Archive\\Kitsune\\kitsune\\modules\\info.py",
+              "RelativeDocumentMoniker": "kitsune\\modules\\info.py",
+              "ToolTip": "D:\\Archive\\Kitsune\\kitsune\\modules\\info.py",
+              "RelativeToolTip": "kitsune\\modules\\info.py",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.002457|",
+              "WhenOpened": "2026-05-09T15:52:57.285Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 14,
+              "Title": "help.py",
+              "DocumentMoniker": "D:\\Archive\\Kitsune\\kitsune\\modules\\help.py",
+              "RelativeDocumentMoniker": "kitsune\\modules\\help.py",
+              "ToolTip": "D:\\Archive\\Kitsune\\kitsune\\modules\\help.py",
+              "RelativeToolTip": "kitsune\\modules\\help.py",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.002457|",
+              "WhenOpened": "2026-05-09T15:52:57.215Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 15,
+              "Title": "health.py",
+              "DocumentMoniker": "D:\\Archive\\Kitsune\\kitsune\\modules\\health.py",
+              "RelativeDocumentMoniker": "kitsune\\modules\\health.py",
+              "ToolTip": "D:\\Archive\\Kitsune\\kitsune\\modules\\health.py",
+              "RelativeToolTip": "kitsune\\modules\\health.py",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.002457|",
+              "WhenOpened": "2026-05-09T15:52:57.145Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 16,
+              "Title": "eval.py",
+              "DocumentMoniker": "D:\\Archive\\Kitsune\\kitsune\\modules\\eval.py",
+              "RelativeDocumentMoniker": "kitsune\\modules\\eval.py",
+              "ToolTip": "D:\\Archive\\Kitsune\\kitsune\\modules\\eval.py",
+              "RelativeToolTip": "kitsune\\modules\\eval.py",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.002457|",
+              "WhenOpened": "2026-05-09T15:52:57.078Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 17,
+              "Title": "config.py",
+              "DocumentMoniker": "D:\\Archive\\Kitsune\\kitsune\\modules\\config.py",
+              "RelativeDocumentMoniker": "kitsune\\modules\\config.py",
+              "ToolTip": "D:\\Archive\\Kitsune\\kitsune\\modules\\config.py",
+              "RelativeToolTip": "kitsune\\modules\\config.py",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.002457|",
+              "WhenOpened": "2026-05-09T15:52:57.012Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 18,
+              "Title": "backup.py",
+              "DocumentMoniker": "D:\\Archive\\Kitsune\\kitsune\\modules\\backup.py",
+              "RelativeDocumentMoniker": "kitsune\\modules\\backup.py",
+              "ToolTip": "D:\\Archive\\Kitsune\\kitsune\\modules\\backup.py",
+              "RelativeToolTip": "kitsune\\modules\\backup.py",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.002457|",
+              "WhenOpened": "2026-05-09T15:52:56.942Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 19,
+              "Title": "api_limiter.py",
+              "DocumentMoniker": "D:\\Archive\\Kitsune\\kitsune\\modules\\api_limiter.py",
+              "RelativeDocumentMoniker": "kitsune\\modules\\api_limiter.py",
+              "ToolTip": "D:\\Archive\\Kitsune\\kitsune\\modules\\api_limiter.py",
+              "RelativeToolTip": "kitsune\\modules\\api_limiter.py",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.002457|",
+              "WhenOpened": "2026-05-09T15:52:56.874Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 20,
+              "Title": "_loader.py",
+              "DocumentMoniker": "D:\\Archive\\Kitsune\\kitsune\\modules\\_loader.py",
+              "RelativeDocumentMoniker": "kitsune\\modules\\_loader.py",
+              "ToolTip": "D:\\Archive\\Kitsune\\kitsune\\modules\\_loader.py",
+              "RelativeToolTip": "kitsune\\modules\\_loader.py",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.002457|",
+              "WhenOpened": "2026-05-09T15:52:56.811Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 21,
+              "Title": "__init__.py",
+              "DocumentMoniker": "D:\\Archive\\Kitsune\\kitsune\\modules\\__init__.py",
+              "RelativeDocumentMoniker": "kitsune\\modules\\__init__.py",
+              "ToolTip": "D:\\Archive\\Kitsune\\kitsune\\modules\\__init__.py",
+              "RelativeToolTip": "kitsune\\modules\\__init__.py",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.002457|",
+              "WhenOpened": "2026-05-09T15:52:56.748Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 22,
+              "Title": "weather.py",
+              "DocumentMoniker": "D:\\Archive\\Kitsune\\kitsune\\modules\\weather.py",
+              "RelativeDocumentMoniker": "kitsune\\modules\\weather.py",
+              "ToolTip": "D:\\Archive\\Kitsune\\kitsune\\modules\\weather.py",
+              "RelativeToolTip": "kitsune\\modules\\weather.py",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.002457|",
+              "WhenOpened": "2026-05-09T15:52:56.685Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 23,
+              "Title": "updater.py",
+              "DocumentMoniker": "D:\\Archive\\Kitsune\\kitsune\\modules\\updater.py",
+              "RelativeDocumentMoniker": "kitsune\\modules\\updater.py",
+              "ToolTip": "D:\\Archive\\Kitsune\\kitsune\\modules\\updater.py",
+              "RelativeToolTip": "kitsune\\modules\\updater.py",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.002457|",
+              "WhenOpened": "2026-05-09T15:52:56.62Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 24,
+              "Title": "translator.py",
+              "DocumentMoniker": "D:\\Archive\\Kitsune\\kitsune\\modules\\translator.py",
+              "RelativeDocumentMoniker": "kitsune\\modules\\translator.py",
+              "ToolTip": "D:\\Archive\\Kitsune\\kitsune\\modules\\translator.py",
+              "RelativeToolTip": "kitsune\\modules\\translator.py",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.002457|",
+              "WhenOpened": "2026-05-09T15:52:56.555Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 25,
+              "Title": "translations.py",
+              "DocumentMoniker": "D:\\Archive\\Kitsune\\kitsune\\modules\\translations.py",
+              "RelativeDocumentMoniker": "kitsune\\modules\\translations.py",
+              "ToolTip": "D:\\Archive\\Kitsune\\kitsune\\modules\\translations.py",
+              "RelativeToolTip": "kitsune\\modules\\translations.py",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.002457|",
+              "WhenOpened": "2026-05-09T15:52:56.493Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 26,
+              "Title": "terminal.py",
+              "DocumentMoniker": "D:\\Archive\\Kitsune\\kitsune\\modules\\terminal.py",
+              "RelativeDocumentMoniker": "kitsune\\modules\\terminal.py",
+              "ToolTip": "D:\\Archive\\Kitsune\\kitsune\\modules\\terminal.py",
+              "RelativeToolTip": "kitsune\\modules\\terminal.py",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.002457|",
+              "WhenOpened": "2026-05-09T15:52:56.431Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 27,
+              "Title": "settings.py",
+              "DocumentMoniker": "D:\\Archive\\Kitsune\\kitsune\\modules\\settings.py",
+              "RelativeDocumentMoniker": "kitsune\\modules\\settings.py",
+              "ToolTip": "D:\\Archive\\Kitsune\\kitsune\\modules\\settings.py",
+              "RelativeToolTip": "kitsune\\modules\\settings.py",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.002457|",
+              "WhenOpened": "2026-05-09T15:52:56.372Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 28,
+              "Title": "security.py",
+              "DocumentMoniker": "D:\\Archive\\Kitsune\\kitsune\\modules\\security.py",
+              "RelativeDocumentMoniker": "kitsune\\modules\\security.py",
+              "ToolTip": "D:\\Archive\\Kitsune\\kitsune\\modules\\security.py",
+              "RelativeToolTip": "kitsune\\modules\\security.py",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.002457|",
+              "WhenOpened": "2026-05-09T15:52:56.312Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 29,
+              "Title": "rkn_bypass.py",
+              "DocumentMoniker": "D:\\Archive\\Kitsune\\kitsune\\modules\\rkn_bypass.py",
+              "RelativeDocumentMoniker": "kitsune\\modules\\rkn_bypass.py",
+              "ToolTip": "D:\\Archive\\Kitsune\\kitsune\\modules\\rkn_bypass.py",
+              "RelativeToolTip": "kitsune\\modules\\rkn_bypass.py",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.002457|",
+              "WhenOpened": "2026-05-09T15:52:56.234Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 0,
+              "Title": "quickstart.py",
+              "DocumentMoniker": "D:\\Archive\\Kitsune\\kitsune\\modules\\quickstart.py",
+              "RelativeDocumentMoniker": "kitsune\\modules\\quickstart.py",
+              "ToolTip": "D:\\Archive\\Kitsune\\kitsune\\modules\\quickstart.py",
+              "RelativeToolTip": "kitsune\\modules\\quickstart.py",
+              "ViewState": "AgIAAE0AAAAAAAAAAAAAAFYAAAA7AAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.002457|",
+              "WhenOpened": "2026-05-09T15:52:54.829Z",
+              "EditorCaption": ""
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
