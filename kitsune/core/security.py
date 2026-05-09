@@ -52,6 +52,7 @@ _CACHE_TTL = 60.0
 
 _DB_KEY    = "kitsune.security"
 
+
 class SecurityManager:
 
     def __init__(self, client: typing.Any, db: typing.Any) -> None:
@@ -60,29 +61,108 @@ class SecurityManager:
 
         self._db     = db
 
+        # _me — полный объект User (если удалось получить),
+        # _me_id — числовой id владельца (надёжно сохраняется отдельно).
         self._me: typing.Any = None
+
+        self._me_id: int | None = None
 
         self._cache: dict[tuple[int, int], tuple[int, float]] = {}
 
         self._lock = asyncio.Lock()
 
     async def init(self) -> None:
+        """Инициализация менеджера безопасности.
 
-        self._me = await self._client.get_me()
+        КРИТИЧЕСКИ ВАЖНО: не падать и не оставлять _me_id=None, если
+        get_me() временно вернул None. Сначала пытаемся переиспользовать
+        client.tg_me / client.tg_id, которые уже выставлены в main.py
+        после всех ретраев. Только если их нет — пробуем get_me() сами.
+        """
+
+        # 1) Самый надёжный путь — взять то, что уже сохранил main.py.
+        cached_me = getattr(self._client, "tg_me", None)
+        cached_id = getattr(self._client, "tg_id", None)
+
+        if cached_me is not None:
+            self._me = cached_me
+            try:
+                self._me_id = int(cached_me.id)
+            except Exception:
+                self._me_id = int(cached_id) if cached_id else None
+        elif cached_id:
+            try:
+                self._me_id = int(cached_id)
+            except Exception:
+                self._me_id = None
+
+        # 2) Если по какой-то причине ничего не сохранено — пробуем сами,
+        # но НИКОГДА не выкидываем исключение наружу: оно тихо съестся
+        # диспетчером и команда просто не сработает.
+        if self._me is None:
+            try:
+                me = await self._client.get_me()
+            except Exception:
+                logger.exception("SecurityManager.init: get_me() raised")
+                me = None
+
+            if me is not None:
+                self._me = me
+                try:
+                    self._me_id = int(me.id)
+                except Exception:
+                    pass
+
+                # Подстрахуем main.py — если он этого ещё не сделал.
+                if not hasattr(self._client, "tg_me") or getattr(self._client, "tg_me", None) is None:
+                    try:
+                        self._client.tg_me = me
+                    except Exception:
+                        pass
+                if not hasattr(self._client, "tg_id") or not getattr(self._client, "tg_id", None):
+                    try:
+                        self._client.tg_id = int(me.id)
+                    except Exception:
+                        pass
+
+        if self._me_id is None:
+            logger.warning(
+                "SecurityManager.init: owner id is still unknown — "
+                "OWNER permission checks will be unavailable until first successful get_me()."
+            )
+
+    async def _ensure_me(self) -> None:
+        """Ленивая повторная инициализация, если _me_id ещё не установлен."""
+        if self._me_id is not None:
+            return
+
+        # Сначала ещё раз глянем кеш на клиенте — он мог появиться позже.
+        cached_me = getattr(self._client, "tg_me", None)
+        cached_id = getattr(self._client, "tg_id", None)
+        if cached_me is not None and self._me is None:
+            self._me = cached_me
+        if cached_id and self._me_id is None:
+            try:
+                self._me_id = int(cached_id)
+            except Exception:
+                pass
+
+        if self._me_id is None:
+            await self.init()
 
     async def check(self, message: typing.Any, required: int) -> bool:
 
-        if self._me is None:
+        await self._ensure_me()
 
-            await self.init()
-
-        sender_id: int = message.sender_id
+        sender_id: int = getattr(message, "sender_id", None)
 
         if sender_id is None:
 
             return False
 
-        if sender_id == self._me.id and (required & OWNER):
+        # Если по какой-то причине id владельца всё ещё неизвестен,
+        # не падаем — просто пропускаем OWNER-ветку и идём дальше.
+        if self._me_id is not None and sender_id == self._me_id and (required & OWNER):
 
             return True
 
@@ -114,7 +194,8 @@ class SecurityManager:
 
         bits = 0
 
-        if sender_id == self._me.id:
+        # Сравниваем с _me_id, а не с self._me.id — last сохраняет нас от NoneType.
+        if self._me_id is not None and sender_id == self._me_id:
 
             bits |= OWNER
 
@@ -132,7 +213,7 @@ class SecurityManager:
 
             bits |= SUPPORT
 
-        chat_id = message.chat_id
+        chat_id = getattr(message, "chat_id", None)
 
         if chat_id is None:
 
