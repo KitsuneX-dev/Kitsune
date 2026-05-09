@@ -7,6 +7,14 @@ logger = logging.getLogger(__name__)
 
 _DB_KEY = "kitsune.notifier"
 
+# Длина caption у фото в Telegram ограничена 1024 символами.
+# Если caption длиннее — Telegram возвращает MEDIA_CAPTION_TOO_LONG,
+# а нашему пользователю это видно как «бот молчит».
+# Поэтому если текст приветствия длиннее лимита — отправляем
+# фото без caption + текст отдельным сообщением.
+_TG_CAPTION_LIMIT = 1024
+
+
 def _load_socks_proxy_url() -> str | None:
 
     try:
@@ -144,30 +152,237 @@ _LANG_OPTIONS: dict[str, str] = {
     "leet": "👾 1337",
 }
 
-async def _show_lang_setup(bot, owner_id: int) -> None:
-    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+async def _ensure_chat_with_bot(client, db) -> None:
+    """Гарантирует, что у пользователя открыт диалог с ботом.
+
+    Пока пользователь сам не написал боту /start, Telegram возвращает
+    «Bad Request: chat not found», и бот не может писать первым.
+
+    Решение — отправить /start в чат с ботом от лица user-аккаунта (через
+    telethon). Это создаёт диалог, и после этого бот спокойно пишет.
+    """
     try:
-        buttons, row = [], []
-        for code, label in _LANG_OPTIONS.items():
-            row.append(InlineKeyboardButton(text=label, callback_data=f"lang_select:{code}"))
-            if len(row) == 2:
-                buttons.append(row)
-                row = []
-        if row:
+        bot_username = db.get(_DB_KEY, "bot_username", None)
+        if not bot_username:
+            return
+        bot_username = str(bot_username).lstrip("@")
+
+        # Если уже отмечали, что чат «прогрет», — не повторяем.
+        if db.get(_DB_KEY, "chat_warmed_up", False):
+            return
+
+        try:
+            entity = await client.get_entity(f"@{bot_username}")
+            await client.send_message(entity, "/start")
+            try:
+                await db.set(_DB_KEY, "chat_warmed_up", True)
+            except Exception:
+                pass
+            logger.info(
+                "BotRunner: открыт диалог с @%s от лица user-аккаунта", bot_username,
+            )
+            # даём Telegram время «увидеть» новый чат
+            await asyncio.sleep(2.0)
+        except Exception as exc:
+            logger.debug(
+                "BotRunner: не смог открыть диалог с @%s — %s", bot_username, exc,
+            )
+    except Exception as exc:
+        logger.debug("BotRunner: _ensure_chat_with_bot failed — %s", exc)
+
+
+async def _send_welcome_with_retry(
+    bot,
+    client,
+    db,
+    owner_id: int,
+    *,
+    attempts: int = 4,
+) -> bool:
+    """Шлёт welcome владельцу с автоматическими повторами.
+
+    Если ловим «chat not found» — пытаемся «прогреть» чат через user-аккаунт
+    и повторяем. Текст всегда отправляется отдельным сообщением, потому что
+    welcome легко может быть длиннее 1024 символов (caption-лимит Telegram).
+    """
+    from pathlib import Path as _Path
+    _info = _Path(__file__).parent.parent.parent / "assets" / "kitsune_info.png"
+
+    welcome = _build_welcome_text(db)
+
+    last_exc: Exception | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            # 1) Сначала фото без caption (если файл существует),
+            #    чтобы caption-limit гарантированно не выстрелил.
+            if _info.exists():
+                try:
+                    from aiogram.types import FSInputFile
+                    await bot.send_photo(
+                        chat_id=int(owner_id),
+                        photo=FSInputFile(str(_info)),
+                    )
+                except Exception as ph_exc:
+                    # фото не критично — продолжаем хотя бы с текстом
+                    logger.debug(
+                        "BotRunner: не удалось отправить фото welcome (%s) — "
+                        "шлю только текст", ph_exc,
+                    )
+
+            # 2) Затем сам текст приветствия отдельным сообщением.
+            await bot.send_message(
+                chat_id=int(owner_id),
+                text=welcome,
+                parse_mode="HTML",
+                disable_web_page_preview=True,
+            )
+            return True
+        except Exception as exc:
+            last_exc = exc
+            err = str(exc).lower()
+            if "chat not found" in err and attempt < attempts:
+                logger.info(
+                    "BotRunner: welcome — chat not found (попытка %d/%d), "
+                    "прогреваю диалог через user-аккаунт", attempt, attempts,
+                )
+                await _ensure_chat_with_bot(client, db)
+                await asyncio.sleep(2.0 * attempt)
+                continue
+            # любая другая ошибка — небольшая пауза и повтор
+            if attempt < attempts:
+                await asyncio.sleep(1.5)
+                continue
+
+    logger.warning(
+        "BotRunner: не удалось отправить welcome: %s",
+        last_exc if last_exc else "unknown error",
+    )
+    return False
+
+
+async def _show_lang_setup(bot, owner_id: int, *, client=None, db=None) -> bool:
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+    buttons, row = [], []
+    for code, label in _LANG_OPTIONS.items():
+        row.append(InlineKeyboardButton(text=label, callback_data=f"lang_select:{code}"))
+        if len(row) == 2:
             buttons.append(row)
-        await bot.send_message(
-            chat_id=owner_id,
-            text=(
-                "🌐 <b>Выберите язык интерфейса</b>\n\n"
-                "Выберите язык, который будет использоваться в командах "
-                "и уведомлениях Kitsune.\n\n"
-                "<i>Изменить позже:</i> <code>.setlang</code>"
-            ),
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
-            parse_mode="HTML",
-        )
-    except Exception as _exc:
-        logger.warning("BotRunner: не удалось отправить выбор языка: %s", _exc)
+            row = []
+    if row:
+        buttons.append(row)
+
+    text = (
+        "🌐 <b>Выберите язык интерфейса</b>\n\n"
+        "Выберите язык, который будет использоваться в командах "
+        "и уведомлениях Kitsune.\n\n"
+        "<i>Изменить позже:</i> <code>.setlang</code>"
+    )
+    markup = InlineKeyboardMarkup(inline_keyboard=buttons)
+
+    last_exc: Exception | None = None
+    for attempt in range(1, 4):
+        try:
+            await bot.send_message(
+                chat_id=int(owner_id),
+                text=text,
+                reply_markup=markup,
+                parse_mode="HTML",
+            )
+            return True
+        except Exception as exc:
+            last_exc = exc
+            err = str(exc).lower()
+            if "chat not found" in err and client is not None and db is not None and attempt < 3:
+                logger.info(
+                    "BotRunner: lang setup — chat not found (попытка %d), "
+                    "прогреваю диалог", attempt,
+                )
+                await _ensure_chat_with_bot(client, db)
+                await asyncio.sleep(2.0)
+                continue
+            if attempt < 3:
+                await asyncio.sleep(1.0)
+                continue
+
+    logger.warning(
+        "BotRunner: не удалось отправить выбор языка: %s",
+        last_exc if last_exc else "unknown error",
+    )
+    return False
+
+
+async def _show_backup_setup(bot, client, db, owner_id: int) -> bool:
+    """Шлёт сообщение с inline-кнопками выбора интервала авто-бэкапа.
+
+    Если модуль backup загружен — используем его собственный
+    `show_interval_setup` (там корректные кнопки). Если нет — шлём
+    fallback-сообщение со стандартным набором интервалов.
+    """
+    loader = getattr(client, "_kitsune_loader", None)
+    backup = loader.modules.get("backup") if loader else None
+
+    last_exc: Exception | None = None
+    for attempt in range(1, 4):
+        try:
+            if backup is not None:
+                await backup.show_interval_setup(bot, int(owner_id))
+            else:
+                # Fallback: на случай, если модуль backup ещё не загрузился.
+                from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+                _OPTS = [2, 4, 6, 8, 12, 24, 48]
+                buttons, row = [], []
+                for h in _OPTS:
+                    row.append(InlineKeyboardButton(
+                        text=f"{h}ч",
+                        callback_data=f"backup_interval:{h}",
+                    ))
+                    if len(row) == 4:
+                        buttons.append(row)
+                        row = []
+                if row:
+                    buttons.append(row)
+                buttons.append([InlineKeyboardButton(
+                    text="❌ Отключить",
+                    callback_data="backup_interval:0",
+                )])
+                await bot.send_message(
+                    chat_id=int(owner_id),
+                    text=(
+                        "🗂 <b>Авто-бэкап Kitsune</b>\n\n"
+                        "Выбери интервал резервного копирования.\n"
+                        "Бэкапы будут отправляться сюда."
+                    ),
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
+                    parse_mode="HTML",
+                )
+            try:
+                await db.set(_DB_KEY, "backup_interval_asked", True)
+            except Exception:
+                pass
+            return True
+        except Exception as exc:
+            last_exc = exc
+            err = str(exc).lower()
+            if "chat not found" in err and attempt < 3:
+                logger.info(
+                    "BotRunner: backup setup — chat not found (попытка %d), "
+                    "прогреваю диалог", attempt,
+                )
+                await _ensure_chat_with_bot(client, db)
+                await asyncio.sleep(2.0)
+                continue
+            if attempt < 3:
+                await asyncio.sleep(1.0)
+                continue
+
+    logger.warning(
+        "BotRunner: не удалось отправить настройку бэкапа: %s",
+        last_exc if last_exc else "unknown error",
+    )
+    return False
+
 
 async def _run_asset_setup(client, db) -> None:
 
@@ -295,47 +510,19 @@ class BotRunner:
 
                 if owner_id:
 
-                    await asyncio.sleep(2)
+                    # Гарантируем, что чат с ботом открыт (иначе chat not found).
+                    await _ensure_chat_with_bot(self._client, self._db)
 
-                    try:
+                    # 1) Welcome (фото отдельно + текст отдельно из-за caption-лимита).
+                    await _send_welcome_with_retry(
+                        self.bot, self._client, self._db, int(owner_id),
+                    )
 
-                        from pathlib import Path as _Path
-
-                        _info = _Path(__file__).parent.parent.parent / "assets" / "kitsune_info.png"
-
-                        if _info.exists():
-
-                            from aiogram.types import FSInputFile
-
-                            await self.bot.send_photo(
-
-                                chat_id=int(owner_id),
-
-                                photo=FSInputFile(str(_info)),
-
-                                caption=_build_welcome_text(self._db),
-
-                                parse_mode="HTML",
-
-                            )
-
-                        else:
-
-                            await self.bot.send_message(
-
-                                chat_id=int(owner_id),
-
-                                text=_build_welcome_text(self._db),
-
-                                parse_mode="HTML",
-
-                            )
-
-                    except Exception as _wexc:
-
-                        logger.warning("BotRunner: не удалось отправить welcome: %s", _wexc)
-
-                    await _show_lang_setup(self.bot, int(owner_id))
+                    # 2) Выбор языка (inline-кнопки).
+                    await _show_lang_setup(
+                        self.bot, int(owner_id),
+                        client=self._client, db=self._db,
+                    )
 
         except Exception as exc:
 
@@ -472,55 +659,47 @@ class BotRunner:
 
             return
 
+        # Раз пользователь сам нажал /start, чат с ботом 100% открыт.
         try:
+            await self._db.set(_DB_KEY, "chat_warmed_up", True)
+        except Exception:
+            pass
 
-            backup_asked = self._db.get(_DB_KEY, "backup_interval_asked", False)
+        # При /start всегда отправляем приветствие. Делается это «по-человечески»:
+        # если есть баннер kitsune_info.png — фото отдельным сообщением, а сам
+        # текст — следом (caption Telegram ограничен 1024 симв., welcome длиннее).
+        welcome = _build_welcome_text(self._db)
 
-            interval_set = self._db.get("kitsune.backup", "interval_h", None)
+        try:
+            from pathlib import Path as _Path
+            _info = _Path(__file__).parent.parent.parent / "assets" / "kitsune_info.png"
 
-            loader = getattr(self._client, "_kitsune_loader", None)
-
-            backup = loader.modules.get("backup") if loader else None
-
-            if (not backup_asked or not interval_set) and backup:
-
-                await backup.show_interval_setup(self.bot, msg.from_user.id)
-
-                await self._db.set(_DB_KEY, "backup_interval_asked", True)
-
-            else:
-
-                from pathlib import Path as _Path
-
-                _info = _Path(__file__).parent.parent.parent / "assets" / "kitsune_info.png"
-
-                if _info.exists():
-
+            if _info.exists():
+                try:
                     from aiogram.types import FSInputFile
+                    await msg.answer_photo(photo=FSInputFile(str(_info)))
+                except Exception as _ph_exc:
+                    logger.debug("BotRunner: /start фото — %s", _ph_exc)
 
-                    await msg.answer_photo(
-
-                        photo=FSInputFile(str(_info)),
-
-                        caption=_build_welcome_text(self._db),
-
-                        parse_mode="HTML",
-
-                    )
-
-                else:
-
-                    await msg.answer(
-
-                        _build_welcome_text(self._db),
-
-                        parse_mode="HTML",
-
-                    )
-
+            await msg.answer(
+                welcome,
+                parse_mode="HTML",
+                disable_web_page_preview=True,
+            )
         except Exception as e:
-
             logger.warning("BotRunner: on_start failed — %s", e)
+            return
+
+        # Если ещё не настраивали интервал авто-бэкапа — предложим прямо сейчас.
+        try:
+            backup_asked = self._db.get(_DB_KEY, "backup_interval_asked", False)
+            interval_set = self._db.get("kitsune.backup", "interval_h", None)
+            if not backup_asked and not interval_set:
+                await _show_backup_setup(
+                    self.bot, self._client, self._db, int(owner_id),
+                )
+        except Exception as e:
+            logger.debug("BotRunner: on_start backup-setup follow-up — %s", e)
 
     async def _on_update_cb(self, call) -> None:
 
@@ -650,15 +829,10 @@ class BotRunner:
 
             logger.warning("BotRunner: _on_lang_select edit failed — %s", _exc)
 
-        loader = getattr(self._client, "_kitsune_loader", None)
-
-        backup = loader.modules.get("backup") if loader else None
-
-        if backup:
-
-            await backup.show_interval_setup(self.bot, int(owner_id))
-
-            await self._db.set(_DB_KEY, "backup_interval_asked", True)
+        # Сразу после выбора языка предлагаем настроить кд авто-бэкапа.
+        await _show_backup_setup(
+            self.bot, self._client, self._db, int(owner_id),
+        )
 
     async def _on_backup_interval(self, call) -> None:
 

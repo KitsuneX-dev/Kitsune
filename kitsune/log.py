@@ -810,6 +810,31 @@ async def _get_aiogram_bot(client: typing.Any) -> typing.Any:
 
     return None
 
+async def _is_bot_already_admin(client: typing.Any, group_id: int, bot_entity) -> bool:
+    """Возвращает True, если bot_entity уже админ (creator/admin) в group_id.
+
+    Никогда не бросает исключение наружу — при любой ошибке возвращает False.
+    """
+    log = logging.getLogger(__name__)
+    try:
+        from telethon.tl.functions.channels import GetParticipantRequest
+        from telethon.tl.types import (
+            ChannelParticipantAdmin,
+            ChannelParticipantCreator,
+        )
+        try:
+            res = await client(GetParticipantRequest(channel=group_id, participant=bot_entity))
+        except Exception as exc:
+            log.debug("log: GetParticipantRequest(@bot) — %s", exc)
+            return False
+        participant = getattr(res, "participant", None)
+        if isinstance(participant, (ChannelParticipantAdmin, ChannelParticipantCreator)):
+            return True
+    except Exception as exc:
+        log.debug("log: _is_bot_already_admin failed — %s", exc)
+    return False
+
+
 async def _ensure_bot_in_group(client: typing.Any, group_id: int) -> bool:
 
     log = logging.getLogger(__name__)
@@ -846,6 +871,13 @@ async def _ensure_bot_in_group(client: typing.Any, group_id: int) -> bool:
 
         bot_entity = await client.get_entity(f"@{bot_username}")
 
+        # Если бот уже админ в группе/канале — повторно ничего делать не нужно.
+        # Это закрывает кейс, когда повторный EditAdminRequest падает с
+        # «Recently logged-in users cannot add or change admins».
+        if await _is_bot_already_admin(client, group_id, bot_entity):
+            log.info("log: бот @%s уже админ в Kitsune-logs — пропускаю", bot_username)
+            return True
+
         try:
 
             from telethon.tl.functions.channels import InviteToChannelRequest
@@ -871,6 +903,12 @@ async def _ensure_bot_in_group(client: typing.Any, group_id: int) -> bool:
 
                 log.info("log: чат является каналом — добавляем бота как админа")
 
+                # Ещё одна страховка: вдруг кто-то уже сделал бота админом
+                # между двумя проверками (или в условиях гонки).
+                if await _is_bot_already_admin(client, group_id, bot_entity):
+                    log.info("log: бот @%s уже админ — повторно не назначаю", bot_username)
+                    return True
+
                 try:
 
                     from telethon.tl.functions.channels import EditAdminRequest
@@ -893,6 +931,24 @@ async def _ensure_bot_in_group(client: typing.Any, group_id: int) -> bool:
                     return True
 
                 except Exception as admin_exc:
+
+                    err_low = str(admin_exc).lower()
+                    # «Recently logged-in users cannot add or change admins» —
+                    # ограничение Telegram для свежих сессий. Если бот по факту
+                    # уже админ — ошибка не критична, считаем добавление успешным.
+                    if "recently logged-in" in err_low or "recently logged in" in err_low:
+                        if await _is_bot_already_admin(client, group_id, bot_entity):
+                            log.info(
+                                "log: бот @%s уже админ — игнорирую RecentlyLoggedIn",
+                                bot_username,
+                            )
+                            return True
+                        log.info(
+                            "log: Telegram блокирует EditAdminRequest для свежей "
+                            "сессии — бот @%s остаётся обычным участником",
+                            bot_username,
+                        )
+                        return False
 
                     log.warning("log: не удалось назначить бота админом — %s", admin_exc)
 
