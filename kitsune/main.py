@@ -873,6 +873,55 @@ async def _startup(args: argparse.Namespace) -> None:
 
     me = await client.get_me()
 
+    if me is None:
+
+        logger.warning("main: get_me() returned None — session may be stale, checking authorization…")
+
+        try:
+
+            authorized = await client.is_user_authorized()
+
+        except Exception:
+
+            authorized = False
+
+        if not authorized:
+
+            logger.warning("main: not authorized — re-launching web setup to re-authenticate…")
+
+            with contextlib.suppress(Exception):
+
+                await client.disconnect()
+
+            from .web.setup import SetupServer
+
+            web_port = int(cfg.get("web_port", 8080))
+
+            setup = SetupServer(save_config_fn=_save_config, get_config_fn=_load_raw_config)
+
+            await setup.start(host="0.0.0.0", port=web_port)
+
+            await setup.wait_done()
+
+            client = setup.get_client()
+
+            me = await client.get_me()
+
+        else:
+
+            logger.info("main: authorized but get_me() returned None — retrying after delay…")
+
+            await asyncio.sleep(2)
+
+            me = await client.get_me()
+
+    if me is None:
+
+        raise RuntimeError(
+            "main: get_me() returned None after all retries — "
+            "delete the session file and re-authenticate."
+        )
+
     client.tg_id = me.id
 
     client.tg_me = me
