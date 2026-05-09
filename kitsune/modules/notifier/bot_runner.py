@@ -428,6 +428,23 @@ class BotRunner:
 
         owner_id = self._db.get(_DB_KEY, "owner_id", None)
 
+        # Fallback: if owner_id not in DB yet, use client.tg_id (set in main.py)
+        if owner_id is None:
+
+            owner_id = getattr(self._client, "tg_id", None)
+
+            if owner_id is not None:
+
+                import asyncio as _asyncio
+
+                _asyncio.ensure_future(
+
+                    self._db.set(_DB_KEY, "owner_id", owner_id)
+
+                )
+
+                logger.info("BotRunner: owner_id restored from tg_id=%s", owner_id)
+
         if owner_id is None or msg.from_user.id != int(owner_id):
 
             try:
