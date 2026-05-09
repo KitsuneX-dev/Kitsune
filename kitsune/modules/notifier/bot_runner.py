@@ -450,41 +450,79 @@ class BotRunner:
 
             backup = loader.modules.get("backup") if loader else None
 
-            if (not backup_asked or not interval_set) and backup:
+            from pathlib import Path as _Path
 
-                await backup.show_interval_setup(self.bot, msg.from_user.id)
+            _info = _Path(__file__).parent.parent.parent / "assets" / "kitsune_info.png"
 
-                await self._db.set(_DB_KEY, "backup_interval_asked", True)
+            if _info.exists():
+
+                from aiogram.types import FSInputFile
+
+                await msg.answer_photo(
+
+                    photo=FSInputFile(str(_info)),
+
+                    caption=_build_welcome_text(self._db),
+
+                    parse_mode="HTML",
+
+                )
 
             else:
 
-                from pathlib import Path as _Path
+                await msg.answer(
 
-                _info = _Path(__file__).parent.parent.parent / "assets" / "kitsune_info.png"
+                    _build_welcome_text(self._db),
 
-                if _info.exists():
+                    parse_mode="HTML",
 
-                    from aiogram.types import FSInputFile
+                )
 
-                    await msg.answer_photo(
+            if (not backup_asked or not interval_set) and backup:
 
-                        photo=FSInputFile(str(_info)),
+                from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-                        caption=_build_welcome_text(self._db),
+                _btns, _row = [], []
 
-                        parse_mode="HTML",
+                for _h in [2, 4, 6, 8, 12, 24, 48]:
 
-                    )
+                    _row.append(InlineKeyboardButton(
 
-                else:
+                        text=f"{_h}ч",
 
-                    await msg.answer(
+                        callback_data=f"backup_interval:{_h}",
 
-                        _build_welcome_text(self._db),
+                    ))
 
-                        parse_mode="HTML",
+                    if len(_row) == 4:
 
-                    )
+                        _btns.append(_row)
+
+                        _row = []
+
+                if _row:
+
+                    _btns.append(_row)
+
+                _btns.append([InlineKeyboardButton(
+
+                    text="❌ Отключить",
+
+                    callback_data="backup_interval:0",
+
+                )])
+
+                await msg.answer(
+
+                    "🗂 <b>Авто-бэкап</b>\n\nВыбери интервал резервного копирования:",
+
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=_btns),
+
+                    parse_mode="HTML",
+
+                )
+
+                await self._db.set(_DB_KEY, "backup_interval_asked", True)
 
         except Exception as e:
 
