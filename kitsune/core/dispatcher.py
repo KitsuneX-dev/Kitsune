@@ -460,7 +460,11 @@ class CommandDispatcher:
 
         sender_id = message.sender_id
 
-        if not sender_id or sender_id == self._client.tg_id:
+        # tg_id may be unset during the first batch of updates after catch_up.
+        # Fall back to 0 so the 'sender_id == 0' branch never short-circuits.
+        own_id = getattr(self._client, "tg_id", 0) or 0
+
+        if not sender_id or sender_id == own_id:
 
             return
 

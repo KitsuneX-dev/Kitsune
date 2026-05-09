@@ -1081,6 +1081,36 @@ async def _startup(args: argparse.Namespace) -> None:
 
     logger.info("main: watchdog started (threshold=45s)")
 
+    # ────────────────────────────────────────────────────────────────
+    # КРИТИЧЕСКИ ВАЖНО: после client.connect() Telethon НЕ получает
+    # апдейты автоматически — нужно явно запустить updates-loop.
+    # Без этого add_event_handler(events.NewMessage(...)) никогда не
+    # вызывается, и юзербот выглядит «мёртвым»: команды не отвечают,
+    # watcher'ы не срабатывают, /start у бота-нотифаера тоже мимо.
+    # ────────────────────────────────────────────────────────────────
+    # Стартуем цикл получения апдейтов ОДИН раз, до await stop_event.wait().
+    # client.run_until_disconnected() — это именно то, что
+    # "включает" доставку NewMessage/MessageEdited/etc.
+    # Без этого вызова add_event_handler регистрируется, но никогда
+    # не вызывается — и любые команды/watcher'ы молчат. Именно это
+    # приводило к «гробовой тишине» в логах.
+    try:
+        # Подтягиваем пропущенные апдейты — чтобы не потерять сообщения,
+        # пришедшие пока юзербот был оффлайн.
+        with contextlib.suppress(Exception):
+            await asyncio.wait_for(client.catch_up(), timeout=15.0)
+
+        # Регистрируем run_until_disconnected() как фоновую задачу.
+        # Она будет жить рядом с stop_event.wait() и внутри Telethon
+        # запустит все нужные внутренние циклы для обработки апдейтов.
+        _spawn(client.run_until_disconnected())
+        logger.info("main: Telethon update loop started (run_until_disconnected)")
+    except Exception:
+        logger.exception(
+            "main: failed to start update loop — "
+            "commands and watchers will NOT work until this is fixed!"
+        )
+
     try:
 
         await stop_event.wait()
