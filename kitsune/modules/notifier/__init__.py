@@ -352,7 +352,14 @@ class NotifierModule(KitsuneModule):
 
             await self.client.send_message("me", self.strings(key).format(name=bot_name), parse_mode="html")
 
-            asyncio.ensure_future(self._runner.start(token, first_run=not reused))
+            # Даже если бот найден (reused) — проводим приветственный сценарий
+            # (GIF + welcome + выбор интервала бэкапа + выбор языка), если
+            # этого не было раньше — сценарий «переустановки».
+            backup_asked = self.db.get(_DB_KEY, "backup_interval_asked", False)
+
+            need_welcome = not backup_asked
+
+            asyncio.ensure_future(self._runner.start(token, first_run=need_welcome))
 
             self._updater.start()
 

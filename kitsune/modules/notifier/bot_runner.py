@@ -76,8 +76,6 @@ def _get_platform() -> str:
 
 def _build_welcome_text(db) -> str:
 
-    prefix       = db.get("kitsune.core", "prefix", ".")
-
     interval_set = db.get("kitsune.backup", "interval_h", None)
 
     backup_str   = f"каждые <b>{interval_set} ч</b>" if interval_set else "не настроен"
@@ -94,13 +92,15 @@ def _build_welcome_text(db) -> str:
 
         "<blockquote>"
 
-        f"<code>{prefix}help</code> — список всех команд\n"
+        "<code>.help</code> — список всех команд\n"
 
-        f"<code>{prefix}ping</code> — проверить работу\n"
+        "<code>.ping</code> — проверить работу\n"
 
-        f"<code>{prefix}cfg</code> — настройка модулей\n"
+        "<code>.cfg</code> — настройка модулей\n"
 
-        f"<code>{prefix}dlm &lt;url&gt;</code> — установить модуль"
+        "<code>.dlm &lt;url&gt;</code> — установить модуль по ссылке\n"
+
+        "<code>.lm</code> — установить модуль файлом (ответом на файл)"
 
         "</blockquote>\n"
 
@@ -108,11 +108,11 @@ def _build_welcome_text(db) -> str:
 
         "<blockquote>"
 
-        f"<code>{prefix}security</code> — управление доступом\n"
+        "<code>.security</code> — управление доступом\n"
 
-        f"<code>{prefix}backupall</code> — полный бэкап (БД + модули)\n"
+        "<code>.backupall</code> — полный бэкап (БД + модули)\n"
 
-        f"<code>{prefix}setbackupinterval</code> — изменить время авто-бэкапа"
+        "<code>.setbackupinterval</code> — изменить время авто-бэкапа"
 
         "</blockquote>\n"
 
@@ -122,7 +122,9 @@ def _build_welcome_text(db) -> str:
 
         "<blockquote>"
 
-        "Репозиторий: github.com/youshi-dev/Kitsune\n"
+        "Репозиторий: github.com/KitsuneX-dev/Kitsune\n"
+
+        "Группа Kitsune Community - https://t.me/UserBot_Kitsune\n"
 
         "Разработчик: @Mikasu32"
 
@@ -262,6 +264,30 @@ class BotRunner:
 
                     await asyncio.sleep(2)
 
+                    bot_username = self._db.get(_DB_KEY, "bot_username", None)
+
+                    # 1) Отправляем GIF ОТ ЛИЦА ПОЛЬЗОВАТЕЛЯ инлайн-боту.
+                    #    Это и активирует бота в личных сообщениях, и даёт красивый визуальный
+                    #    баннер перед welcome-сообщением.
+                    try:
+                        from pathlib import Path as _Path
+
+                        _gif = _Path(__file__).parent.parent.parent / "assets" / "welcome.gif"
+
+                        if bot_username and _gif.exists():
+                            try:
+                                await self._client.send_file(
+                                    f"@{bot_username}",
+                                    str(_gif),
+                                )
+                                # Даём время на доставку/просмотр GIF
+                                await asyncio.sleep(1.2)
+                            except Exception as _ge:
+                                logger.debug("BotRunner: не удалось отправить welcome.gif: %s", _ge)
+                    except Exception:
+                        pass
+
+                    # 2) Бот отправляет велкам-сообщение.
                     try:
 
                         from pathlib import Path as _Path
@@ -300,6 +326,8 @@ class BotRunner:
 
                         logger.warning("BotRunner: не удалось отправить welcome: %s", _wexc)
 
+                    # 3) Интервал авто-бэкапа (выбор языка появится после
+                    #    нажатия кнопки в обработчике _on_backup_interval).
                     loader = getattr(self._client, "_kitsune_loader", None)
 
                     backup = loader.modules.get("backup") if loader else None
@@ -411,6 +439,12 @@ class BotRunner:
         async def on_backup_interval(call: CallbackQuery) -> None:
 
             await ref._on_backup_interval(call)
+
+        @router.callback_query(lambda c: c.data and c.data.startswith("lang_select:"))
+
+        async def on_lang_select(call: CallbackQuery) -> None:
+
+            await ref._on_lang_select(call)
 
         @router.callback_query(lambda c: c.data and c.data.startswith("cfg_"))
 
@@ -657,9 +691,135 @@ class BotRunner:
 
             await backup.handle_interval_callback(call)
 
+            # После выбора интервала бэкапа — показываем выбор языка,
+            # если язык ещё не выбран в этой сессии первого запуска.
+            try:
+                if not self._db.get(_DB_KEY, "lang_asked", False):
+                    await self._send_lang_select(call.message.chat.id)
+            except Exception as _le:
+                logger.debug("BotRunner: lang select after backup failed: %s", _le)
+
         else:
 
             await call.answer("Модуль backup не загружен.", show_alert=True)
+
+    async def _send_lang_select(self, chat_id: int) -> None:
+        """Отправляет инлайн-клавиатуру с выбором языка из langpacks/."""
+        if not self.bot:
+            return
+        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+        # Дружелюбные имена языков.
+        lang_labels = {
+            "ru":   "🇷🇺 Русский",
+            "en":   "🇬🇧 English",
+            "de":   "🇩🇪 Deutsch",
+            "ua":   "🇺🇦 Українська",
+            "uk":   "🇺🇦 Українська",
+            "jp":   "🇯🇵 日本語",
+            "tr":   "🇹🇷 Türkçe",
+            "uz":   "🇺🇿 O'zbekcha",
+            "uwu":  "🐾 UwU",
+            "leet": "👾 1337",
+        }
+
+        from pathlib import Path as _Path
+        lp_dir = _Path(__file__).parent.parent.parent / "langpacks"
+        codes = sorted([p.stem for p in lp_dir.glob("*.yml")]) if lp_dir.exists() else ["ru", "en"]
+
+        # Убираем дубли (например ua и uk — оба украинские).
+        seen, ordered = set(), []
+        for c in codes:
+            label = lang_labels.get(c, c)
+            if label in seen:
+                continue
+            seen.add(label)
+            ordered.append(c)
+
+        buttons, row = [], []
+        for code in ordered:
+            label = lang_labels.get(code, f"🌐 {code}")
+            row.append(InlineKeyboardButton(
+                text=label,
+                callback_data=f"lang_select:{code}",
+            ))
+            if len(row) == 2:
+                buttons.append(row)
+                row = []
+        if row:
+            buttons.append(row)
+
+        try:
+            await self.bot.send_message(
+                chat_id=chat_id,
+                text="🌐 <b>Выбери язык интерфейса:</b>\n\n"
+                     "<i>Можно поменять позже командой <code>.setlang &lt;код&gt;</code></i>",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
+                parse_mode="HTML",
+            )
+        except Exception as _se:
+            logger.warning("BotRunner: не удалось отправить lang-select: %s", _se)
+
+    async def _on_lang_select(self, call) -> None:
+        owner_id = self._db.get(_DB_KEY, "owner_id", None)
+        try:
+            if owner_id is None or call.from_user.id != int(owner_id):
+                await call.answer("🔒 Нет доступа.", show_alert=True)
+                return
+        except Exception:
+            return
+
+        try:
+            _, code = call.data.split(":", 1)
+        except ValueError:
+            await call.answer()
+            return
+
+        from pathlib import Path as _Path
+        lp_dir = _Path(__file__).parent.parent.parent / "langpacks"
+        if not (lp_dir / f"{code}.yml").exists():
+            await call.answer("Язык не найден.", show_alert=True)
+            return
+
+        # Сохраняем выбор языка и применяем к Translator.
+        await self._db.set("kitsune.core", "lang", code)
+        await self._db.set(_DB_KEY, "lang_asked", True)
+
+        try:
+            from ...translations import Translator  # type: ignore
+            tr = getattr(self._client, "_kitsune_translator", None)
+            if tr is None:
+                tr = Translator(self._db)
+                self._client._kitsune_translator = tr
+            tr.set_language(code)
+        except Exception as _te:
+            logger.debug("BotRunner: Translator update failed: %s", _te)
+
+        nice = {
+            "ru": "🇷🇺 Русский",
+            "en": "🇬🇧 English",
+            "de": "🇩🇪 Deutsch",
+            "ua": "🇺🇦 Українська",
+            "uk": "🇺🇦 Українська",
+            "jp": "🇯🇵 日本語",
+            "tr": "🇹🇷 Türkçe",
+            "uz": "🇺🇿 O'zbekcha",
+            "uwu": "🐾 UwU",
+            "leet": "👾 1337",
+        }.get(code, code)
+
+        try:
+            await call.message.edit_text(
+                f"✅ Язык интерфейса: <b>{nice}</b>\n\n"
+                f"🔄 Изменить позже: <code>.setlang &lt;код&gt;</code>",
+                parse_mode="HTML",
+            )
+        except Exception:
+            pass
+        try:
+            await call.answer("Язык применён ✅")
+        except Exception:
+            pass
 
     async def _on_config_cb(self, call) -> None:
 

@@ -93,7 +93,16 @@ class BotSetup:
             logger.warning("BotSetup: could not write token to config.toml")
 
     async def find_existing_bot(self, tg_id: int) -> tuple[str | None, str | None]:
+        """Ищет среди ботов пользователя бота Kitsune, созданного ранее.
 
+        Поиск ведётся СТРОГО по tg_id владельца — именно этот ID Kitsune
+        всегда вшивает в username бота при создании. Имя пользователя может
+        меняться, ориентироваться на него нельзя.
+
+        Сценарии:
+          • Первая установка — ничего не найдено → (None, None) → создаём нового.
+          • Переустановка/сбой — бот уже есть в BotFather → берём его токен.
+        """
         try:
 
             async with _BOTFATHER_LOCK:
@@ -108,10 +117,12 @@ class BotSetup:
 
                     buttons = _extract_buttons(resp)
 
-                    pattern = re.compile(rf"kitsune_{tg_id}[a-z0-9_]*_bot", re.IGNORECASE)
+                    # Ищем строго по ID — формат kitsune_<tg_id>[любой_суффикс]_bot
+                    pattern = re.compile(rf"kitsune_{tg_id}[a-z0-9_]*_?bot", re.IGNORECASE)
 
                     raw_candidates: list[str] = []
 
+                    # 1) Сканируем текст ответа BotFather (там бывают @username)
                     for m in pattern.finditer(text):
 
                         uname = m.group(0).lstrip("@")
@@ -120,17 +131,30 @@ class BotSetup:
 
                             raw_candidates.append(uname)
 
+                    # 2) Сканируем кнопки — обычно это основной источник username
                     for b in buttons:
 
-                        b_clean = b.lstrip("@").lower()
+                        b_clean = b.lstrip("@").strip()
 
-                        if f"kitsune_{tg_id}" in b_clean or "kitsune" in b_clean:
+                        if pattern.search(b_clean):
 
-                            uname = b.lstrip("@")
+                            uname = b.lstrip("@").strip()
 
-                            if uname not in raw_candidates:
+                            if uname and uname not in raw_candidates:
 
                                 raw_candidates.append(uname)
+
+                    # 3) Безопасный fallback: любой бот с вхождением tg_id в имя.
+                    #    Это покрывает случаи, когда раньше префикс был другим (legacy).
+                    legacy_pat = re.compile(rf"[a-z0-9_]*{tg_id}[a-z0-9_]*bot", re.IGNORECASE)
+
+                    for b in buttons:
+
+                        b_clean = b.lstrip("@").strip()
+
+                        if legacy_pat.fullmatch(b_clean) and b_clean not in raw_candidates:
+
+                            raw_candidates.append(b_clean)
 
                     exact = f"kitsune_{tg_id}_bot"
 
@@ -138,11 +162,20 @@ class BotSetup:
 
                         u_low = u.lower()
 
-                        return (0 if u_low == exact else 1, len(u_low))
+                        # Сначала — точное совпадение kitsune_<id>_bot,
+                        # потом явные «kitsune_<id>», потом остальные.
+                        if u_low == exact:
+                            return (0, len(u_low))
+                        if u_low.startswith(f"kitsune_{tg_id}"):
+                            return (1, len(u_low))
+                        return (2, len(u_low))
 
                     candidates = sorted(raw_candidates, key=_sort_key)
 
-                    logger.debug("BotSetup: find_existing_bot candidates: %s", candidates)
+                    logger.info(
+                        "BotSetup: find_existing_bot for tg_id=%s candidates=%s",
+                        tg_id, candidates,
+                    )
 
                     for username in candidates:
 
@@ -273,6 +306,8 @@ class BotSetup:
 
                     await conv.get_response()
 
+                    # ВСЕГДА строим username из tg_id владельца — это гарантирует,
+                    # что при следующем запуске find_existing_bot найдёт бота по ID.
                     for suffix in ["", f"_{me.id % 10000}", "_ub", "_kitsune_ub"]:
 
                         uname = f"kitsune_{me.id}{suffix}_bot"

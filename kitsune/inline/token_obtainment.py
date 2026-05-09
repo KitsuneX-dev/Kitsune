@@ -11,20 +11,17 @@ _BOTFATHER = "BotFather"
 _TOKEN_RE  = re.compile(r"\d+:[A-Za-z0-9_-]{35,}")
 
 async def obtain_token(client: typing.Any, bot_name: str | None = None) -> str | None:
+    """Создаёт нового бота через @BotFather.
 
-    import typing
+    ВАЖНО: username бота строится из tg_id владельца, а не из его имени —
+    так мы потом сможем надёжно найти этот бот при переустановке Kitsune.
+    """
+
+    me = await client.get_me()
 
     if bot_name is None:
 
-        me = await client.get_me()
-
-        safe = re.sub(r"[^a-zA-Z0-9]", "", me.first_name or "kitsune").lower()
-
-        bot_name = f"{safe}_kitsune_bot"
-
-        if len(bot_name) < 5:
-
-            bot_name = "kitsune_userbot_bot"
+        bot_name = f"kitsune_{me.id}_bot"
 
     logger.info("token_obtainment: requesting token for @%s from BotFather", bot_name)
 

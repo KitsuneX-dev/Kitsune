@@ -752,6 +752,12 @@ class _ConsoleStartupFilter(logging.Filter):
 
         "log: бот уже в",
 
+        "BotRunner: polling started",
+
+        "Notifier: InlineManager attached",
+
+        "main: Telethon update loop started",
+
     )
 
     def filter(self, record: logging.LogRecord) -> bool:
