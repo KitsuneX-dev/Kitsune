@@ -60,43 +60,9 @@ class QuickstartModule(KitsuneModule):
 
     strings_ru = {
 
-        "welcome": (
-
-            "🦊 <b>Добро пожаловать в Kitsune Userbot!</b>\n\n"
-
-            "Kitsune успешно запущен и готов к работе.\n\n"
-
-            "<b>Быстрый старт:</b>\n"
-
-            "• <code>.help</code> — список всех команд\n"
-
-            "• <code>.ping</code> — проверить работу\n"
-
-            "• <code>.cfg</code> — настройка модулей\n"
-
-            "• <code>.dlm &lt;url&gt;</code> — установить модуль\n\n"
-
-            "<b>Безопасность:</b>\n"
-
-            "• <code>.security</code> — управление доступом\n"
-
-            "• <code>.backup</code> — резервная копия БД\n\n"
-
-            "<b>Полезные ссылки:</b>\n"
-
-            "• Репозиторий: github.com/KitsuneX-dev/Kitsune\n"
-
-            "• Разработчик: @Mikasu32\n\n"
-
-            "🎉 <i>Приятного использования!</i>"
-
-        ),
-
         "already_shown": "✅ Онбординг уже был показан.",
 
         "reset_done":    "♻️ Флаг онбординга сброшен. Перезапусти Kitsune.",
-
-        "platform_info": "🖥 Платформа: <b>{platform}</b>",
 
     }
 
@@ -402,41 +368,15 @@ class QuickstartModule(KitsuneModule):
 
             await asyncio.sleep(3)
 
-            chats = await self._sync_kitsune_folder()
-
-            text = self.strings("welcome")
-
-            plat = get_platform()
-
-            text += f"\n\n{self.strings('platform_info').format(platform=plat)}"
-
-            target = chats.get("backup")
-
-            if target is None:
-
-                me = await self.client.get_me()
-
-                group_title = f"Kitsune {me.first_name or ''}".strip()
-
-                if me.last_name:
-
-                    group_title += f" {me.last_name}"
-
-                from telethon.tl.functions.messages import CreateChatRequest
-
-                result = await self.client(CreateChatRequest(users=[], title=group_title))
-
-                target = result.chats[0]
-
-            await self.client.send_message(target, text, parse_mode="html")
+            await self._sync_kitsune_folder()
 
             ls.set(_LS_OWNER, _LS_KEY, True)
 
-            logger.info("Quickstart: приветствие отправлено")
+            logger.info("Quickstart: папка Kitsune и чаты синхронизированы (приветствие отправляется ботом в DM)")
 
         except Exception:
 
-            logger.exception("Quickstart: ошибка отправки приветствия")
+            logger.exception("Quickstart: ошибка синхронизации папки")
 
     @command("quickstart", required=OWNER)
 
@@ -508,33 +448,27 @@ class QuickstartModule(KitsuneModule):
 
                 return
 
-            text = self.strings("welcome")
-
-            plat = get_platform()
-
-            text += f"\n\n{self.strings('platform_info').format(platform=plat)}"
-
             chats = await self._sync_kitsune_folder()
 
-            target = chats.get("backup")
+            lines = []
 
-            if target is None:
+            for cfg in _KITSUNE_CHATS:
 
-                me = await self.client.get_me()
+                e = chats.get(cfg["key"])
 
-                group_title = f"Kitsune {me.first_name or ''}".strip()
+                status = "✅" if e is not None else "❌"
 
-                if me.last_name:
+                lines.append(f"{status} <code>{cfg['title']}</code>")
 
-                    group_title += f" {me.last_name}"
+            report = "\n".join(lines)
 
-                from telethon.tl.functions.messages import CreateChatRequest
+            await event.reply(
 
-                result = await self.client(CreateChatRequest(users=[], title=group_title))
+                f"🦊 <b>Папка Kitsune синхронизирована!</b>\n\n{report}",
 
-                target = result.chats[0]
+                parse_mode="html",
 
-            await self.client.send_message(target, text, parse_mode="html")
+            )
 
             ls.set(_LS_OWNER, _LS_KEY, True)
 

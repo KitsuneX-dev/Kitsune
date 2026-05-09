@@ -1,8 +1,11 @@
 from __future__ import annotations
+import logging
 import re
 import time
 from ..core.loader import KitsuneModule, command, ModuleConfig, ConfigValue
 from ..core.security import OWNER
+
+logger = logging.getLogger(__name__)
 
 _DEFAULT_PONG = (
 
@@ -68,7 +71,7 @@ class PingModule(KitsuneModule):
 
     author      = "Yushi"
 
-    version     = "1.3.0"
+    version     = "1.4.0"
 
     def __init__(self, *args, **kwargs) -> None:
 
@@ -93,6 +96,24 @@ class PingModule(KitsuneModule):
                     "или {emoji:XXXXXXXXX:⭐}. "
 
                     "Оставь пустым для стандартного вида."
+
+                ),
+
+            ),
+
+            ConfigValue(
+
+                "media_url",
+
+                default=None,
+
+                doc=(
+
+                    "Ссылка на медиа (фото/видео/гифка), которое будет прикреплено к сообщению ping. "
+
+                    "Используй прямую ссылку. Для GitHub: команда .cdn конвертирует в CDN. "
+
+                    "Оставь пустым чтобы отправлять только текст."
 
                 ),
 
@@ -170,6 +191,101 @@ class PingModule(KitsuneModule):
 
             return "—", "—"
 
+    @staticmethod
+
+    def _parse_html_with_tg_emoji(html_text: str):
+
+        from telethon.extensions import html as tl_html
+        from telethon.tl.types import MessageEntityCustomEmoji
+
+        tg_pattern = re.compile(
+
+            r'<tg-emoji\s+emoji-id=["\'](\d+)["\']>(.*?)</tg-emoji>',
+
+            re.DOTALL,
+
+        )
+
+        if not tg_pattern.search(html_text):
+
+            return tl_html.parse(html_text)
+
+        result_text     = ""
+
+        result_entities = []
+
+        cursor          = 0
+
+        pos_in_html     = 0
+
+        for m in tg_pattern.finditer(html_text):
+
+            before_html = html_text[pos_in_html:m.start()]
+
+            if before_html:
+
+                plain_before, ents_before = tl_html.parse(before_html)
+
+                for e in (ents_before or []):
+
+                    e.offset += cursor
+
+                result_text     += plain_before
+
+                result_entities += list(ents_before or [])
+
+                cursor          += len(plain_before)
+
+            emoji_id    = m.group(1)
+
+            inner_html  = m.group(2)
+
+            inner_plain, inner_ents = tl_html.parse(inner_html)
+
+            for e in (inner_ents or []):
+
+                e.offset += cursor
+
+            result_entities.append(
+
+                MessageEntityCustomEmoji(
+
+                    offset=cursor,
+
+                    length=len(inner_plain),
+
+                    document_id=int(emoji_id),
+
+                )
+
+            )
+
+            result_entities += list(inner_ents or [])
+
+            result_text     += inner_plain
+
+            cursor          += len(inner_plain)
+
+            pos_in_html      = m.end()
+
+        tail_html = html_text[pos_in_html:]
+
+        if tail_html:
+
+            plain_tail, ents_tail = tl_html.parse(tail_html)
+
+            for e in (ents_tail or []):
+
+                e.offset += cursor
+
+            result_text     += plain_tail
+
+            result_entities += list(ents_tail or [])
+
+        result_entities.sort(key=lambda e: e.offset)
+
+        return result_text, result_entities
+
     @command("ping", required=OWNER)
 
     async def ping_cmd(self, event) -> None:
@@ -230,7 +346,85 @@ class PingModule(KitsuneModule):
 
         text = _resolve_custom_emoji(text)
 
+        media_url = self.config["media_url"] if self.config else None
+
+        if media_url:
+
+            try:
+
+                parsed_text, entities = self._parse_html_with_tg_emoji(text)
+
+                await self.client.send_file(
+
+                    event.peer_id,
+
+                    media_url,
+
+                    caption=parsed_text,
+
+                    formatting_entities=entities,
+
+                )
+
+                try:
+
+                    await msg.delete()
+
+                except Exception:
+
+                    pass
+
+                return
+
+            except Exception:
+
+                logger.exception("ping: не удалось отправить медиа, отправляю текст")
+
         await msg.edit(text, parse_mode="html")
+
+    @command("setpingmedia", required=OWNER)
+
+    async def setpingmedia_cmd(self, event) -> None:
+
+        """setpingmedia — задать ссылку на медиа (фото/видео/гифку) для .ping."""
+
+        args = self.get_args(event).strip()
+
+        if not args:
+
+            await event.reply(
+
+                "❌ Укажи ссылку на медиа:\n"
+
+                "<code>.setpingmedia https://...</code>\n\n"
+
+                "Поддерживается фото, видео и гифки. "
+
+                "Для GitHub-ссылок используй <code>.cdn</code>.",
+
+                parse_mode="html",
+
+            )
+
+            return
+
+        self.config["media_url"] = args
+
+        await self.db.set("kitsune.config.ping", "media_url", args)
+
+        await event.reply("✅ Медиа для .ping установлено.", parse_mode="html")
+
+    @command("resetpingmedia", required=OWNER)
+
+    async def resetpingmedia_cmd(self, event) -> None:
+
+        """resetpingmedia — убрать медиа из сообщения .ping."""
+
+        self.config["media_url"] = None
+
+        await self.db.delete("kitsune.config.ping", "media_url")
+
+        await event.reply("✅ Медиа для .ping удалено.", parse_mode="html")
 
     @command("me", required=OWNER)
 

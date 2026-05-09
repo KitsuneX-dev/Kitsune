@@ -170,28 +170,54 @@ class UpdateChecker:
 
             return None
 
-        text = (
+        version_changed = bool(current and new and str(current).strip() != str(new).strip())
 
-            "🦊 <b>Kitsune Userbot</b>\n\n"
+        if version_changed:
 
-            "🆕 <b>Доступно обновление!</b>\n"
+            text = (
 
-            f"📌 Версия: <code>{current}</code> → <code>{new}</code>\n\n"
+                "🦊 <b>KITSUNE // UPDATE_LOG</b>\n\n"
 
-            f"📋 <b>Изменения:</b>\n{changes}\n\n"
+                "<b>[STATUS]</b> Доступна новая версия!\n"
 
-            "Нажми кнопку для обновления:"
+                f"<b>[BUILD ]</b> <code>{current}</code> → <code>{new}</code>\n\n"
 
-        )
+                f"<b>CHANGELOG:</b>\n{changes}\n\n"
+
+                "🔘 Запустить процесс обновления?"
+
+            )
+
+        else:
+
+            text = (
+
+                "🦊 <b>KITSUNE // HOTFIX</b>\n\n"
+
+                "<b>[STATUS]</b> Обнаружены улучшения!\n"
+
+                "<b>[PATCH ]</b> Локальные исправления кода\n\n"
+
+                f"<b>CHANGELOG:</b>\n{changes}\n\n"
+
+                "<b>SYSTEM:</b>\n"
+
+                "Версия остается прежней, требуется перезагрузка для применения патчей.\n\n"
+
+                "🔘 Применить изменения?"
+
+            )
 
         try:
 
             from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
             from kitsune.modules.notifier.bot_runner import _make_bot
 
+            apply_btn_text = "⬆️ Обновиться" if version_changed else "🛠 Применить"
+
             kb = InlineKeyboardMarkup(inline_keyboard=[[
 
-                InlineKeyboardButton(text="⬆️ Обновиться", callback_data="do_update"),
+                InlineKeyboardButton(text=apply_btn_text, callback_data="do_update"),
 
                 InlineKeyboardButton(text="❌ Отмена",      callback_data="update_no"),
 

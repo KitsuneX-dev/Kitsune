@@ -33,11 +33,11 @@ class UpdaterModule(KitsuneModule):
 
         "notify_sent": (
 
-            "🆕 <b>Обнаружена новая версия!</b>\n\n"
+            "🦊 <b>KITSUNE // UPDATE_LOG</b>\n\n"
 
-            "Текущая: <code>{current}</code>\n"
+            "<b>[STATUS]</b> Доступна новая версия!\n"
 
-            "Новая: <code>{new}</code>\n"
+            "<b>[BUILD ]</b> <code>{current}</code> → <code>{new}</code>\n"
 
             "Коммитов впереди: <code>{count}</code>\n\n"
 
@@ -47,13 +47,15 @@ class UpdaterModule(KitsuneModule):
 
         "no_notifier": (
 
-            "🆕 <b>Обнаружена новая версия!</b>\n\n"
+            "🦊 <b>KITSUNE // UPDATE_LOG</b>\n\n"
 
-            "Текущая: <code>{current}</code>\n"
+            "<b>[STATUS]</b> Доступна новая версия!\n"
+
+            "<b>[BUILD ]</b> <code>{current}</code>\n"
 
             "Коммитов впереди: <code>{count}</code>\n\n"
 
-            "<b>Изменения:</b>\n{changes}\n\n"
+            "<b>CHANGELOG:</b>\n{changes}\n\n"
 
             "Напиши <code>.update confirm</code> для обновления."
 
@@ -355,27 +357,57 @@ class UpdaterModule(KitsuneModule):
 
             shown_inline = False
 
+            version_changed_local = str(__version_str__).strip() != str(new_ver).strip()
+
             if inline:
 
                 try:
 
-                    preview_text = (
+                    if version_changed_local:
 
-                        f"🆕 <b>Обнаружена новая версия!</b>\n\n"
+                        preview_text = (
 
-                        f"Текущая: <code>{__version_str__}</code> → <code>{new_ver}</code>\n"
+                            f"🦊 <b>KITSUNE // UPDATE_LOG</b>\n\n"
 
-                        f"Коммитов: <code>{len(behind)}</code>\n\n"
+                            f"<b>[STATUS]</b> Доступна новая версия!\n"
 
-                        f"<b>Изменения:</b>\n{changes}"
+                            f"<b>[BUILD ]</b> <code>{__version_str__}</code> → <code>{new_ver}</code>\n\n"
 
-                    )
+                            f"<b>CHANGELOG:</b>\n{changes}\n\n"
+
+                            f"🔘 Запустить процесс обновления?"
+
+                        )
+
+                        apply_label = "⬆️ Обновить"
+
+                    else:
+
+                        preview_text = (
+
+                            f"🦊 <b>KITSUNE // HOTFIX</b>\n\n"
+
+                            f"<b>[STATUS]</b> Обнаружены улучшения!\n"
+
+                            f"<b>[PATCH ]</b> Локальные исправления кода\n\n"
+
+                            f"<b>CHANGELOG:</b>\n{changes}\n\n"
+
+                            f"<b>SYSTEM:</b>\n"
+
+                            f"Версия остается прежней, требуется перезагрузка для применения патчей.\n\n"
+
+                            f"🔘 Применить изменения?"
+
+                        )
+
+                        apply_label = "🛠 Применить"
 
                     markup = [
 
                         [
 
-                            {"text": "⬆️ Обновить",  "callback": self._cb_do_update,     "args": (repo_path,)},
+                            {"text": apply_label,  "callback": self._cb_do_update,     "args": (repo_path,)},
 
                             {"text": "❌ Отмена",     "callback": self._cb_cancel_update},
 
@@ -413,11 +445,11 @@ class UpdaterModule(KitsuneModule):
 
                     await m.edit(
 
-                        f"🆕 <b>Обнаружена новая версия!</b>\n\n"
+                        f"🦊 <b>KITSUNE // UPDATE_LOG</b>\n\n"
 
-                        f"Текущая: <code>{__version_str__}</code>\n"
+                        f"<b>[STATUS]</b> Доступна новая версия!\n"
 
-                        f"Новая: <code>{new_ver}</code>\n"
+                        f"<b>[BUILD ]</b> <code>{__version_str__}</code> → <code>{new_ver}</code>\n"
 
                         f"Коммитов впереди: <code>{len(behind)}</code>\n\n"
 
