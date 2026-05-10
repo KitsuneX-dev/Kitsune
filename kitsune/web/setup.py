@@ -846,9 +846,58 @@ class SetupServer:
         DATA_DIR = _Path.home() / ".kitsune"
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         hydro_session_file = DATA_DIR / "kitsune_hydro.session"
-        if hydro_session_file.exists() and hydro_session_file.stat().st_size > 100:
-            logger.info("setup: Hydrogram session уже существует — пропускаю генерацию")
-            return True
+        # ВАЖНО: 100 байт мало — это типичный размер «огрызка» от прерванной
+        # 2FA-регистрации (auth_key есть, но user_id=0). Такая сессия потом ловит
+        # AuthKeyUnregistered при login и бомбит варнингами в main.py.
+        # Считаем сессию валидной только если она достаточно большая И в ней реально есть
+        # user_id (быстрый sanity-check через sqlite, без запуска hydrogram).
+        if hydro_session_file.exists() and hydro_session_file.stat().st_size >= 4096:
+            try:
+                import sqlite3 as _sq3
+                _con = _sq3.connect(str(hydro_session_file))
+                try:
+                    _cur = _con.cursor()
+                    _cur.execute(
+                        "SELECT name FROM sqlite_master "
+                        "WHERE type='table' AND name='sessions'"
+                    )
+                    if _cur.fetchone():
+                        try:
+                            _cur.execute("SELECT user_id FROM sessions LIMIT 1")
+                            _row = _cur.fetchone()
+                            if _row and _row[0]:
+                                logger.info(
+                                    "setup: Hydrogram session уже существует и валидна — пропускаю генерацию"
+                                )
+                                return True
+                        except Exception:
+                            pass
+                finally:
+                    _con.close()
+            except Exception:
+                pass
+            # Сессия большая, но не прошла sanity-check — это битый огрызок.
+            logger.info(
+                "setup: найдена битая Hydrogram-сессия (%d байт) — удаляю и генерирую заново",
+                hydro_session_file.stat().st_size,
+            )
+            for _suf in ("", "-journal", ".wal", ".shm"):
+                _p = _Path(str(hydro_session_file) + _suf)
+                try:
+                    if _p.exists():
+                        _p.unlink()
+                except Exception:
+                    pass
+        elif hydro_session_file.exists():
+            # Файл есть, но слишком мал — это точно огрызок.
+            logger.info(
+                "setup: Hydrogram-сессия слишком мала (%d байт) — удаляю и генерирую заново",
+                hydro_session_file.stat().st_size,
+            )
+            try:
+                hydro_session_file.unlink()
+            except Exception:
+                pass
 
         try:
             from hydrogram import Client as HydroClient

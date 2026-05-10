@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import signal
+import sqlite3
 import sys
 from pathlib import Path
 from typing import Any
@@ -274,15 +275,43 @@ def _release_hydro_lock() -> None:
     with contextlib.suppress(Exception):
         _HYDRO_LOCK_FILE.unlink(missing_ok=True)
 
+# Минимальный размер «осмысленной» Hydrogram-сессии в байтах.
+# Если файл меньше — это битый огрызок, оставшийся от прерванной 2FA-сессии,
+# и пытаться им логиниться бессмысленно (поймаем AuthKeyUnregistered).
+_HYDRO_MIN_SESSION_BYTES = 4096
+
+
+def _purge_bad_hydro_session(session_file: Path, reason: str) -> None:
+    """Удаляет битый Hydrogram-сессионный файл и его -journal/.wal/.shm.
+
+    Без этого _start_hydrogram бесконечно ловит AuthKeyUnregistered
+    при каждом запуске, потому что файл «существует» (size > 100), но
+    на сервере auth_key уже мёртв (типичный итог прерванной 2FA-регистрации).
+    """
+    try:
+        for suffix in ("", "-journal", ".wal", ".shm"):
+            p = Path(str(session_file) + suffix)
+            with contextlib.suppress(Exception):
+                if p.exists():
+                    p.unlink()
+        logger.info(
+            "main: удалил битую Hydrogram-сессию %s (причина: %s)",
+            session_file.name, reason,
+        )
+    except Exception:
+        logger.debug("main: _purge_bad_hydro_session failed", exc_info=True)
+
+
 async def _start_hydrogram(api_id: int, api_hash: str, session_name: str) -> Any | None:
 
     hydro_session_file = DATA_DIR / f"{Path(session_name).name}_hydro.session"
 
     if not hydro_session_file.exists():
 
-        logger.warning(
-            "main: Hydrogram session not found at %s — Hydrogram features disabled. "
-            "Re-run web setup (delete ~/.kitsune/kitsune.session and start) to regenerate.",
+        # Это нормальный путь: Hydrogram опционален. Не пугаем юзера WARNING-ом.
+        logger.info(
+            "main: Hydrogram session file отсутствует (%s) — "
+            "вторичный клиент не запускается (это не ошибка).",
             hydro_session_file,
         )
 
@@ -292,6 +321,28 @@ async def _start_hydrogram(api_id: int, api_hash: str, session_name: str) -> Any
         except Exception:
             pass
 
+        return None
+
+    # Доп-проверка: файл существует, но мог быть «огрызком» прерванной
+    # 2FA-регистрации (auth_key недоавторизован → AuthKeyUnregistered).
+    try:
+        _hsize = hydro_session_file.stat().st_size
+    except OSError:
+        _hsize = 0
+
+    if _hsize < _HYDRO_MIN_SESSION_BYTES:
+        _purge_bad_hydro_session(
+            hydro_session_file,
+            reason=f"файл слишком мал ({_hsize}b < {_HYDRO_MIN_SESSION_BYTES}b)",
+        )
+        logger.info(
+            "main: Hydrogram пропущен — сессия была недоавторизована и удалена",
+        )
+        try:
+            from .core.reliability import flags as _deg_flags
+            _deg_flags.mark_hydrogram_failed("session was a stub")
+        except Exception:
+            pass
         return None
 
     if not _acquire_hydro_lock():
@@ -411,13 +462,28 @@ async def _start_hydrogram(api_id: int, api_hash: str, session_name: str) -> Any
 
     except AuthKeyUnregistered:
 
-        logger.warning("main: Hydrogram session invalid, skipping")
+        # Сессия «есть на диске», но auth_key на сервере уже мёртв.
+        # Лечим: удаляем битый файл — на следующем запуске мы тихо
+        # перейдём в ветку «session file отсутствует» (INFO, без WARNING).
+        with contextlib.suppress(Exception):
+            if hydro_session_file.exists():
+                _purge_bad_hydro_session(
+                    hydro_session_file, reason="AuthKeyUnregistered",
+                )
+
+        logger.info(
+            "main: Hydrogram-сессия была инвалидной (AuthKeyUnregistered) — "
+            "удалил файл, продолжаю без вторичного клиента",
+        )
 
         try:
             from .core.reliability import flags as _deg_flags
             _deg_flags.mark_hydrogram_failed("AuthKeyUnregistered")
         except Exception:
             pass
+
+        with contextlib.suppress(Exception):
+            await hydro.stop()  # type: ignore[name-defined]
 
         _release_hydro_lock()
 
@@ -1154,9 +1220,57 @@ async def _startup(args: argparse.Namespace) -> None:
 
             logger.debug("main: cancel update-loop failed", exc_info=True)
 
+        # Страховка: если по какой-то причине SQLiteSession-патч из install_patches()
+        # не применился (старая версия Telethon, ранний импорт и т.п.) — явно
+        # создаём недостающие таблицы перед disconnect, чтобы Telethon´овский
+        # _save_states_and_entities не валился с «no such table: entities».
+        try:
+            sess = getattr(client, "session", None)
+            sess_file = getattr(sess, "filename", None)
+            if sess_file and sess_file != ":memory:":
+                import sqlite3 as _sq3
+                with contextlib.suppress(Exception):
+                    _con = _sq3.connect(sess_file)
+                    try:
+                        _cc = _con.cursor()
+                        _cc.execute(
+                            "CREATE TABLE IF NOT EXISTS entities ("
+                            "id integer primary key, hash integer not null, "
+                            "username text, phone integer, name text, "
+                            "date integer)"
+                        )
+                        _cc.execute(
+                            "CREATE TABLE IF NOT EXISTS sent_files ("
+                            "md5_digest blob, file_size integer, "
+                            "type integer, id integer, hash integer, "
+                            "primary key(md5_digest, file_size, type))"
+                        )
+                        _cc.execute(
+                            "CREATE TABLE IF NOT EXISTS update_state ("
+                            "id integer primary key, pts integer, "
+                            "qts integer, date integer, seq integer)"
+                        )
+                        _con.commit()
+                    finally:
+                        _con.close()
+        except Exception:
+            logger.debug("main: pre-disconnect schema heal skipped", exc_info=True)
+
         try:
 
             await asyncio.wait_for(client.disconnect(), timeout=10.0)
+
+        except sqlite3.OperationalError as _se:
+
+            # Патч SQLiteSession.process_entities должен поймать это
+            # раньше, но если вдруг нет — хотя бы не пугаем traceback-ом.
+            if "no such table" in str(_se).lower():
+                logger.info(
+                    "main: client disconnect: session-db без таблицы entities — "
+                    "это не критично, игнорирую (%s)", _se,
+                )
+            else:
+                logger.exception("main: client disconnect failed")
 
         except Exception:
 

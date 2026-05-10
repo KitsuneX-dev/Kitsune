@@ -23,6 +23,7 @@ def install_patches() -> None:
 
         return
 
+    # ── 1. Hardening MTProxy readexactly ────────────────────────────────────
     try:
 
         from telethon.network.connection import tcpmtproxy as _m
@@ -79,6 +80,7 @@ def install_patches() -> None:
 
         _log.debug("kitsune: MTProxyIO patch skipped — %s", _exc)
 
+    # ── 2. Hardening IntermediatePacketCodec ────────────────────────────────
     try:
 
         from telethon.network.connection import tcpintermediate as _ti
@@ -138,5 +140,145 @@ def install_patches() -> None:
     except Exception as _exc:
 
         _log.debug("kitsune: IntermediatePacketCodec patch skipped — %s", _exc)
+
+    # ── 3. SQLiteSession: лечим "no such table: entities" при disconnect ────
+    #
+    # Telethon 1.40+ при `client.disconnect()` зовёт `_save_states_and_entities`,
+    # который вызывает `session.process_entities(...)`. Если SQLite-файл сессии
+    # был создан/мигрирован некорректно (например, после ручной правки или сбоя
+    # в момент шифрования), таблицы `entities` может НЕ быть, и мы получаем:
+    #
+    #     sqlite3.OperationalError: no such table: entities
+    #
+    # Это валит весь shutdown по Ctrl+C. Лечим точечно: при первом таком
+    # OperationalError создаём недостающие таблицы (по схеме Telethon) и
+    # повторяем операцию. Если таблицы уже есть — патч прозрачен.
+    try:
+
+        from telethon.sessions import sqlite as _ts_sqlite
+        import sqlite3 as _sqlite3
+
+        _SQLiteSession = getattr(_ts_sqlite, "SQLiteSession", None)
+
+        if (
+            _SQLiteSession is not None
+            and "process_entities" in _SQLiteSession.__dict__
+            and not getattr(
+                _SQLiteSession.process_entities, "_kitsune_table_guard", False
+            )
+        ):
+
+            _orig_pe = _SQLiteSession.process_entities
+
+            # Полная схема таблиц Telethon — на случай, если повреждён не только
+            # `entities`, но и соседние (`sent_files`, `update_state`).
+            _SCHEMA = {
+                "entities": (
+                    "CREATE TABLE IF NOT EXISTS entities ("
+                    "id integer primary key, hash integer not null, "
+                    "username text, phone integer, name text, date integer)"
+                ),
+                "sent_files": (
+                    "CREATE TABLE IF NOT EXISTS sent_files ("
+                    "md5_digest blob, file_size integer, type integer, "
+                    "id integer, hash integer, "
+                    "primary key(md5_digest, file_size, type))"
+                ),
+                "update_state": (
+                    "CREATE TABLE IF NOT EXISTS update_state ("
+                    "id integer primary key, pts integer, qts integer, "
+                    "date integer, seq integer)"
+                ),
+                "version": (
+                    "CREATE TABLE IF NOT EXISTS version ("
+                    "version integer primary key)"
+                ),
+                "sessions": (
+                    "CREATE TABLE IF NOT EXISTS sessions ("
+                    "dc_id integer primary key, server_address text, "
+                    "port integer, auth_key blob, takeout_id integer, "
+                    "tmp_auth_key blob)"
+                ),
+            }
+
+            def _ensure_tables(self) -> None:
+                """Создаёт все недостающие таблицы Telethon-сессии."""
+                try:
+                    cur = self._cursor()
+                    try:
+                        for _ddl in _SCHEMA.values():
+                            cur.execute(_ddl)
+                    finally:
+                        cur.close()
+                    try:
+                        self.save()
+                    except Exception:
+                        pass
+                except Exception as _e:
+                    _log.debug(
+                        "kitsune: _ensure_tables failed — %s", _e,
+                    )
+
+            def _safe_process_entities(self, tlo):
+
+                try:
+
+                    return _orig_pe(self, tlo)
+
+                except _sqlite3.OperationalError as exc:
+
+                    msg = str(exc).lower()
+
+                    if "no such table" not in msg:
+
+                        # Не наш кейс — пробрасываем дальше.
+                        raise
+
+                    _log.info(
+                        "kitsune: session-db missing table during "
+                        "process_entities (%s) — пересоздаю схему", exc,
+                    )
+
+                    _ensure_tables(self)
+
+                    try:
+
+                        return _orig_pe(self, tlo)
+
+                    except Exception as _e2:
+
+                        # Не валим disconnect из-за служебного апдейта сущностей.
+                        _log.debug(
+                            "kitsune: process_entities повторно упал — %s "
+                            "(игнорирую, чтобы не ломать shutdown)",
+                            _e2,
+                        )
+
+                        return
+
+                except Exception as _e:
+
+                    # Любая другая ошибка процесса сущностей не должна
+                    # обрушать disconnect (это поведение и так нормально
+                    # для Telethon-а — у него тут не критичный путь).
+                    _log.debug(
+                        "kitsune: process_entities silently swallowed — %s",
+                        _e,
+                    )
+
+                    return
+
+            _safe_process_entities._kitsune_table_guard = True
+
+            _SQLiteSession.process_entities = _safe_process_entities
+
+            _log.info(
+                "kitsune: SQLiteSession.process_entities patched "
+                "(self-heal missing 'entities' table on shutdown)",
+            )
+
+    except Exception as _exc:
+
+        _log.debug("kitsune: SQLiteSession patch skipped — %s", _exc)
 
     _PATCHES_INSTALLED = True

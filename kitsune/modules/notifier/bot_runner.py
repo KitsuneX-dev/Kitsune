@@ -1,166 +1,96 @@
 from __future__ import annotations
-
 import asyncio
-
 import logging
-
-import typing
+import re
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
 _DB_KEY = "kitsune.notifier"
 
-def _load_socks_proxy_url() -> str | None:
+# Глобальный лок, чтобы две (и более) корутины не открывали `conversation`
+# с @BotFather одновременно — иначе Telethon бросает
+# "Cannot open exclusive conversation in a chat that already has one open conversation".
+_BOTFATHER_LOCK: asyncio.Lock = asyncio.Lock()
+
+# Регэксп, которым ловим формат токена бота от @BotFather.
+_TOKEN_RE = re.compile(r"(\d{8,}:[A-Za-z0-9_-]{35,})")
+
+# Эвристики, по которым мы понимаем, что BotFather прислал список ботов
+# для выбора (а не сам токен). Это ключевая часть фикса для шага «Choose a bot
+# to get Bot API access token.» — без неё мы пропускали выбор кнопки и шли
+# создавать нового бота.
+_CHOOSE_BOT_HINTS = (
+    "choose a bot",
+    "select a bot",
+    "выбери бота",
+    "выберите бота",
+    "выбери бот",
+    "выберите бот",
+)
+
+
+def _extract_buttons(message) -> list[str]:
+
+    result = []
 
     try:
 
-        from kitsune.rkn_bypass import get_socks_proxy_url
+        markup = getattr(message, "reply_markup", None)
 
-        return get_socks_proxy_url()
+        if markup is None:
 
-    except Exception:
+            return result
 
-        return None
+        rows = getattr(markup, "rows", []) or []
 
-def _make_bot(token: str) -> typing.Any:
+        for row in rows:
 
-    from kitsune.rkn_bypass import make_aiogram_bot
+            for btn in getattr(row, "buttons", []) or []:
 
-    return make_aiogram_bot(str(token), parse_mode="HTML", timeout=60)
+                text = getattr(btn, "text", "") or ""
 
-def _get_platform() -> str:
+                if text:
 
-    import sys, os
-
-    if os.path.exists("/data/data/tech.ula") or "com.termux" in os.environ.get("PREFIX", ""):
-
-        return "📱 Android (UserLand)"
-
-    if "ANDROID_ROOT" in os.environ or "ANDROID_DATA" in os.environ:
-
-        return "📱 Android (Termux)"
-
-    if sys.platform == "darwin" and os.path.exists("/var/mobile"):
-
-        return "🍎 iOS (iSH)"
-
-    try:
-
-        release = open("/etc/os-release").read()
-
-        if "ubuntu" in release.lower(): return "🐧 Ubuntu"
-
-        if "debian" in release.lower(): return "🐧 Debian"
-
-        if "alpine" in release.lower(): return "🏔 Alpine Linux"
-
-        if "arch"   in release.lower(): return "🎯 Arch Linux"
+                    result.append(text)
 
     except Exception:
 
         pass
 
-    if sys.platform.startswith("linux"):
+    return result
 
-        return "🐧 Linux"
 
-    if sys.platform == "win32":
+def _looks_like_choose_bot(message) -> bool:
+    """Возвращает True, если ответ BotFather — это список ботов на выбор."""
+    text = (getattr(message, "text", "") or "").lower()
+    if any(h in text for h in _CHOOSE_BOT_HINTS):
+        return True
+    # Иногда заголовок отсутствует, но кнопок несколько и все они выглядят
+    # как @username_bot — это тоже список выбора.
+    btns = _extract_buttons(message)
+    if len(btns) >= 2:
+        usernames = [b for b in btns if "bot" in b.lower()]
+        if len(usernames) >= 2:
+            return True
+    return False
 
-        return "🪟 Windows"
 
-    if sys.platform == "darwin":
+def _pick_bot_button(buttons: list[str], username: str) -> str | None:
+    """Ищет в списке кнопок ту, что соответствует нашему боту."""
+    uname_low = username.lower().lstrip("@")
+    # 1) точное совпадение @username
+    for b in buttons:
+        if b.lstrip("@").strip().lower() == uname_low:
+            return b
+    # 2) подстрока username
+    for b in buttons:
+        if uname_low in b.lower():
+            return b
+    return None
 
-        return "🍎 macOS"
 
-    return f"❓ {sys.platform}"
-
-def _build_welcome_text(db) -> str:
-
-    interval_set = db.get("kitsune.backup", "interval_h", None)
-
-    backup_str   = f"каждые <b>{interval_set} ч</b>" if interval_set else "не настроен"
-
-    platform     = _get_platform()
-
-    return (
-
-        "🦊 <b>Добро пожаловать в Kitsune Userbot!</b>\n"
-
-        "Kitsune успешно запущен и готов к работе.\n\n"
-
-        "⚡ <b>Быстрый старт:</b>\n"
-
-        "<blockquote>"
-
-        "<code>.help</code> — список всех команд\n"
-
-        "<code>.ping</code> — проверить работу\n"
-
-        "<code>.cfg</code> — настройка модулей\n"
-
-        "<code>.dlm &lt;url&gt;</code> — установить модуль по ссылке\n"
-
-        "<code>.lm</code> — установить модуль файлом (ответом на файл)"
-
-        "</blockquote>\n"
-
-        "🔒 <b>Безопасность:</b>\n"
-
-        "<blockquote>"
-
-        "<code>.security</code> — управление доступом\n"
-
-        "<code>.backupall</code> — полный бэкап (БД + модули)\n"
-
-        "<code>.setbackupinterval</code> — изменить время авто-бэкапа"
-
-        "</blockquote>\n"
-
-        "🗂 <b>Авто-бэкап:</b> " + backup_str + "\n\n"
-
-        "🔗 <b>Полезные ссылки:</b>\n"
-
-        "<blockquote>"
-
-        "Репозиторий: github.com/KitsuneX-dev/Kitsune\n"
-
-        "Группа Kitsune Community - https://t.me/UserBot_Kitsune\n"
-
-        "Разработчик: @Mikasu32"
-
-        "</blockquote>\n"
-
-        "🎉 <i>Приятного использования!</i>\n"
-
-        f"🖥 <b>Платформа:</b> {platform}"
-
-    )
-
-async def _run_asset_setup(client, db) -> None:
-
-    import asyncio as _asyncio
-
-    if db.get("kitsune.assets", "setup_done", False):
-
-        return
-
-    await _asyncio.sleep(5)
-
-    try:
-
-        from ...assets import setup_all_avatars
-
-        logger.debug("BotRunner: auto asset setup starting...")
-
-        await setup_all_avatars(client, db)
-
-        logger.debug("BotRunner: auto asset setup done")
-
-    except Exception as _e:
-
-        logger.debug("BotRunner: asset setup error: %s", _e, exc_info=True)
-
-class BotRunner:
+class BotSetup:
 
     def __init__(self, client, db) -> None:
 
@@ -168,936 +98,573 @@ class BotRunner:
 
         self._db = db
 
-        self.bot: typing.Any = None
-
-        self.dp: typing.Any = None
-
-        self._polling_task: asyncio.Task | None = None
-
-    async def start(self, token: str, *, first_run: bool = False) -> None:
+    def load_token_from_config(self) -> str | None:
 
         try:
 
-            from aiogram import Dispatcher, Router
+            import toml
 
-        except ImportError:
+            cfg_path = Path(__file__).parent.parent.parent.parent / "config.toml"
 
-            logger.warning("BotRunner: aiogram not installed, polling disabled")
+            if cfg_path.exists():
 
-            return
+                val = toml.loads(cfg_path.read_text(encoding="utf-8")).get("bot_token")
 
-        await self.stop()
+                return str(val) if val else None
+
+        except Exception:
+
+            pass
+
+        return None
+
+    def save_token_to_config(self, token: str) -> None:
 
         try:
 
-            from kitsune.rkn_bypass import (
+            import toml
 
-                ensure_aiohttp_socks,
+            cfg_path = Path(__file__).parent.parent.parent.parent / "config.toml"
 
-                get_socks_proxy_url,
+            if cfg_path.exists():
 
-                test_socks_proxy,
+                cfg = toml.loads(cfg_path.read_text(encoding="utf-8"))
 
-            )
+                cfg["bot_token"] = token
 
-            if get_socks_proxy_url():
+                cfg_path.write_text(toml.dumps(cfg), encoding="utf-8")
 
-                ensure_aiohttp_socks()
+        except Exception:
 
-                ok, msg = await test_socks_proxy(timeout=15.0)
+            logger.warning("BotSetup: could not write token to config.toml")
 
-                if ok:
+    async def find_existing_bot(self, tg_id: int) -> tuple[str | None, str | None]:
+        """Ищет среди ботов пользователя бота Kitsune, созданного ранее.
 
-                    logger.info("BotRunner: SOCKS5 pre-check OK — %s", msg)
+        Поиск ведётся СТРОГО по tg_id владельца — именно этот ID Kitsune
+        всегда вшивает в username бота при создании. Имя пользователя может
+        меняться, ориентироваться на него нельзя.
 
-                else:
+        Сценарии:
+          • Первая установка — ничего не найдено → (None, None) → создаём нового.
+          • Переустановка/сбой — бот уже есть в BotFather → берём его токен.
+        """
+        try:
 
-                    _soft = ("timeout", "reset", "refused", "unreachable",
+            async with _BOTFATHER_LOCK:
 
-                             "closed", "eof")
+                async with self._client.conversation("@BotFather", timeout=40) as conv:
 
-                    _level = (logger.info if any(k in msg.lower() for k in _soft)
+                    await conv.send_message("/mybots")
 
-                              else logger.warning)
+                    resp = await conv.get_response()
 
-                    _level(
+                    text    = resp.text or ""
 
-                        "BotRunner: SOCKS5 pre-check soft-fail — %s. "
+                    buttons = _extract_buttons(resp)
 
-                        "polling всё равно будет запущен.",
+                    # Ищем строго по ID — формат kitsune_<tg_id>[любой_суффикс]_bot
+                    pattern = re.compile(rf"kitsune_{tg_id}[a-z0-9_]*_?bot", re.IGNORECASE)
 
-                        msg,
+                    raw_candidates: list[str] = []
 
+                    # 1) Сканируем текст ответа BotFather (там бывают @username)
+                    for m in pattern.finditer(text):
+
+                        uname = m.group(0).lstrip("@")
+
+                        if uname not in raw_candidates:
+
+                            raw_candidates.append(uname)
+
+                    # 2) Сканируем кнопки — обычно это основной источник username
+                    for b in buttons:
+
+                        b_clean = b.lstrip("@").strip()
+
+                        if pattern.search(b_clean):
+
+                            uname = b.lstrip("@").strip()
+
+                            if uname and uname not in raw_candidates:
+
+                                raw_candidates.append(uname)
+
+                    # 3) Безопасный fallback: любой бот с вхождением tg_id в имя.
+                    #    Это покрывает случаи, когда раньше префикс был другим (legacy).
+                    legacy_pat = re.compile(rf"[a-z0-9_]*{tg_id}[a-z0-9_]*bot", re.IGNORECASE)
+
+                    for b in buttons:
+
+                        b_clean = b.lstrip("@").strip()
+
+                        if legacy_pat.fullmatch(b_clean) and b_clean not in raw_candidates:
+
+                            raw_candidates.append(b_clean)
+
+                    exact = f"kitsune_{tg_id}_bot"
+
+                    def _sort_key(u: str) -> tuple:
+
+                        u_low = u.lower()
+
+                        # Сначала — точное совпадение kitsune_<id>_bot,
+                        # потом явные «kitsune_<id>», потом остальные.
+                        if u_low == exact:
+                            return (0, len(u_low))
+                        if u_low.startswith(f"kitsune_{tg_id}"):
+                            return (1, len(u_low))
+                        return (2, len(u_low))
+
+                    candidates = sorted(raw_candidates, key=_sort_key)
+
+                    logger.info(
+                        "BotSetup: find_existing_bot for tg_id=%s candidates=%s",
+                        tg_id, candidates,
                     )
 
-        except Exception as _pre_exc:
+                    for username in candidates:
 
-            logger.debug("BotRunner: SOCKS5 pre-check skipped — %s", _pre_exc)
+                        token = await self._get_token_via_conv(conv, username, buttons)
+
+                        if token:
+
+                            logger.info("BotSetup: found existing bot @%s", username)
+
+                            return token, username
+
+        except Exception as exc:
+
+            logger.debug("BotSetup: find_existing_bot failed — %s", exc)
+
+        return None, None
+
+    async def _bot_already_has_avatar(self, uname: str) -> bool:
+        """Проверяет, установлена ли уже аватарка у бота.
+
+        Сначала смотрит флаг в БД (быстро, без обращения к Telegram).
+        Если флаг не выставлен — реально проверяет наличие фото у бота через
+        get_entity (telethon вернёт photo=ChatPhotoEmpty, если фото нет).
+        """
+        try:
+            from ...assets import _DB_NS as _ASSETS_NS  # type: ignore
+        except Exception:
+            _ASSETS_NS = "kitsune.assets"
+
+        flag_key = f"bot_photo_{uname.lower()}"
+        try:
+            if self._db.get(_ASSETS_NS, flag_key, False):
+                return True
+        except Exception:
+            pass
+
+        try:
+            entity = await self._client.get_entity(f"@{uname}")
+            photo = getattr(entity, "photo", None)
+            if photo is not None:
+                cls_name = type(photo).__name__
+                if "Empty" not in cls_name:
+                    try:
+                        self._db.force_set(_ASSETS_NS, flag_key, True)
+                    except Exception:
+                        pass
+                    return True
+        except Exception as exc:
+            logger.debug("BotSetup: _bot_already_has_avatar(%s) failed — %s", uname, exc)
+        return False
+
+    async def _set_bot_avatar(self, uname: str) -> None:
+        """Устанавливает аватарку боту через @BotFather.
+
+        Защищён от:
+          • неправильного импорта (исправлен путь `kitsune.assets`);
+          • повторной установки, если фото уже есть;
+          • параллельных диалогов с @BotFather (через _BOTFATHER_LOCK).
+        """
+        try:
+            # ВАЖНО: правильный путь — kitsune.assets, а не kitsune.modules.assets.
+            from ...assets import BOT_AVATAR, _DB_NS  # type: ignore
+        except Exception as imp_exc:
+            logger.warning("BotSetup: аватарка бота не установлена: %s", imp_exc)
+            return
+
+        if not BOT_AVATAR.exists():
+            logger.warning(
+                "BotSetup: файл аватарки %s не найден — пропускаю установку",
+                BOT_AVATAR,
+            )
+            return
+
+        # Если аватарка уже стоит — даже не лезем к BotFather.
+        if await self._bot_already_has_avatar(uname):
+            logger.info("BotSetup: у бота @%s уже стоит аватарка — пропускаю", uname)
+            try:
+                self._db.force_set(_DB_NS, f"bot_photo_{uname.lower()}", True)
+            except Exception:
+                pass
+            return
+
+        try:
+            async with _BOTFATHER_LOCK:
+                # Небольшая пауза, чтобы предыдущий диалог BotFather
+                # точно успел закрыться на стороне Telethon.
+                await asyncio.sleep(1.0)
+                async with self._client.conversation("@BotFather", timeout=60) as conv:
+                    await conv.send_message("/setuserpic")
+                    await conv.get_response()
+                    await conv.send_message(f"@{uname}")
+                    r = await conv.get_response()
+                    if any(w in (r.text or "").lower()
+                           for w in ("photo", "фото", "pic", "send")):
+                        await conv.send_file(str(BOT_AVATAR))
+                        r2 = await conv.get_response()
+                        if any(w in (r2.text or "").lower()
+                               for w in ("updated", "установлено", "success", "saved", "done")):
+                            try:
+                                self._db.force_set(
+                                    _DB_NS, f"bot_photo_{uname.lower()}", True,
+                                )
+                            except Exception:
+                                pass
+                            logger.info("BotSetup: аватарка бота @%s установлена", uname)
+                            return
+                    logger.debug("BotSetup: BotFather неожиданный ответ при /setuserpic — %r", r2 if 'r2' in locals() else r)
+        except Exception as _ae:
+            logger.warning("BotSetup: аватарка бота не установлена: %s", _ae)
+
+    async def create_bot(self, me, bot_name: str) -> tuple[str | None, str | None]:
 
         try:
 
-            self.bot = _make_bot(token)
+            async with _BOTFATHER_LOCK:
 
-            self.dp = Dispatcher()
+                async with self._client.conversation("@BotFather", timeout=30) as conv:
 
-            router = Router()
+                    await conv.send_message("/start")
 
-            self.dp.include_router(router)
+                    await conv.get_response()
 
-            self._register_handlers(router)
+                    await conv.send_message("/newbot")
 
-            self._polling_task = asyncio.ensure_future(
+                    await conv.get_response()
 
-                self.dp.start_polling(self.bot, handle_signals=False)
+                    await conv.send_message(bot_name)
 
-            )
+                    await conv.get_response()
 
-            logger.info("BotRunner: polling started (first_run=%s)", first_run)
+                    # ВСЕГДА строим username из tg_id владельца — это гарантирует,
+                    # что при следующем запуске find_existing_bot найдёт бота по ID.
+                    return_uname: str | None = None
+                    return_token: str | None = None
 
-            asyncio.ensure_future(_run_asset_setup(self._client, self._db))
+                    for suffix in ["", f"_{me.id % 10000}", "_ub", "_kitsune_ub"]:
 
-            if first_run:
+                        uname = f"kitsune_{me.id}{suffix}_bot"
 
-                owner_id = self._db.get(_DB_KEY, "owner_id", None)
+                        await conv.send_message(uname)
 
-                if owner_id:
+                        resp = await conv.get_response()
 
-                    await asyncio.sleep(2)
+                        text = resp.text or ""
 
-                    bot_username = self._db.get(_DB_KEY, "bot_username", None)
+                        m = _TOKEN_RE.search(text)
 
-                    # 1) Отправляем GIF ОТ ЛИЦА ПОЛЬЗОВАТЕЛЯ инлайн-боту.
-                    #    Это и активирует бота в личных сообщениях, и даёт красивый визуальный
-                    #    баннер перед welcome-сообщением.
-                    try:
-                        from pathlib import Path as _Path
+                        if m:
 
-                        _gif = _Path(__file__).parent.parent.parent / "assets" / "welcome.gif"
+                            return_token = m.group(1)
+                            return_uname = uname
 
-                        if bot_username and _gif.exists():
-                            try:
-                                await self._client.send_file(
-                                    f"@{bot_username}",
-                                    str(_gif),
-                                )
-                                # Даём время на доставку/просмотр GIF
-                                await asyncio.sleep(1.2)
-                            except Exception as _ge:
-                                logger.debug("BotRunner: не удалось отправить welcome.gif: %s", _ge)
-                    except Exception:
-                        pass
+                            # Покидаем conversation/lock — даём вложенным
+                            # обработчикам возможность открыть свои диалоги
+                            # с @BotFather без коллизии.
+                            break
 
-                    # 2) Бот отправляет велкам-сообщение.
-                    try:
+                    else:
 
-                        from pathlib import Path as _Path
+                        return None, None
 
-                        _info = _Path(__file__).parent.parent.parent / "assets" / "kitsune_info.png"
+            if not return_token or not return_uname:
+                return None, None
 
-                        if _info.exists():
+            # Вне БотFather-лока: подключаем inline-mode и ставим аватарку.
+            try:
+                await self.enable_inline_mode(return_uname)
+            except Exception as _ie:
+                logger.warning("BotSetup: enable_inline_mode wrapper — %s", _ie)
 
-                            from aiogram.types import FSInputFile
+            try:
+                await self._set_bot_avatar(return_uname)
+            except Exception as _ae:
+                logger.warning("BotSetup: _set_bot_avatar wrapper — %s", _ae)
 
-                            await self.bot.send_photo(
+            return return_token, return_uname
 
-                                chat_id=int(owner_id),
+        except Exception as exc:
 
-                                photo=FSInputFile(str(_info)),
+            logger.error("BotSetup: create_bot failed — %s", exc)
 
-                                caption=_build_welcome_text(self._db),
+        return None, None
 
-                                parse_mode="HTML",
+    async def get_token_for_bot(self, username: str) -> str | None:
+        """Получает токен для конкретного бота через диалог с @BotFather.
 
-                            )
+        Делегирует основной поток в `_get_token_via_conv`, чтобы код выбора
+        бота из списка («Choose a bot to get Bot API access token.») жил
+        в одном месте.
+        """
 
-                        else:
+        username = username.lstrip("@")
 
-                            await self.bot.send_message(
+        try:
 
-                                chat_id=int(owner_id),
+            async with _BOTFATHER_LOCK:
 
-                                text=_build_welcome_text(self._db),
+                async with self._client.conversation("@BotFather", timeout=40) as conv:
 
-                                parse_mode="HTML",
+                    await conv.send_message("/mybots")
 
-                            )
+                    resp = await conv.get_response()
 
-                    except Exception as _wexc:
+                    buttons = _extract_buttons(resp)
 
-                        logger.warning("BotRunner: не удалось отправить welcome: %s", _wexc)
+                    return await self._get_token_via_conv(conv, username, buttons)
 
-                    # 3) Интервал авто-бэкапа (выбор языка появится после
-                    #    нажатия кнопки в обработчике _on_backup_interval).
-                    loader = getattr(self._client, "_kitsune_loader", None)
+        except Exception as exc:
 
-                    backup = loader.modules.get("backup") if loader else None
+            logger.debug("BotSetup: get_token_for_bot failed — %s", exc)
 
-                    if backup:
+        return None
 
-                        await backup.show_interval_setup(self.bot, int(owner_id))
+    async def list_kitsune_bots(self) -> list[tuple[str, str | None]]:
 
-                        await self._db.set(_DB_KEY, "backup_interval_asked", True)
+        results = []
+
+        try:
+
+            async with _BOTFATHER_LOCK:
+
+                async with self._client.conversation("@BotFather", timeout=40) as conv:
+
+                    await conv.send_message("/mybots")
+
+                    resp = await conv.get_response()
+
+                    usernames = _extract_buttons(resp)
+
+                    if not usernames:
+
+                        usernames = re.findall(r"@([a-zA-Z0-9_]+bot)", resp.text or "", re.IGNORECASE)
+
+                    for uname in usernames:
+
+                        uname = uname.lstrip("@")
+
+                        token = await self._get_token_via_conv(conv, uname, _extract_buttons(resp))
+
+                        results.append((uname, token))
+
+        except Exception as exc:
+
+            logger.debug("BotSetup: list_kitsune_bots failed — %s", exc)
+
+        return results
+
+    async def _bot_inline_already_enabled(self, username: str) -> bool:
+        """Эвристика: открываем меню бота в @BotFather и смотрим, есть ли пункт
+        Inline Mode со значением «Enabled». Если выставлен — возвращаем True.
+
+        Делается под общим _BOTFATHER_LOCK, чтобы не конфликтовать с другими диалогами.
+        """
+        try:
+            async with self._client.conversation("@BotFather", timeout=20) as conv:
+                await conv.send_message(f"@{username}")
+                resp = await conv.get_response()
+                text = (resp.text or "").lower()
+                # BotFather пишет "Inline Mode: Enabled" или подобное
+                if "inline mode" in text and "enabled" in text:
+                    return True
+                if "инлайн" in text and ("вкл" in text or "enabled" in text):
+                    return True
+        except Exception as exc:
+            logger.debug("BotSetup: _bot_inline_already_enabled(%s) failed — %s",
+                         username, exc)
+        return False
+
+    async def enable_inline_mode(self, username: str) -> None:
+
+        try:
+
+            async with _BOTFATHER_LOCK:
+
+                # Если inline уже включён — не дублируем процесс.
+                if await self._bot_inline_already_enabled(username):
+                    logger.info(
+                        "BotSetup: inline mode уже включён для @%s — пропускаю", username,
+                    )
+                    return
+
+                # Пауза, чтобы предыдущая conversation в этом же чате 100%
+                # успела закрыться на сервере Telethon.
+                await asyncio.sleep(1.0)
+
+                async with self._client.conversation("@BotFather", timeout=30) as conv:
+
+                    await conv.send_message("/setinline")
+
+                    await conv.get_response()
+
+                    await conv.send_message(f"@{username}")
+
+                    await conv.get_response()
+
+                    await conv.send_message("kitsune")
+
+                    await conv.get_response()
+
+                logger.info("BotSetup: inline mode enabled for @%s", username)
+
+                # Ещё одна пауза перед следующим conversation
+                # с тем же чатом — Telethon должен освободить exclusive lock.
+                await asyncio.sleep(1.5)
+
+                async with self._client.conversation("@BotFather", timeout=30) as conv:
+
+                    await conv.send_message("/setinlinefeedback")
+
+                    await conv.get_response()
+
+                    await conv.send_message(f"@{username}")
+
+                    await conv.get_response()
+
+                    await conv.send_message("Enabled")
+
+                    await conv.get_response()
 
         except Exception as exc:
 
             err = str(exc).lower()
-
-            _net = ("network", "connection", "ssl", "timeout", "certificate",
-
-                    "connect", "resolve", "reset", "eof", "broken pipe")
-
-            if any(kw in err for kw in _net):
-
-                logger.warning("BotRunner: network error — retry in 60s: %s", exc)
-
-                await asyncio.sleep(60)
-
-                token2 = self._db.get(_DB_KEY, "bot_token", None)
-
-                if token2:
-
-                    asyncio.ensure_future(self.start(str(token2), first_run=False))
-
+            # Эта ошибка не критична: значит inline-режим скорее всего уже включён.
+            if "exclusive conversation" in err or "already has one open" in err:
+                logger.info(
+                    "BotSetup: enable_inline_mode пропущен (диалог BotFather уже занят) — %s",
+                    exc,
+                )
             else:
-
-                logger.exception("BotRunner: polling failed — bot may be frozen")
-
-                await self._client.send_message(
-
-                    "me",
-
-                    "⚠️ <b>Бот заморожен Telegram.</b>\n\n"
-
-                    "Создай нового бота у @BotFather и замени токен в config.toml:\n\n"
-
-                    "<code>bot_token = \"новый_токен\"</code>\n\nЗатем перезапусти Kitsune.",
-
-                    parse_mode="html",
-
-                )
-
-    async def stop(self) -> None:
-
-        if self._polling_task and not self._polling_task.done():
-
-            self._polling_task.cancel()
-
-        if self.dp:
-
-            try:
-
-                await self.dp.stop_polling()
-
-            except Exception:
-
-                pass
-
-        if self.bot:
-
-            try:
-
-                await self.bot.session.close()
-
-            except Exception:
-
-                pass
-
-        self.bot = None
-
-        self.dp = None
-
-        self._polling_task = None
-
-    async def send_message(self, chat_id: int, text: str, **kwargs) -> None:
-
-        if self.bot:
-
-            await self.bot.send_message(chat_id=chat_id, text=text, **kwargs)
-
-    def _register_handlers(self, router) -> None:
-
-        from aiogram.filters import Command
-
-        from aiogram.types import Message, CallbackQuery
-
-        ref = self
-
-        @router.message(Command("start"))
-
-        async def on_start(msg: Message) -> None:
-
-            await ref._on_start(msg)
-
-        @router.callback_query(lambda c: c.data in ("update_yes", "update_no", "do_update"))
-
-        async def on_update_cb(call: CallbackQuery) -> None:
-
-            await ref._on_update_cb(call)
-
-        @router.callback_query(lambda c: c.data and c.data.startswith("backup_interval:"))
-
-        async def on_backup_interval(call: CallbackQuery) -> None:
-
-            await ref._on_backup_interval(call)
-
-        @router.callback_query(lambda c: c.data and c.data.startswith("lang_select:"))
-
-        async def on_lang_select(call: CallbackQuery) -> None:
-
-            await ref._on_lang_select(call)
-
-        @router.callback_query(lambda c: c.data and c.data.startswith("cfg_"))
-
-        async def on_config_cb(call: CallbackQuery) -> None:
-
-            await ref._on_config_cb(call)
-
-        @router.message(lambda m: True)
-
-        async def on_text_input(msg: Message) -> None:
-
-            await ref._on_text_input(msg)
-
-    async def _on_start(self, msg) -> None:
-
-        owner_id = self._db.get(_DB_KEY, "owner_id", None)
-
-        # Fallback: if owner_id not in DB yet, use client.tg_id (set in main.py)
-        if owner_id is None:
-
-            owner_id = getattr(self._client, "tg_id", None)
-
-            if owner_id is not None:
-
-                import asyncio as _asyncio
-
-                _asyncio.ensure_future(
-
-                    self._db.set(_DB_KEY, "owner_id", owner_id)
-
-                )
-
-                logger.info("BotRunner: owner_id restored from tg_id=%s", owner_id)
-
-        if owner_id is None or msg.from_user.id != int(owner_id):
-
-            try:
-
-                await msg.answer("🔒 Нет доступа.")
-
-            except Exception:
-
-                pass
-
-            return
+                logger.warning("BotSetup: could not enable inline mode — %s", exc)
+
+    async def _get_token_via_conv(
+        self,
+        conv,
+        username: str,
+        buttons: list[str],
+    ) -> str | None:
+        """Достаёт токен у @BotFather для указанного `username`.
+
+        Полный поток (исправлен, чтобы корректно обрабатывать все три уровня
+        BotFather):
+
+        1. /mybots  → `buttons` (список ботов).
+        2. Кликаем по кнопке/тексту с `@username`  → меню бота.
+        3. В меню ищем кнопку «API Token». Если её нет — отправляем `/token`.
+        4. ⚠ ВАЖНО: после `/token` BotFather может прислать «Choose a bot to
+           get Bot API access token.» со списком кнопок. Это и был баг —
+           раньше мы тут возвращали None и шли создавать нового бота. Теперь
+           кликаем по нужной кнопке и читаем токен.
+        """
+
+        username = username.lstrip("@")
 
         try:
 
-            backup_asked = self._db.get(_DB_KEY, "backup_interval_asked", False)
+            # --- Шаг 2: выбираем нашего бота из списка /mybots --------------
+            btn = _pick_bot_button(buttons, username)
 
-            interval_set = self._db.get("kitsune.backup", "interval_h", None)
+            await conv.send_message(btn or f"@{username}")
 
-            loader = getattr(self._client, "_kitsune_loader", None)
+            menu = await conv.get_response()
 
-            backup = loader.modules.get("backup") if loader else None
+            # Иногда токен прилетает уже здесь (если у бота единственный
+            # сценарий — отдать токен).
+            m = _TOKEN_RE.search(menu.text or "")
+            if m:
+                return m.group(1)
 
-            from pathlib import Path as _Path
+            # --- Шаг 3: жмём «API Token» из меню или шлём /token -----------
+            menu_btns = _extract_buttons(menu)
 
-            _info = _Path(__file__).parent.parent.parent / "assets" / "kitsune_info.png"
-
-            if _info.exists():
-
-                from aiogram.types import FSInputFile
-
-                await msg.answer_photo(
-
-                    photo=FSInputFile(str(_info)),
-
-                    caption=_build_welcome_text(self._db),
-
-                    parse_mode="HTML",
-
-                )
-
-            else:
-
-                await msg.answer(
-
-                    _build_welcome_text(self._db),
-
-                    parse_mode="HTML",
-
-                )
-
-            if (not backup_asked or not interval_set) and backup:
-
-                from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-
-                _btns, _row = [], []
-
-                for _h in [2, 4, 6, 8, 12, 24, 48]:
-
-                    _row.append(InlineKeyboardButton(
-
-                        text=f"{_h}ч",
-
-                        callback_data=f"backup_interval:{_h}",
-
-                    ))
-
-                    if len(_row) == 4:
-
-                        _btns.append(_row)
-
-                        _row = []
-
-                if _row:
-
-                    _btns.append(_row)
-
-                _btns.append([InlineKeyboardButton(
-
-                    text="❌ Отключить",
-
-                    callback_data="backup_interval:0",
-
-                )])
-
-                await msg.answer(
-
-                    "🗂 <b>Авто-бэкап</b>\n\nВыбери интервал резервного копирования:",
-
-                    reply_markup=InlineKeyboardMarkup(inline_keyboard=_btns),
-
-                    parse_mode="HTML",
-
-                )
-
-                await self._db.set(_DB_KEY, "backup_interval_asked", True)
-
-        except Exception as e:
-
-            logger.warning("BotRunner: on_start failed — %s", e)
-
-    async def _on_update_cb(self, call) -> None:
-
-        owner_id = self._db.get(_DB_KEY, "owner_id", None)
-
-        try:
-
-            if call.from_user.id != owner_id:
-
-                await call.answer("🔒 Нет доступа.", show_alert=True)
-
-                return
-
-            await call.answer()
-
-        except Exception:
-
-            return
-
-        if call.data == "update_no":
-
-            await self._db.delete("kitsune.updater", "pending_update")
-
-            try:
-
-                await call.message.edit_text("❌ Обновление отменено.")
-
-            except Exception:
-
-                pass
-
-            return
-
-        try:
-
-            await call.message.edit_text("⬇️ <b>Скачиваю обновление...</b>", parse_mode="HTML")
-
-        except Exception:
-
-            pass
-
-        asyncio.ensure_future(self._safe_update_run(call.message))
-
-    async def _safe_update_run(self, msg) -> None:
-
-        async def edit(text: str) -> None:
-
-            try:
-
-                await msg.edit_text(text, parse_mode="HTML")
-
-            except Exception:
-
-                pass
-
-        loader = getattr(self._client, "_kitsune_loader", None)
-
-        notifier = loader.modules.get("notifier") if loader else None
-
-        if not notifier:
-
-            return
-
-        for attempt in range(1, 4):
-
-            try:
-
-                await notifier._updater.do_update(msg)
-
-                return
-
-            except Exception as exc:
-
-                err = str(exc)
-
-                if any(w in err for w in ("unable to access", "Couldn't connect", "timed out")):
-
-                    if attempt < 3:
-
-                        await edit(f"⚠️ Нет соединения, повтор {attempt}/3...")
-
-                        await asyncio.sleep(15)
-
-                        continue
-
-                await edit(f"❌ Ошибка / Error:\n<code>{err}</code>")
-
-                return
-
-    async def _on_backup_interval(self, call) -> None:
-
-        owner_id = self._db.get(_DB_KEY, "owner_id", None)
-
-        try:
-
-            if call.from_user.id != owner_id:
-
-                await call.answer("🔒 Нет доступа.", show_alert=True)
-
-                return
-
-        except Exception:
-
-            return
-
-        loader = getattr(self._client, "_kitsune_loader", None)
-
-        backup = loader.modules.get("backup") if loader else None
-
-        if backup:
-
-            await backup.handle_interval_callback(call)
-
-            # После выбора интервала бэкапа — показываем выбор языка,
-            # если язык ещё не выбран в этой сессии первого запуска.
-            try:
-                if not self._db.get(_DB_KEY, "lang_asked", False):
-                    await self._send_lang_select(call.message.chat.id)
-            except Exception as _le:
-                logger.debug("BotRunner: lang select after backup failed: %s", _le)
-
-        else:
-
-            await call.answer("Модуль backup не загружен.", show_alert=True)
-
-    async def _send_lang_select(self, chat_id: int) -> None:
-        """Отправляет инлайн-клавиатуру с выбором языка из langpacks/."""
-        if not self.bot:
-            return
-        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-
-        # Дружелюбные имена языков.
-        lang_labels = {
-            "ru":   "🇷🇺 Русский",
-            "en":   "🇬🇧 English",
-            "de":   "🇩🇪 Deutsch",
-            "ua":   "🇺🇦 Українська",
-            "uk":   "🇺🇦 Українська",
-            "jp":   "🇯🇵 日本語",
-            "tr":   "🇹🇷 Türkçe",
-            "uz":   "🇺🇿 O'zbekcha",
-            "uwu":  "🐾 UwU",
-            "leet": "👾 1337",
-        }
-
-        from pathlib import Path as _Path
-        lp_dir = _Path(__file__).parent.parent.parent / "langpacks"
-        codes = sorted([p.stem for p in lp_dir.glob("*.yml")]) if lp_dir.exists() else ["ru", "en"]
-
-        # Убираем дубли (например ua и uk — оба украинские).
-        seen, ordered = set(), []
-        for c in codes:
-            label = lang_labels.get(c, c)
-            if label in seen:
-                continue
-            seen.add(label)
-            ordered.append(c)
-
-        buttons, row = [], []
-        for code in ordered:
-            label = lang_labels.get(code, f"🌐 {code}")
-            row.append(InlineKeyboardButton(
-                text=label,
-                callback_data=f"lang_select:{code}",
-            ))
-            if len(row) == 2:
-                buttons.append(row)
-                row = []
-        if row:
-            buttons.append(row)
-
-        try:
-            await self.bot.send_message(
-                chat_id=chat_id,
-                text="🌐 <b>Выбери язык интерфейса:</b>\n\n"
-                     "<i>Можно поменять позже командой <code>.setlang &lt;код&gt;</code></i>",
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
-                parse_mode="HTML",
-            )
-        except Exception as _se:
-            logger.warning("BotRunner: не удалось отправить lang-select: %s", _se)
-
-    async def _on_lang_select(self, call) -> None:
-        owner_id = self._db.get(_DB_KEY, "owner_id", None)
-        try:
-            if owner_id is None or call.from_user.id != int(owner_id):
-                await call.answer("🔒 Нет доступа.", show_alert=True)
-                return
-        except Exception:
-            return
-
-        try:
-            _, code = call.data.split(":", 1)
-        except ValueError:
-            await call.answer()
-            return
-
-        from pathlib import Path as _Path
-        lp_dir = _Path(__file__).parent.parent.parent / "langpacks"
-        if not (lp_dir / f"{code}.yml").exists():
-            await call.answer("Язык не найден.", show_alert=True)
-            return
-
-        # Сохраняем выбор языка и применяем к Translator.
-        await self._db.set("kitsune.core", "lang", code)
-        await self._db.set(_DB_KEY, "lang_asked", True)
-
-        try:
-            from ...translations import Translator  # type: ignore
-            tr = getattr(self._client, "_kitsune_translator", None)
-            if tr is None:
-                tr = Translator(self._db)
-                self._client._kitsune_translator = tr
-            tr.set_language(code)
-        except Exception as _te:
-            logger.debug("BotRunner: Translator update failed: %s", _te)
-
-        nice = {
-            "ru": "🇷🇺 Русский",
-            "en": "🇬🇧 English",
-            "de": "🇩🇪 Deutsch",
-            "ua": "🇺🇦 Українська",
-            "uk": "🇺🇦 Українська",
-            "jp": "🇯🇵 日本語",
-            "tr": "🇹🇷 Türkçe",
-            "uz": "🇺🇿 O'zbekcha",
-            "uwu": "🐾 UwU",
-            "leet": "👾 1337",
-        }.get(code, code)
-
-        try:
-            await call.message.edit_text(
-                f"✅ Язык интерфейса: <b>{nice}</b>\n\n"
-                f"🔄 Изменить позже: <code>.setlang &lt;код&gt;</code>",
-                parse_mode="HTML",
-            )
-        except Exception:
-            pass
-        try:
-            await call.answer("Язык применён ✅")
-        except Exception:
-            pass
-
-    async def _on_config_cb(self, call) -> None:
-
-        owner_id = self._db.get(_DB_KEY, "owner_id", None)
-
-        try:
-
-            if call.from_user.id != owner_id:
-
-                await call.answer("🔒 Нет доступа.", show_alert=True)
-
-                return
-
-            await call.answer()
-
-        except Exception:
-
-            return
-
-        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-
-        from ..config import _get_configurable, _mod_text, _list_text
-
-        data = call.data
-
-        if data == "cfg_close":
-
-            await call.message.delete()
-
-            return
-
-        if data == "cfg_back":
-
-            configurable = _get_configurable(self._client)
-
-            buttons, row = [], []
-
-            for name in sorted(configurable.keys()):
-
-                row.append(InlineKeyboardButton(text=configurable[name].name, callback_data=f"cfg_mod:{name}"))
-
-                if len(row) == 3:
-
-                    buttons.append(row)
-
-                    row = []
-
-            if row:
-
-                buttons.append(row)
-
-            buttons.append([InlineKeyboardButton(text="❌ Закрыть", callback_data="cfg_close")])
-
-            await call.message.edit_text(
-
-                _list_text(configurable),
-
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
-
-                parse_mode="HTML",
-
+            api_btn = next(
+                (b for b in menu_btns if "token" in b.lower() or "api" in b.lower()),
+                None,
             )
 
-            return
+            await conv.send_message(api_btn or "/token")
 
-        if data.startswith("cfg_mod:"):
+            token_resp = await conv.get_response()
 
-            mod_name = data.split(":", 1)[1]
+            m2 = _TOKEN_RE.search(token_resp.text or "")
+            if m2:
+                return m2.group(1)
 
-            configurable = _get_configurable(self._client)
+            # --- Шаг 4 (фикс): BotFather прислал список ботов на выбор -----
+            # Текст: «Choose a bot to get Bot API access token.»
+            # Кнопки: список всех @username_bot пользователя.
+            if _looks_like_choose_bot(token_resp):
 
-            mod = configurable.get(mod_name)
+                choose_btns = _extract_buttons(token_resp)
 
-            if not mod:
+                pick = _pick_bot_button(choose_btns, username)
 
-                await call.message.edit_text("❌ Модуль не найден.")
+                if pick is None:
+                    logger.debug(
+                        "BotSetup: 'Choose a bot' пришёл, но кнопки для @%s не нашлось "
+                        "(buttons=%r)", username, choose_btns,
+                    )
+                    return None
 
-                return
-
-            buttons = [[InlineKeyboardButton(text=f"✏️ {k}", callback_data=f"cfg_key:{mod_name}:{k}")] for k in mod.config.keys()]
-
-            buttons.append([
-
-                InlineKeyboardButton(text="◀️ Назад", callback_data="cfg_back"),
-
-                InlineKeyboardButton(text="❌ Закрыть", callback_data="cfg_close"),
-
-            ])
-
-            await call.message.edit_text(_mod_text(mod_name, mod), reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons), parse_mode="HTML")
-
-            return
-
-        if data.startswith("cfg_key:"):
-
-            _, mod_name, key = data.split(":", 2)
-
-            configurable = _get_configurable(self._client)
-
-            mod = configurable.get(mod_name)
-
-            if not mod or key not in mod.config:
-
-                await call.message.edit_text("❌ Параметр не найден.")
-
-                return
-
-            val, default, doc = mod.config[key], mod.config.get_default(key), mod.config.get_doc(key) or "—"
-
-            text = (
-
-                f"⚙️ <b>{mod.name}</b> → <code>{key}</code>\n\n"
-
-                f"📄 <i>{doc}</i>\n\n"
-
-                f"🔹 Текущее: <b>{val}</b>\n"
-
-                f"🔸 По умолчанию: <b>{default}</b>\n\n"
-
-                f"Отправь новое значение в ответ на это сообщение."
-
-            )
-
-            buttons = []
-
-            if isinstance(val, bool):
-
-                buttons.append([
-
-                    InlineKeyboardButton(text="☑️ True (текущее)" if val else "✅ True", callback_data=f"cfg_set:{mod_name}:{key}:true"),
-
-                    InlineKeyboardButton(text="☑️ False (текущее)" if not val else "❌ False", callback_data=f"cfg_set:{mod_name}:{key}:false"),
-
-                ])
-
-            if val != default:
-
-                buttons.append([InlineKeyboardButton(text="🔄 Сбросить до дефолта", callback_data=f"cfg_reset:{mod_name}:{key}")])
-
-            buttons.append([
-
-                InlineKeyboardButton(text="◀️ Назад", callback_data=f"cfg_mod:{mod_name}"),
-
-                InlineKeyboardButton(text="❌ Закрыть", callback_data="cfg_close"),
-
-            ])
-
-            await self._db.set("kitsune.config", "pending_input", {"mod": mod_name, "key": key, "msg_id": call.message.message_id, "chat_id": call.message.chat.id})
-
-            await call.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons), parse_mode="HTML")
-
-            return
-
-        if data.startswith("cfg_set:"):
-
-            _, mod_name, key, raw_val = data.split(":", 3)
-
-            configurable = _get_configurable(self._client)
-
-            mod = configurable.get(mod_name)
-
-            if mod and key in mod.config:
-
-                mod.config[key] = raw_val.lower() == "true"
-
-                await self._db.set(f"kitsune.config.{mod_name}", "values", {k: mod.config[k] for k in mod.config.keys()})
-
-                await call.message.edit_text(
-
-                    f"✅ <b>{mod.name}</b> → <code>{key}</code> = <b>{mod.config[key]}</b>",
-
-                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data=f"cfg_mod:{mod_name}")]]),
-
-                    parse_mode="HTML",
-
+                logger.debug(
+                    "BotSetup: выбираю бота из списка /token → %r", pick,
                 )
 
-            return
+                await conv.send_message(pick)
 
-        if data.startswith("cfg_reset:"):
+                final_resp = await conv.get_response()
 
-            _, mod_name, key = data.split(":", 2)
+                m3 = _TOKEN_RE.search(final_resp.text or "")
+                if m3:
+                    return m3.group(1)
 
-            configurable = _get_configurable(self._client)
+                # Иногда после выбора BotFather всё равно показывает меню,
+                # а токен прилетает ещё одним сообщением — добираем.
+                try:
+                    extra = await asyncio.wait_for(
+                        conv.get_response(), timeout=5.0,
+                    )
+                    m4 = _TOKEN_RE.search(extra.text or "")
+                    if m4:
+                        return m4.group(1)
+                except (asyncio.TimeoutError, Exception):
+                    pass
 
-            mod = configurable.get(mod_name)
-
-            if mod and key in mod.config:
-
-                mod.config[key] = mod.config.get_default(key)
-
-                await self._db.set(f"kitsune.config.{mod_name}", "values", {k: mod.config[k] for k in mod.config.keys()})
-
-                await call.message.edit_text(
-
-                    f"✅ <b>{mod.name}</b> → <code>{key}</code> сброшен до <b>{mod.config[key]}</b>",
-
-                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data=f"cfg_mod:{mod_name}")]]),
-
-                    parse_mode="HTML",
-
+                # Возможно, после выбора нам сначала показывают меню бота,
+                # а токен надо ещё «попросить» кнопкой API Token.
+                final_btns = _extract_buttons(final_resp)
+                api_btn2 = next(
+                    (b for b in final_btns
+                     if "token" in b.lower() or "api" in b.lower()),
+                    None,
                 )
+                if api_btn2:
+                    await conv.send_message(api_btn2)
+                    token_resp2 = await conv.get_response()
+                    m5 = _TOKEN_RE.search(token_resp2.text or "")
+                    if m5:
+                        return m5.group(1)
 
-            return
+            return None
 
-    async def _on_text_input(self, msg) -> None:
+        except Exception as exc:
 
-        owner_id = self._db.get(_DB_KEY, "owner_id", None)
+            logger.debug("BotSetup: _get_token_via_conv failed for %s — %s", username, exc)
 
-        if msg.from_user.id != owner_id:
-
-            return
-
-        pending = self._db.get("kitsune.config", "pending_input", None)
-
-        if not pending:
-
-            return
-
-        await self._db.delete("kitsune.config", "pending_input")
-
-        mod_name, key, value = pending["mod"], pending["key"], msg.text or ""
-
-        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-
-        from ..config import _get_configurable
-
-        configurable = _get_configurable(self._client)
-
-        mod = configurable.get(mod_name)
-
-        if not mod or key not in mod.config:
-
-            return
-
-        orig = mod.config.get_default(key)
-
-        try:
-
-            if isinstance(orig, int):
-
-                value = int(value)
-
-            elif isinstance(orig, float):
-
-                value = float(value)
-
-        except (ValueError, TypeError):
-
-            pass
-
-        mod.config[key] = value
-
-        await self._db.set(f"kitsune.config.{mod_name}", "values", {k: mod.config[k] for k in mod.config.keys()})
-
-        try:
-
-            await self.bot.edit_message_text(
-
-                chat_id=pending["chat_id"], message_id=pending["msg_id"],
-
-                text=f"✅ <b>{mod.name}</b> → <code>{key}</code> = <b>{value}</b>",
-
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Назад", callback_data=f"cfg_mod:{mod_name}")]]),
-
-                parse_mode="HTML",
-
-            )
-
-        except Exception:
-
-            pass
-
-        try:
-
-            await msg.delete()
-
-        except Exception:
-
-            pass
-
+            return None
