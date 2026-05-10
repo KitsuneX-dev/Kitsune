@@ -185,9 +185,9 @@ button:disabled{opacity:.35;cursor:not-allowed;box-shadow:none;filter:none}
 
   <div class="logo">🦊</div>
 
-  <h1>Kitsune Userbot</h1>
+  <h1 id="setup_title">Kitsune Userbot</h1>
 
-  <p class="sub">by Yushi · первоначальная настройка</p>
+  <p class="sub" id="setup_sub">by Yushi · первоначальная настройка</p>
 
   <div class="steps-bar">
 
@@ -201,7 +201,9 @@ button:disabled{opacity:.35;cursor:not-allowed;box-shadow:none;filter:none}
 
   <div class="step active" id="step1">
 
-    <div class="step-title">🔑 API-данные Telegram</div>
+    <div class="step-title" id="step1_title">🔑 API-данные Telegram</div>
+
+    <div id="api_block">
 
     <label>API ID</label>
 
@@ -212,6 +214,8 @@ button:disabled{opacity:.35;cursor:not-allowed;box-shadow:none;filter:none}
     <input type="text" id="api_hash" placeholder="0abc123def456..." autocomplete="off">
 
     <p class="hint">Получи на <a href="https://my.telegram.org" target="_blank">my.telegram.org</a> → API development tools</p>
+
+    </div>
 
     <label>Номер телефона</label>
 
@@ -275,6 +279,26 @@ button:disabled{opacity:.35;cursor:not-allowed;box-shadow:none;filter:none}
 
 <script>
 
+let HYDRO_ONLY = false;
+
+// Спрашиваем у бэка режим, ещё до взаимодействия с пользователем.
+(async()=>{
+  try{
+    const r = await fetch('/api/mode');
+    const j = await r.json();
+    HYDRO_ONLY = !!(j && j.hydrogram_only);
+    if(HYDRO_ONLY){
+      // Меняем шапку и прячем поля api_id/api_hash —
+      // в этом режиме они уже сохранены в config.toml.
+      document.getElementById('setup_title').textContent = 'Kitsune · повторная регистрация';
+      document.getElementById('setup_sub').textContent = 'Только Hydrogram-сессия (предыдущая истекла)';
+      document.getElementById('step1_title').textContent = '🔁 Повторная регистрация Hydrogram';
+      const apib = document.getElementById('api_block');
+      if(apib){ apib.style.display = 'none'; }
+    }
+  }catch(_){ /* offline / 404 → считаем что обычный режим */ }
+})();
+
 function setDots(a){
 
   for(let i=1;i<=3;i++){
@@ -321,19 +345,28 @@ async function post(url,data){
 
 async function sendCode(){
 
-  const api_id=document.getElementById('api_id').value.trim();
-
-  const api_hash=document.getElementById('api_hash').value.trim();
-
   const phone=document.getElementById('phone').value.trim();
-
-  if(!api_id||!api_hash){showErr(1,'Заполни API ID и API Hash');return;}
 
   if(!phone){showErr(1,'Введи номер телефона');return;}
 
+  let payload;
+
+  if(HYDRO_ONLY){
+
+    payload = {phone};
+
+  } else {
+
+    const api_id=document.getElementById('api_id').value.trim();
+    const api_hash=document.getElementById('api_hash').value.trim();
+    if(!api_id||!api_hash){showErr(1,'Заполни API ID и API Hash');return;}
+    payload = {api_id:parseInt(api_id), api_hash, phone};
+
+  }
+
   setBtn('btn1','Отправляем код…',true);
 
-  const res=await post('/api/sendcode',{api_id:parseInt(api_id),api_hash,phone});
+  const res=await post('/api/sendcode',payload);
 
   setBtn('btn1','Получить код →',false);
 
@@ -387,7 +420,12 @@ async function check2fa(){
 
 class SetupServer:
 
-    def __init__(self, save_config_fn: Callable, get_config_fn: Callable) -> None:
+    def __init__(
+        self,
+        save_config_fn: Callable,
+        get_config_fn: Callable,
+        hydrogram_only: bool = False,
+    ) -> None:
 
         self._save_config = save_config_fn
 
@@ -407,6 +445,18 @@ class SetupServer:
 
         self._runner: Any = None
 
+        # Если True — мы НЕ создаём Telethon-сессию заново, а только
+        # проводим заново авторизацию для Hydrogram (после AuthKeyUnregistered).
+        self._hydrogram_only: bool = bool(hydrogram_only)
+
+        # Hydrogram-клиент, который живёт всё время повторной регистрации
+        # (нужен, чтобы send_code → sign_in использовали один и тот же auth_key).
+        self._hydro_client: Any = None
+
+        self._hydro_phone_code_hash: str | None = None
+
+        self._hydrogram_success: bool = False
+
     async def start(self, host: str = "0.0.0.0", port: int = 8080) -> None:
 
         app = web.Application()
@@ -418,6 +468,9 @@ class SetupServer:
         app.router.add_post("/api/signin", self._api_signin)
 
         app.router.add_post("/api/2fa", self._api_2fa)
+
+        # Эндпоинт чтобы фронт понял в каком режиме работает мастер.
+        app.router.add_get("/api/mode", self._api_mode)
 
         self._runner = web.AppRunner(app)
 
@@ -495,7 +548,28 @@ class SetupServer:
 
         return web.Response(text=_HTML, content_type="text/html")
 
+    async def _api_mode(self, _: web.Request) -> web.Response:
+
+        # Фронт спрашивает: это первичная установка или повторная только для Hydrogram.
+        cfg = self._get_config() or {}
+
+        return web.json_response({
+
+            "hydrogram_only": bool(self._hydrogram_only),
+
+            # В режиме hydrogram_only api_id/api_hash уже сохранены и не нужны от пользователя.
+            "api_id": cfg.get("api_id") if self._hydrogram_only else None,
+
+            "api_hash": cfg.get("api_hash") if self._hydrogram_only else None,
+
+        })
+
     async def _api_sendcode(self, request: web.Request) -> web.Response:
+
+        # Вторая ветка — только для Hydrogram, без перерегистрации Telethon.
+        if self._hydrogram_only:
+
+            return await self._api_sendcode_hydrogram(request)
 
         try:
 
@@ -703,6 +777,10 @@ class SetupServer:
 
     async def _api_signin(self, request: web.Request) -> web.Response:
 
+        if self._hydrogram_only:
+
+            return await self._api_signin_hydrogram(request)
+
         try:
 
             data = await request.json()
@@ -740,6 +818,10 @@ class SetupServer:
             return self._err(str(exc))
 
     async def _api_2fa(self, request: web.Request) -> web.Response:
+
+        if self._hydrogram_only:
+
+            return await self._api_2fa_hydrogram(request)
 
         try:
 
@@ -984,6 +1066,276 @@ class SetupServer:
                     await hydro.disconnect()
                 except Exception:
                     pass
+
+    # ==================================================================
+    # Hydrogram-only flow: повторная регистрация только Hydrogram-сессии
+    # после AuthKeyUnregistered. Telethon-сессия НЕ трогается.
+    # ==================================================================
+
+    async def _api_sendcode_hydrogram(self, request: web.Request) -> web.Response:
+
+        try:
+            data = await request.json()
+
+            self._phone = str(data.get("phone", "")).strip()
+
+            if not self._phone:
+
+                return self._err("Введи номер телефона")
+
+            cfg = self._get_config() or {}
+
+            api_id = int(cfg.get("api_id") or 0)
+
+            api_hash = str(cfg.get("api_hash") or "")
+
+            if not api_id or not api_hash:
+
+                return self._err(
+                    "В config.toml не найдены api_id / api_hash. "
+                    "Это повторная регистрация возможна только из ранее настроенного Kitsune."
+                )
+
+            from pathlib import Path as _Path
+
+            DATA_DIR = _Path.home() / ".kitsune"
+
+            DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+            hydro_session_file = DATA_DIR / "kitsune_hydro.session"
+
+            # Сносим остатки от прошлых попыток, чтобы Hydrogram не ругался.
+            for _suf in ("", "-journal", ".wal", ".shm"):
+
+                _p = _Path(str(hydro_session_file) + _suf)
+
+                try:
+
+                    if _p.exists():
+
+                        _p.unlink()
+
+                except Exception:
+
+                    pass
+
+            try:
+
+                from hydrogram import Client as HydroClient
+
+            except Exception:
+
+                return self._err(
+                    "hydrogram не установлен. Выполни: pip install hydrogram tgcrypto"
+                )
+
+            kwargs: dict = dict(
+                name="kitsune_hydro",
+                api_id=api_id,
+                api_hash=api_hash,
+                workdir=str(DATA_DIR),
+                phone_number=self._phone,
+                device_model="Kitsune Userbot (media)",
+                app_version="1.0.0",
+                system_version="1.0",
+                lang_code="ru",
+                no_updates=True,
+                takeout=False,
+            )
+
+            proxy_cfg = (cfg.get("proxy") or {})
+
+            if proxy_cfg.get("host") and proxy_cfg.get("port"):
+
+                ptype = str(proxy_cfg.get("type", "SOCKS5")).upper()
+
+                hydro_proxy_type = {
+                    "SOCKS5": "socks5",
+                    "SOCKS4": "socks4",
+                    "HTTP":   "http",
+                    "HTTPS":  "http",
+                }.get(ptype)
+
+                if hydro_proxy_type:
+
+                    kwargs["proxy"] = dict(
+                        scheme=hydro_proxy_type,
+                        hostname=str(proxy_cfg["host"]),
+                        port=int(proxy_cfg["port"]),
+                        username=proxy_cfg.get("username") or None,
+                        password=proxy_cfg.get("password") or None,
+                    )
+
+            # Если от прошлой попытки остался открытый клиент — закроем.
+            if self._hydro_client is not None:
+
+                try:
+
+                    await self._hydro_client.disconnect()
+
+                except Exception:
+
+                    pass
+
+                self._hydro_client = None
+
+            self._hydro_client = HydroClient(**kwargs)
+
+            await self._hydro_client.connect()
+
+            sent = await asyncio.wait_for(
+                self._hydro_client.send_code(self._phone), timeout=30.0,
+            )
+
+            self._hydro_phone_code_hash = sent.phone_code_hash
+
+            return web.json_response({"ok": True})
+
+        except asyncio.TimeoutError:
+
+            return self._err("Не удалось подключиться к Telegram (timeout). Проверь связь.")
+
+        except Exception as exc:
+
+            logger.exception("setup: /api/sendcode (hydrogram) error")
+
+            return self._err(str(exc))
+
+    async def _api_signin_hydrogram(self, request: web.Request) -> web.Response:
+
+        try:
+
+            data = await request.json()
+
+            code = str(data.get("code", "")).strip()
+
+            self._last_code = code
+
+            if not code:
+
+                return self._err("Введи код")
+
+            if self._hydro_client is None or not self._phone or not self._hydro_phone_code_hash:
+
+                return self._err("Сессия потеряна. Перезапусти мастер и запроси код заново.")
+
+            try:
+
+                from hydrogram.errors import SessionPasswordNeeded as _HydroSessionPasswordNeeded
+
+            except Exception:
+
+                _HydroSessionPasswordNeeded = Exception  # type: ignore[misc, assignment]
+
+            try:
+
+                me = await self._hydro_client.sign_in(
+                    self._phone, self._hydro_phone_code_hash, code,
+                )
+
+            except _HydroSessionPasswordNeeded:
+
+                return web.json_response({"ok": False, "need_2fa": True})
+
+            await self._finalize_hydrogram_only()
+
+            first_name = getattr(me, "first_name", "") or "Готово"
+
+            user_id = getattr(me, "id", 0)
+
+            return web.json_response({
+                "ok": True,
+                "message": f"👤 {first_name}  |  id: {user_id}",
+            })
+
+        except Exception as exc:
+
+            logger.exception("setup: /api/signin (hydrogram) error")
+
+            return self._err(str(exc))
+
+    async def _api_2fa_hydrogram(self, request: web.Request) -> web.Response:
+
+        try:
+
+            data = await request.json()
+
+            password = str(data.get("password", "")).strip()
+
+            self._last_password = password
+
+            if not password:
+
+                return self._err("Пароль не может быть пустым")
+
+            if self._hydro_client is None:
+
+                return self._err("Сессия потеряна. Перезапусти мастер и запроси код заново.")
+
+            try:
+
+                from hydrogram.errors import PasswordHashInvalid as _HydroPasswordHashInvalid
+
+            except Exception:
+
+                _HydroPasswordHashInvalid = Exception  # type: ignore[misc, assignment]
+
+            try:
+
+                me = await self._hydro_client.check_password(password)
+
+            except _HydroPasswordHashInvalid:
+
+                return web.json_response({
+                    "ok": False,
+                    "error": "Неверный пароль. Попробуй ещё раз.",
+                    "wrong_password": True,
+                })
+
+            await self._finalize_hydrogram_only()
+
+            first_name = getattr(me, "first_name", "") or "Готово"
+
+            user_id = getattr(me, "id", 0)
+
+            return web.json_response({
+                "ok": True,
+                "message": f"👤 {first_name}  |  id: {user_id}",
+            })
+
+        except Exception as exc:
+
+            logger.exception("setup: /api/2fa (hydrogram) error")
+
+            return self._err(str(exc))
+
+    async def _finalize_hydrogram_only(self) -> None:
+        """Корректно завершаем Hydrogram-only регистрацию: отключаем клиента
+        (чтобы Hydrogram сбросил session-файл на диск), выставляем флаг успеха
+        и разбуживаем wait_done(), чтобы main.py пошла дальше."""
+
+        if self._hydro_client is not None:
+
+            try:
+
+                await self._hydro_client.disconnect()
+
+            except Exception:
+
+                logger.debug("setup: hydro disconnect failed", exc_info=True)
+
+            self._hydro_client = None
+
+        self._hydrogram_success = True
+
+        logger.info("setup: Hydrogram-only сессия успешно создана и сохранена на диск")
+
+        self._done.set()
+
+    def hydrogram_only_success(self) -> bool:
+        """Используется main.py чтобы понять, нужно ли повторять _start_hydrogram()."""
+
+        return bool(self._hydrogram_success)
 
     @staticmethod
 

@@ -302,6 +302,61 @@ def _purge_bad_hydro_session(session_file: Path, reason: str) -> None:
         logger.debug("main: _purge_bad_hydro_session failed", exc_info=True)
 
 
+async def _hydrogram_web_reauth(
+    save_config_fn,
+    get_config_fn,
+    web_port: int,
+) -> bool:
+    """Запускает web-мастер в режиме ``hydrogram_only=True`` и ждёт,
+    пока пользователь не пройдёт повторную регистрацию только для Hydrogram.
+
+    Возвращает True, если сессия Hydrogram была успешно пересоздана,
+    иначе False (ошибка / прервано пользователем).
+    """
+    try:
+        from .web.setup import SetupServer
+    except Exception:
+        logger.exception("main: web.setup import failed — hydrogram re-auth skipped")
+        return False
+
+    setup = SetupServer(
+        save_config_fn=save_config_fn,
+        get_config_fn=get_config_fn,
+        hydrogram_only=True,
+    )
+
+    try:
+        await setup.start(host="0.0.0.0", port=web_port)
+    except Exception:
+        logger.exception(
+            "main: web setup (hydrogram_only) failed to start on port %d", web_port,
+        )
+        return False
+
+    print(
+        "\n\033[1;33m⚠  Hydrogram-сессия не валидна.\n"
+        "   Открой веб-интерфейс выше и пройди повторную регистрацию\n"
+        "   только для Hydrogram.\033[0m\n"
+    )
+
+    try:
+        await setup.wait_done()
+    except Exception:
+        logger.exception("main: web setup (hydrogram_only) wait_done failed")
+        return False
+
+    ok = bool(setup.hydrogram_only_success())
+    if ok:
+        logger.info(
+            "main: Hydrogram повторная регистрация завершена через веб-мастер"
+        )
+    else:
+        logger.warning(
+            "main: web setup (hydrogram_only) закрыт, но флаг успеха не выставлен"
+        )
+    return ok
+
+
 async def _start_hydrogram(api_id: int, api_hash: str, session_name: str) -> Any | None:
 
     hydro_session_file = DATA_DIR / f"{Path(session_name).name}_hydro.session"
@@ -463,8 +518,8 @@ async def _start_hydrogram(api_id: int, api_hash: str, session_name: str) -> Any
     except AuthKeyUnregistered:
 
         # Сессия «есть на диске», но auth_key на сервере уже мёртв.
-        # Лечим: удаляем битый файл — на следующем запуске мы тихо
-        # перейдём в ветку «session file отсутствует» (INFO, без WARNING).
+        # Лечим: удаляем битый файл — и прям сейчас предложим пользователю
+        # пройти повторную регистрацию только для Hydrogram в веб-мастере.
         with contextlib.suppress(Exception):
             if hydro_session_file.exists():
                 _purge_bad_hydro_session(
@@ -473,7 +528,7 @@ async def _start_hydrogram(api_id: int, api_hash: str, session_name: str) -> Any
 
         logger.info(
             "main: Hydrogram-сессия была инвалидной (AuthKeyUnregistered) — "
-            "удалил файл, продолжаю без вторичного клиента",
+            "удалил файл, запускаю веб-мастер для повторной регистрации",
         )
 
         try:
@@ -487,7 +542,40 @@ async def _start_hydrogram(api_id: int, api_hash: str, session_name: str) -> Any
 
         _release_hydro_lock()
 
-        return None
+        # ----- веб-регистрация Hydrogram-only -----
+        try:
+            cfg_now = _load_raw_config()
+            web_port = int(cfg_now.get("web_port", 8080))
+        except Exception:
+            web_port = 8080
+
+        try:
+            reauth_ok = await _hydrogram_web_reauth(
+                save_config_fn=_save_config,
+                get_config_fn=_load_raw_config,
+                web_port=web_port,
+            )
+        except Exception:
+            logger.exception(
+                "main: ошибка во время веб-регистрации Hydrogram — продолжаю без вторичного клиента",
+            )
+            reauth_ok = False
+
+        if not reauth_ok:
+            logger.info(
+                "main: повторная регистрация Hydrogram не завершена — продолжаю без вторичного клиента",
+            )
+            return None
+
+        # Регистрация успешна — рекурсивно запускаем _start_hydrogram ещё раз,
+        # уже со свежей сессией.
+        try:
+            from .core.reliability import flags as _deg_flags
+            _deg_flags.clear_hydrogram_failed()
+        except Exception:
+            pass
+
+        return await _start_hydrogram(api_id, api_hash, session_name)
 
     except Exception as _exc:
 

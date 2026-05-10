@@ -13,6 +13,22 @@ _DB_KEY = "kitsune.notifier"
 # "Cannot open exclusive conversation in a chat that already has one open conversation".
 _BOTFATHER_LOCK: asyncio.Lock = asyncio.Lock()
 
+# Регэксп, которым ловим формат токена бота от @BotFather.
+_TOKEN_RE = re.compile(r"(\d{8,}:[A-Za-z0-9_-]{35,})")
+
+# Эвристики, по которым мы понимаем, что BotFather прислал список ботов
+# для выбора (а не сам токен). Это ключевая часть фикса для шага «Choose a bot
+# to get Bot API access token.» — без неё мы пропускали выбор кнопки и шли
+# создавать нового бота.
+_CHOOSE_BOT_HINTS = (
+    "choose a bot",
+    "select a bot",
+    "выбери бота",
+    "выберите бота",
+    "выбери бот",
+    "выберите бот",
+)
+
 
 def _extract_buttons(message) -> list[str]:
 
@@ -43,6 +59,36 @@ def _extract_buttons(message) -> list[str]:
         pass
 
     return result
+
+
+def _looks_like_choose_bot(message) -> bool:
+    """Возвращает True, если ответ BotFather — это список ботов на выбор."""
+    text = (getattr(message, "text", "") or "").lower()
+    if any(h in text for h in _CHOOSE_BOT_HINTS):
+        return True
+    # Иногда заголовок отсутствует, но кнопок несколько и все они выглядят
+    # как @username_bot — это тоже список выбора.
+    btns = _extract_buttons(message)
+    if len(btns) >= 2:
+        usernames = [b for b in btns if "bot" in b.lower()]
+        if len(usernames) >= 2:
+            return True
+    return False
+
+
+def _pick_bot_button(buttons: list[str], username: str) -> str | None:
+    """Ищет в списке кнопок ту, что соответствует нашему боту."""
+    uname_low = username.lower().lstrip("@")
+    # 1) точное совпадение @username
+    for b in buttons:
+        if b.lstrip("@").strip().lower() == uname_low:
+            return b
+    # 2) подстрока username
+    for b in buttons:
+        if uname_low in b.lower():
+            return b
+    return None
+
 
 class BotSetup:
 
@@ -308,6 +354,9 @@ class BotSetup:
 
                     # ВСЕГДА строим username из tg_id владельца — это гарантирует,
                     # что при следующем запуске find_existing_bot найдёт бота по ID.
+                    return_uname: str | None = None
+                    return_token: str | None = None
+
                     for suffix in ["", f"_{me.id % 10000}", "_ub", "_kitsune_ub"]:
 
                         uname = f"kitsune_{me.id}{suffix}_bot"
@@ -318,17 +367,12 @@ class BotSetup:
 
                         text = resp.text or ""
 
-                        m = re.search(r"(\d{8,}:[A-Za-z0-9_-]{35,})", text)
+                        m = _TOKEN_RE.search(text)
 
                         if m:
 
-                            token = m.group(1)
-
-                            # выходим из conversation перед тем как делать
-                            # вложенные звонки в BotFather (enable_inline_mode,
-                            # _set_bot_avatar) — они откроют свои диалоги.
+                            return_token = m.group(1)
                             return_uname = uname
-                            return_token = token
 
                             # Покидаем conversation/lock — даём вложенным
                             # обработчикам возможность открыть свои диалоги
@@ -338,6 +382,9 @@ class BotSetup:
                     else:
 
                         return None, None
+
+            if not return_token or not return_uname:
+                return None, None
 
             # Вне БотFather-лока: подключаем inline-mode и ставим аватарку.
             try:
@@ -359,6 +406,12 @@ class BotSetup:
         return None, None
 
     async def get_token_for_bot(self, username: str) -> str | None:
+        """Получает токен для конкретного бота через диалог с @BotFather.
+
+        Делегирует основной поток в `_get_token_via_conv`, чтобы код выбора
+        бота из списка («Choose a bot to get Bot API access token.») жил
+        в одном месте.
+        """
 
         username = username.lstrip("@")
 
@@ -374,29 +427,7 @@ class BotSetup:
 
                     buttons = _extract_buttons(resp)
 
-                    target = next((b for b in buttons if username.lower() in b.lower()), None)
-
-                    await conv.send_message(target or f"@{username}")
-
-                    menu = await conv.get_response()
-
-                    m = re.search(r"(\d{8,}:[A-Za-z0-9_-]{35,})", menu.text or "")
-
-                    if m:
-
-                        return m.group(1)
-
-                    menu_btns = _extract_buttons(menu)
-
-                    api_btn = next((b for b in menu_btns if "token" in b.lower() or "api" in b.lower()), None)
-
-                    await conv.send_message(api_btn or "/token")
-
-                    token_resp = await conv.get_response()
-
-                    m2 = re.search(r"(\d{8,}:[A-Za-z0-9_-]{35,})", token_resp.text or "")
-
-                    return m2.group(1) if m2 else None
+                    return await self._get_token_via_conv(conv, username, buttons)
 
         except Exception as exc:
 
@@ -522,33 +553,115 @@ class BotSetup:
             else:
                 logger.warning("BotSetup: could not enable inline mode — %s", exc)
 
-    async def _get_token_via_conv(self, conv, username: str, buttons: list[str]) -> str | None:
+    async def _get_token_via_conv(
+        self,
+        conv,
+        username: str,
+        buttons: list[str],
+    ) -> str | None:
+        """Достаёт токен у @BotFather для указанного `username`.
+
+        Полный поток (исправлен, чтобы корректно обрабатывать все три уровня
+        BotFather):
+
+        1. /mybots  → `buttons` (список ботов).
+        2. Кликаем по кнопке/тексту с `@username`  → меню бота.
+        3. В меню ищем кнопку «API Token». Если её нет — отправляем `/token`.
+        4. ⚠ ВАЖНО: после `/token` BotFather может прислать «Choose a bot to
+           get Bot API access token.» со списком кнопок. Это и был баг —
+           раньше мы тут возвращали None и шли создавать нового бота. Теперь
+           кликаем по нужной кнопке и читаем токен.
+        """
+
+        username = username.lstrip("@")
 
         try:
 
-            btn = next((b for b in buttons if username.lower() in b.lower()), None)
+            # --- Шаг 2: выбираем нашего бота из списка /mybots --------------
+            btn = _pick_bot_button(buttons, username)
 
             await conv.send_message(btn or f"@{username}")
 
             menu = await conv.get_response()
 
-            m = re.search(r"(\d{8,}:[A-Za-z0-9_-]{35,})", menu.text or "")
-
+            # Иногда токен прилетает уже здесь (если у бота единственный
+            # сценарий — отдать токен).
+            m = _TOKEN_RE.search(menu.text or "")
             if m:
-
                 return m.group(1)
 
+            # --- Шаг 3: жмём «API Token» из меню или шлём /token -----------
             menu_btns = _extract_buttons(menu)
 
-            api_btn = next((b for b in menu_btns if "token" in b.lower() or "api" in b.lower()), None)
+            api_btn = next(
+                (b for b in menu_btns if "token" in b.lower() or "api" in b.lower()),
+                None,
+            )
 
             await conv.send_message(api_btn or "/token")
 
             token_resp = await conv.get_response()
 
-            m2 = re.search(r"(\d{8,}:[A-Za-z0-9_-]{35,})", token_resp.text or "")
+            m2 = _TOKEN_RE.search(token_resp.text or "")
+            if m2:
+                return m2.group(1)
 
-            return m2.group(1) if m2 else None
+            # --- Шаг 4 (фикс): BotFather прислал список ботов на выбор -----
+            # Текст: «Choose a bot to get Bot API access token.»
+            # Кнопки: список всех @username_bot пользователя.
+            if _looks_like_choose_bot(token_resp):
+
+                choose_btns = _extract_buttons(token_resp)
+
+                pick = _pick_bot_button(choose_btns, username)
+
+                if pick is None:
+                    logger.debug(
+                        "BotSetup: 'Choose a bot' пришёл, но кнопки для @%s не нашлось "
+                        "(buttons=%r)", username, choose_btns,
+                    )
+                    return None
+
+                logger.debug(
+                    "BotSetup: выбираю бота из списка /token → %r", pick,
+                )
+
+                await conv.send_message(pick)
+
+                final_resp = await conv.get_response()
+
+                m3 = _TOKEN_RE.search(final_resp.text or "")
+                if m3:
+                    return m3.group(1)
+
+                # Иногда после выбора BotFather всё равно показывает меню,
+                # а токен прилетает ещё одним сообщением — добираем.
+                try:
+                    extra = await asyncio.wait_for(
+                        conv.get_response(), timeout=5.0,
+                    )
+                    m4 = _TOKEN_RE.search(extra.text or "")
+                    if m4:
+                        return m4.group(1)
+                except (asyncio.TimeoutError, Exception):
+                    pass
+
+                # Возможно, после выбора нам сначала показывают меню бота,
+                # а токен надо ещё «попросить» кнопкой API Token.
+                final_btns = _extract_buttons(final_resp)
+                api_btn2 = next(
+                    (b for b in final_btns
+                     if "token" in b.lower() or "api" in b.lower()),
+                    None,
+                )
+                if api_btn2:
+                    await conv.send_message(api_btn2)
+                    token_resp2 = await conv.get_response()
+                    m5 = _TOKEN_RE.search(token_resp2.text or "")
+                    if m5:
+                        return m5.group(1)
+
+            return None
 
         except Exception as exc:
 
