@@ -870,6 +870,12 @@ class SetupServer:
 
         DATA_DIR.mkdir(parents=True, exist_ok=True)
 
+        # Удаляем повреждённый/старый файл сессии перед созданием нового,
+        # иначе SQLiteSession падает если таблица version есть но пустая.
+        session_file = DATA_DIR / "kitsune.session"
+        if session_file.exists():
+            session_file.unlink()
+
         session = SQLiteSession(str(DATA_DIR / "kitsune"))
 
         session.set_dc(
