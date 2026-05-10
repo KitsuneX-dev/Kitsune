@@ -868,6 +868,8 @@ class SetupServer:
 
         DATA_DIR = Path.home() / ".kitsune"
 
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+
         session = SQLiteSession(str(DATA_DIR / "kitsune"))
 
         session.set_dc(
