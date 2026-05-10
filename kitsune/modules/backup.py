@@ -478,6 +478,116 @@ class BackupModule(KitsuneModule):
 
             self._start_auto(val)
 
+        # Персистентное восстановление inline-колбэков кнопки "Восстановить"
+        # после перезапуска/переустановки бота.
+        try:
+            asyncio.ensure_future(self._restore_callbacks_from_db())
+        except Exception as _exc:
+            logger.debug("backup: cannot schedule callback restore: %s", _exc)
+
+    async def _restore_callbacks_from_db(self) -> None:
+        """После старта бота восстановить callbackи кнопки "Восстановить".
+
+        Иначе inline._callbacks после рестарта пуст и любое нажатие выдаёт
+        "⚠️ Устаревшая кнопка.". Мы ждём, пока inline-менеджер стартует (до 90 сек),
+        и ре-регистрируем все сохранённые cb_id в его словаре.
+        Старые записи (>30 дней) при этом вычищаются.
+        """
+        inline = None
+        for _ in range(90):
+            inline = self._inline()
+            if inline is not None and getattr(inline, "_started", False):
+                break
+            await asyncio.sleep(1)
+        else:
+            logger.debug("backup: inline manager not ready — callback restore skipped")
+            return
+
+        if inline is None:
+            return
+
+        saved = self.db.get(_DB_OWNER, "restore_callbacks", {})
+        if not isinstance(saved, dict) or not saved:
+            return
+
+        now = int(time.time())
+        cleaned: dict = {}
+        restored = 0
+        for cb_id, info in saved.items():
+            try:
+                if not isinstance(info, dict):
+                    continue
+                chat_id = int(info.get("chat_id", 0))
+                msg_id  = int(info.get("msg_id", 0))
+                kind    = str(info.get("kind", ""))
+                created = int(info.get("created_at", now))
+                if kind not in ("db", "mods", "all") or not chat_id or not msg_id:
+                    continue
+                if now - created > 30 * 24 * 3600:
+                    continue  # слишком старый бэкап — выбрасываем
+                inline._callbacks[cb_id] = (
+                    self._cb_restore,
+                    (chat_id, msg_id, kind),
+                    self.client.tg_id,
+                    False,
+                    {},
+                )
+                cleaned[cb_id] = {
+                    "chat_id": chat_id,
+                    "msg_id": msg_id,
+                    "kind": kind,
+                    "created_at": created,
+                }
+                restored += 1
+            except Exception:
+                continue
+
+        if restored:
+            logger.info("backup: restored %d inline callback(s) from DB", restored)
+
+        if len(cleaned) != len(saved):
+            try:
+                self.db.set_sync(_DB_OWNER, "restore_callbacks", cleaned)
+            except Exception as _exc:
+                logger.debug("backup: cannot prune callbacks: %s", _exc)
+
+    def _persist_callback(
+        self, cb_id: str, chat_id: int, msg_id: int, kind: str,
+    ) -> None:
+        """Сохранить callback кнопки "Восстановить" в БД, чтобы она работала после рестарта."""
+        try:
+            saved = self.db.get(_DB_OWNER, "restore_callbacks", {})
+            if not isinstance(saved, dict):
+                saved = {}
+            # Ограничиваем размер — держим последние 50 записей
+            if len(saved) >= 50:
+                items = sorted(
+                    saved.items(),
+                    key=lambda kv: (
+                        kv[1].get("created_at", 0) if isinstance(kv[1], dict) else 0
+                    ),
+                )
+                saved = dict(items[-49:])
+            saved[cb_id] = {
+                "chat_id": int(chat_id),
+                "msg_id": int(msg_id),
+                "kind": kind,
+                "created_at": int(time.time()),
+            }
+            self.db.set_sync(_DB_OWNER, "restore_callbacks", saved)
+        except Exception as exc:
+            logger.debug("backup: cannot persist callback %s: %s", cb_id, exc)
+
+    def _forget_callback(self, cb_id: str) -> None:
+        """Удалить callback из БД (используется при откатах)."""
+        try:
+            saved = self.db.get(_DB_OWNER, "restore_callbacks", {})
+            if isinstance(saved, dict) and cb_id in saved:
+                saved.pop(cb_id, None)
+                self.db.set_sync(_DB_OWNER, "restore_callbacks", saved)
+        except Exception:
+            pass
+
     def _ts(self) -> str:
 
         return datetime.datetime.now().strftime("%d-%m-%Y %H:%M")
@@ -862,6 +972,8 @@ class BackupModule(KitsuneModule):
 
             inline._callbacks.pop(cb_id, None)
 
+            self._forget_callback(cb_id)
+
             return False
 
         try:
@@ -894,6 +1006,8 @@ class BackupModule(KitsuneModule):
 
             inline._callbacks.pop(cb_id, None)
 
+            self._forget_callback(cb_id)
+
             return False
 
         try:
@@ -916,6 +1030,12 @@ class BackupModule(KitsuneModule):
 
             )
 
+            # Персистентно сохраняем cb_id, чтобы кнопка "Восстановить"
+            # оставалась рабочей после перезапуска/переустановки бота.
+            self._persist_callback(
+                cb_id, int(sent_chat_id), int(sent_msg_id), kind,
+            )
+
             logger.debug(
 
                 "backup: бот отправил %s (chat=%s msg=%s) с кнопкой «Восстановить»",
@@ -929,6 +1049,8 @@ class BackupModule(KitsuneModule):
             logger.warning("backup: не смог достать sent.chat/message_id: %s", exc)
 
             inline._callbacks.pop(cb_id, None)
+
+            self._forget_callback(cb_id)
 
             return False
 
@@ -982,6 +1104,11 @@ class BackupModule(KitsuneModule):
 
             )
 
+            # Персистентно сохраняем cb_id (кнопка реально прикреплена).
+            self._persist_callback(
+                cb_id, int(bot_chat_id), int(msg_id), kind,
+            )
+
             logger.info(
 
                 "backup: кнопка «Восстановить» прикреплена к %s/%s (kind=%s)",
@@ -1003,6 +1130,8 @@ class BackupModule(KitsuneModule):
             )
 
             inline._callbacks.pop(cb_id, None)
+
+            self._forget_callback(cb_id)
 
             return False
 
@@ -1132,6 +1261,14 @@ class BackupModule(KitsuneModule):
 
         self._strip_tokens(db_data)
 
+        # Сохраняем персистентные callbackи и настройки backup-модуля через очистку,
+        # чтобы кнопки "Восстановить" продолжали работать после restore.
+        _kept_backup_ns = self.db.get(_DB_OWNER, None, None)
+        if isinstance(_kept_backup_ns, dict):
+            _kept_backup_ns = dict(_kept_backup_ns)
+        else:
+            _kept_backup_ns = None
+
         self.db.clear()
 
         for owner, keys in db_data.items():
@@ -1140,7 +1277,19 @@ class BackupModule(KitsuneModule):
 
                 for key, val in keys.items():
 
-                    self.db.force_set(owner, key, val)
+                    self.db.set_sync(owner, key, val)
+
+        # Ресторим колбэки восстановления — в бэкапе их может не быть,
+        # а потерять их = сломать кнопки в видимых бэкапах.
+        if _kept_backup_ns:
+            restored_cbs = _kept_backup_ns.get("restore_callbacks")
+            if isinstance(restored_cbs, dict) and restored_cbs:
+                merged = self.db.get(_DB_OWNER, "restore_callbacks", {}) or {}
+                if not isinstance(merged, dict):
+                    merged = {}
+                for cb_id, info in restored_cbs.items():
+                    merged.setdefault(cb_id, info)
+                self.db.set_sync(_DB_OWNER, "restore_callbacks", merged)
 
         await self.db.force_save()
 
@@ -1318,6 +1467,13 @@ class BackupModule(KitsuneModule):
 
                 self._strip_tokens(db_data)
 
+                # Сохраняем персистентные callbackи бэкап-модуля через очистку.
+                _kept_backup_ns = self.db.get(_DB_OWNER, None, None)
+                if isinstance(_kept_backup_ns, dict):
+                    _kept_backup_ns = dict(_kept_backup_ns)
+                else:
+                    _kept_backup_ns = None
+
                 self.db.clear()
 
                 for owner, keys in db_data.items():
@@ -1326,7 +1482,17 @@ class BackupModule(KitsuneModule):
 
                         for key, val in keys.items():
 
-                            self.db.force_set(owner, key, val)
+                            self.db.set_sync(owner, key, val)
+
+                if _kept_backup_ns:
+                    restored_cbs = _kept_backup_ns.get("restore_callbacks")
+                    if isinstance(restored_cbs, dict) and restored_cbs:
+                        merged = self.db.get(_DB_OWNER, "restore_callbacks", {}) or {}
+                        if not isinstance(merged, dict):
+                            merged = {}
+                        for cb_id, info in restored_cbs.items():
+                            merged.setdefault(cb_id, info)
+                        self.db.set_sync(_DB_OWNER, "restore_callbacks", merged)
 
                 await self.db.force_save()
 

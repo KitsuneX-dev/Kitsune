@@ -566,6 +566,29 @@ class DatabaseManager:
 
         return True
 
+    # Алиас для совместимости с backup-модулем и Hikka/Heroku-стилем вызова.
+    force_set = set_sync
+
+    def clear(self) -> bool:
+        """Полностью очистить базу.
+
+        Помечает все существующие ключи на удаление из бэкенда и
+        очищает in-memory словарь. Безопасно вызывать
+        синхронно из async-кода — фактический flush будет
+        выполнен фоновой задачей или следующим force_save().
+        """
+        for owner, sub in list(self._data.items()):
+            for key in list(sub.keys()):
+                self._deleted.append((owner, key))
+        self._data.clear()
+        self._dirty.clear()
+        try:
+            self._kick_save()
+        except RuntimeError:
+            # нет активного event loop — force_save() всё равно будет вызван выше
+            pass
+        return True
+
     async def delete(self, owner: str, key: str) -> bool:
 
         async with self._lock:
