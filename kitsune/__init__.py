@@ -291,4 +291,187 @@ def install_patches() -> None:
 
         _log.debug("kitsune: SQLiteSession patch skipped — %s", _exc)
 
+    # ── 4. SQLiteSession._create_table: лечим "table entities already exists" ──
+    #
+    # При повторном запуске Telethon вызывает _create_table с обычным
+    # CREATE TABLE (без IF NOT EXISTS) и валится:
+    #     sqlite3.OperationalError: table entities already exists
+    # Лечим — делаем _create_table идемпотентным.
+    try:
+
+        from telethon.sessions import sqlite as _ts_sqlite2
+
+        _SQLiteSession2 = getattr(_ts_sqlite2, "SQLiteSession", None)
+
+        if (
+            _SQLiteSession2 is not None
+            and "_create_table" in _SQLiteSession2.__dict__
+            and not getattr(
+                _SQLiteSession2._create_table, "_kitsune_idempotent_guard", False
+            )
+        ):
+
+            def _safe_create_table(self, c, *definitions):
+                for definition in definitions:
+                    try:
+                        c.execute('create table {}'.format(definition))
+                    except Exception as _e:
+                        msg = str(_e).lower()
+                        if "already exists" in msg:
+                            _log.debug(
+                                "kitsune: _create_table — таблица уже есть, пропускаю"
+                            )
+                            continue
+                        raise
+
+            _safe_create_table._kitsune_idempotent_guard = True
+            _SQLiteSession2._create_table = _safe_create_table
+            _log.info(
+                "kitsune: SQLiteSession._create_table patched (idempotent)",
+            )
+
+    except Exception as _exc:
+
+        _log.debug("kitsune: SQLiteSession._create_table patch skipped — %s", _exc)
+
+    # ── 5. SQLiteSession.set_update_state / save: ловим readonly DB ──
+    try:
+
+        from telethon.sessions import sqlite as _ts_sqlite3
+        import sqlite3 as _sqlite3_v3
+
+        _SQLiteSession3 = getattr(_ts_sqlite3, "SQLiteSession", None)
+
+        if (
+            _SQLiteSession3 is not None
+            and "set_update_state" in _SQLiteSession3.__dict__
+            and not getattr(
+                _SQLiteSession3.set_update_state, "_kitsune_ro_guard", False
+            )
+        ):
+
+            _orig_sus = _SQLiteSession3.set_update_state
+
+            def _safe_set_update_state(self, entity_id, state):
+                try:
+                    return _orig_sus(self, entity_id, state)
+                except _sqlite3_v3.OperationalError as exc:
+                    msg = str(exc).lower()
+                    if "readonly" in msg or "read-only" in msg:
+                        try:
+                            import os as _os
+                            from pathlib import Path as _PP
+                            sf = getattr(self, "filename", None)
+                            if sf and sf != ":memory:":
+                                for _suf in ("", "-wal", "-shm", "-journal"):
+                                    _p = _PP(str(sf) + _suf)
+                                    if _p.exists():
+                                        try:
+                                            _os.chmod(_p, 0o644)
+                                        except Exception:
+                                            pass
+                                try:
+                                    return _orig_sus(self, entity_id, state)
+                                except Exception:
+                                    pass
+                        except Exception:
+                            pass
+                        _log.debug(
+                            "kitsune: set_update_state — readonly DB, skipping (%s)",
+                            exc,
+                        )
+                        return
+                    raise
+                except Exception as _e:
+                    _log.debug(
+                        "kitsune: set_update_state silently swallowed — %s", _e,
+                    )
+                    return
+
+            _safe_set_update_state._kitsune_ro_guard = True
+            _SQLiteSession3.set_update_state = _safe_set_update_state
+            _log.info(
+                "kitsune: SQLiteSession.set_update_state patched (readonly-safe)",
+            )
+
+        if (
+            _SQLiteSession3 is not None
+            and "save" in _SQLiteSession3.__dict__
+            and not getattr(
+                _SQLiteSession3.save, "_kitsune_ro_guard", False
+            )
+        ):
+            _orig_save = _SQLiteSession3.save
+
+            def _safe_save(self):
+                try:
+                    return _orig_save(self)
+                except _sqlite3_v3.OperationalError as exc:
+                    msg = str(exc).lower()
+                    if "readonly" in msg or "read-only" in msg:
+                        _log.debug(
+                            "kitsune: SQLiteSession.save() — readonly DB, skip (%s)",
+                            exc,
+                        )
+                        return
+                    raise
+                except Exception as _e:
+                    _log.debug("kitsune: SQLiteSession.save() swallowed — %s", _e)
+                    return
+
+            _safe_save._kitsune_ro_guard = True
+            _SQLiteSession3.save = _safe_save
+            _log.info("kitsune: SQLiteSession.save patched (readonly-safe)")
+
+    except Exception as _exc:
+
+        _log.debug("kitsune: SQLiteSession set_update_state patch skipped — %s", _exc)
+
+    # ── 6. TelegramBaseClient._save_states_and_entities: full readonly-safe wrap ──
+    try:
+        from telethon.client import telegrambaseclient as _tbc
+        import sqlite3 as _sqlite3_v4
+
+        _TBC = getattr(_tbc, "TelegramBaseClient", None)
+
+        if (
+            _TBC is not None
+            and "_save_states_and_entities" in _TBC.__dict__
+            and not getattr(
+                _TBC._save_states_and_entities, "_kitsune_ro_guard", False
+            )
+        ):
+            _orig_sse = _TBC._save_states_and_entities
+
+            async def _safe_sse(self):
+                try:
+                    return await _orig_sse(self)
+                except _sqlite3_v4.OperationalError as exc:
+                    msg = str(exc).lower()
+                    if "readonly" in msg or "read-only" in msg or "no such table" in msg:
+                        _log.debug(
+                            "kitsune: _save_states_and_entities — DB issue swallowed (%s)",
+                            exc,
+                        )
+                        return
+                    raise
+                except Exception as _e:
+                    _log.debug(
+                        "kitsune: _save_states_and_entities silently swallowed — %s",
+                        _e,
+                    )
+                    return
+
+            _safe_sse._kitsune_ro_guard = True
+            _TBC._save_states_and_entities = _safe_sse
+            _log.info(
+                "kitsune: TelegramBaseClient._save_states_and_entities patched (safe)",
+            )
+
+    except Exception as _exc:
+        _log.debug(
+            "kitsune: TelegramBaseClient._save_states_and_entities patch skipped — %s",
+            _exc,
+        )
+
     _PATCHES_INSTALLED = True

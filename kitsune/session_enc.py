@@ -257,10 +257,20 @@ def session_ready() -> bool:
 
     _ensure_data_dir()
 
+    _fix_all_permissions()
+
     if SESSION_PATH.exists():
 
         _fix_session_permissions()
 
+        _fix_db_readonly()
+
         return True
 
-    return decrypt_session_file()
+    ok = decrypt_session_file()
+
+    if ok:
+
+        _fix_db_readonly()
+
+    return ok
