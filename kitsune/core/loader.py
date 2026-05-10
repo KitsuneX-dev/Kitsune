@@ -169,12 +169,29 @@ def command(
     *,
     required: int = 0,
     aliases: list[str] | None = None,
+    incoming: bool = False,
 ) -> typing.Callable:
+    """Декоратор регистрации команды модуля.
+
+    Параметры:
+        name: имя команды (по умолчанию — имя функции без суффикса ``_cmd``).
+        required: требуемые права (битовая маска из ``kitsune.core.security``).
+        aliases: дополнительные имена-алиасы команды.
+        incoming: если ``True`` — команда срабатывает также на входящие
+            сообщения (от других пользователей, не только владельца).
+            Доступ при этом проверяется через
+            ``SecurityManager.check(message, required)``: если отправитель
+            не проходит проверку прав, сообщение тихо игнорируется.
+            По умолчанию ``False`` — старое поведение (исходящие
+            сообщения владельца / co-owner / sudo через текущую логику
+            ``CommandDispatcher``).
+    """
     def decorator(func: typing.Callable) -> typing.Callable:
         func._is_command = True
         func._command_name = name or func.__name__.removesuffix("_cmd")
         func._required = required
         func._aliases = aliases or []
+        func._incoming = bool(incoming)
         return func
     return decorator
 

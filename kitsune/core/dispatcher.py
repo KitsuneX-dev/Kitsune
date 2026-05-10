@@ -596,15 +596,64 @@ class CommandDispatcher:
 
         co_owners  = self._get_co_owners()
 
-        if sender_id not in sudo_users and sender_id not in co_owners:
+        is_co_owner = sender_id in co_owners
+
+        # ------------------------------------------------------------------
+        # Поддержка @command(..., incoming=True): если входящее сообщение
+        # является командой, помеченной incoming=True, — маршрутизируем её
+        # через is_incoming=True. В этом режиме доступ контролируется
+        # ИСКЛЮЧИТЕЛЬНО через SecurityManager.check(message, required):
+        # если отправитель не проходит проверку прав, сообщение тихо
+        # игнорируется. Этот путь работает одинаково и для sudo, и для
+        # обычных пользователей — таким образом разработчику модуля больше
+        # не нужно вручную регистрировать собственный event handler в
+        # обход диспетчера.
+        # ------------------------------------------------------------------
+        text = (message.raw_text or message.text or "").strip()
+
+        if text.startswith(self._prefix):
+
+            raw = text[len(self._prefix):].lstrip()
+
+            parts = raw.split(maxsplit=1)
+
+            if parts:
+
+                cmd_name = parts[0].lower().split("@")[0]
+
+                entry = self._commands.get(cmd_name)
+
+                if entry is not None:
+
+                    handler, _required = entry
+
+                    if getattr(handler, "_incoming", False):
+
+                        # Если отправитель — co-owner, передаём is_co_owner=True,
+                        # чтобы сработала штатная co-owner-логика (proxy +
+                        # повышение до is_own). SecurityManager даёт co-owner
+                        # только бит OWNER, поэтому без этого co-owner не смог
+                        # бы выполнить incoming-команду с required=SUDO.
+                        await self._handle_message(
+
+                            event, is_own=False, is_co_owner=is_co_owner, is_incoming=True,
+
+                        )
+
+                        return
+
+        # ------------------------------------------------------------------
+        # Классический путь: команды без incoming=True доступны только
+        # sudo-юзерам и co-owner'ам (старое поведение, обратная
+        # совместимость).
+        # ------------------------------------------------------------------
+        if sender_id not in sudo_users and not is_co_owner:
 
             return
 
-        is_co_owner = sender_id in co_owners
-
         await self._handle_message(event, is_own=False, is_co_owner=is_co_owner)
 
-    async def _handle_message(self, event: events.NewMessage.Event, *, is_own: bool, is_co_owner: bool = False) -> None:
+    async def _handle_message(self, event: events.NewMessage.Event, *, is_own: bool, is_co_owner: bool = False, is_incoming: bool = False) -> None:
 
         message = event.message
 
@@ -670,7 +719,10 @@ class CommandDispatcher:
 
                 is_co_owner = False
 
-            if not is_own and not is_co_owner and required >= OWNER:
+            # Для incoming-команд проверку прав делает SecurityManager.check
+            # (ниже по коду). Старый guard на required>=OWNER применяется
+            # только к классическому пути sudo/co-owner.
+            if not is_incoming and not is_own and not is_co_owner and required >= OWNER:
 
                 return
 
