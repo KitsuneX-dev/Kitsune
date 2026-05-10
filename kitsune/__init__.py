@@ -229,6 +229,16 @@ def install_patches() -> None:
 
                     msg = str(exc).lower()
 
+                    if "readonly" in msg:
+
+                        # БД открыта только для чтения — некритичный путь,
+                        # просто пропускаем запись кэша сущностей.
+                        _log.debug(
+                            "kitsune: process_entities — readonly DB, "
+                            "skipping entity cache write (%s)", exc,
+                        )
+                        return
+
                     if "no such table" not in msg:
 
                         # Не наш кейс — пробрасываем дальше.

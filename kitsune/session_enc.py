@@ -52,13 +52,20 @@ def _fix_db_readonly() -> None:
 
         return
 
-    try:
+    # Фиксим права на основной файл и WAL-файлы
+    for suffix in ("", "-wal", "-shm"):
 
-        os.chmod(SESSION_PATH, 0o644)
+        p = SESSION_PATH.parent / (SESSION_PATH.name + suffix)
 
-    except Exception as e:
+        if p.exists():
 
-        logger.warning("session_enc: _fix_db_readonly chmod failed: %s", e)
+            try:
+
+                os.chmod(p, 0o644)
+
+            except Exception as e:
+
+                logger.warning("session_enc: _fix_db_readonly chmod %s failed: %s", p.name, e)
 
     try:
 
