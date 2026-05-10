@@ -1137,6 +1137,44 @@ async def _startup(args: argparse.Namespace) -> None:
 
             logger.exception("main: db shutdown failed")
 
+        # ВАЖНО: сначала корректно отключаем Telethon-клиент.
+        # Внутри disconnect() Telethon вызывает _save_states_and_entities(),
+        # который пишет в SQLite-таблицу `entities` файла .session.
+        # Если зашифровать (и удалить) .session ДО disconnect() —
+        # получим OperationalError: no such table: entities,
+        # а фоновая задача run_until_disconnected() выкинет
+        # «Task exception was never retrieved».
+        # Поэтому: 1) глушим update-loop, 2) disconnect, 3) шифруем сессию.
+        try:
+
+            # Гасим run_until_disconnected(), чтобы он не выбросил
+            # исключение в момент disconnect().
+            for _t in list(asyncio.all_tasks()):
+
+                _coro = getattr(_t, "get_coro", lambda: None)()
+
+                _name = getattr(_coro, "__qualname__", "") or ""
+
+                if "_run_until_disconnected" in _name and not _t.done():
+
+                    _t.cancel()
+
+                    with contextlib.suppress(Exception, asyncio.CancelledError):
+
+                        await asyncio.wait_for(asyncio.shield(_t), timeout=2.0)
+
+        except Exception:
+
+            logger.debug("main: cancel update-loop failed", exc_info=True)
+
+        try:
+
+            await asyncio.wait_for(client.disconnect(), timeout=10.0)
+
+        except Exception:
+
+            logger.exception("main: client disconnect failed")
+
         try:
 
             encrypt_session_file()
@@ -1144,8 +1182,6 @@ async def _startup(args: argparse.Namespace) -> None:
         except Exception:
 
             logger.exception("main: session encrypt failed")
-
-        await client.disconnect()
 
         logger.info("main: goodbye 🦊")
 

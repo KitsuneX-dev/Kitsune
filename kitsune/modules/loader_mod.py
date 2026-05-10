@@ -331,11 +331,11 @@ class LoaderModule(KitsuneModule):
 
             )
 
-    @command("unloadmod", required=OWNER)
+    @command("unloadmod", required=OWNER, aliases=["ulm"])
 
     async def unloadmod_cmd(self, event) -> None:
 
-        """unloadmod — выгрузить установленный модуль."""
+        """unloadmod — выгрузить установленный модуль (alias: ulm)."""
 
         name = self.get_args(event).strip()
 
@@ -351,17 +351,140 @@ class LoaderModule(KitsuneModule):
 
             return
 
+        # Перед выгрузкой запоминаем путь к .py-файлу модуля,
+        # чтобы потом физически удалить его с диска. Без этого
+        # модуль восстановится при следующем запуске, потому что
+        # load_all_user() сканирует ~/.kitsune/modules/ и грузит
+        # оттуда ВСЕ .py файлы независимо от user_modules в БД.
+        mod_obj = loader.get_module(name)
+
+        source_path = getattr(mod_obj, "_source_path", None) if mod_obj else None
+
+        is_builtin = bool(getattr(mod_obj, "_is_builtin", False)) if mod_obj else False
+
         ok = await loader.unload_module(name)
 
         if ok:
 
             user_mods = self._get_user_modules()
 
-            user_mods.pop(name, None)
+            # Удаляем запись из БД с учётом регистра — могли сохранить
+            # как под оригинальным именем модуля, так и под нижним.
+            removed_keys: list[str] = []
 
-            user_mods.pop(name.lower(), None)
+            for key in list(user_mods.keys()):
+
+                if key.lower() == name.lower():
+
+                    removed_keys.append(key)
+
+                    user_mods.pop(key, None)
 
             await self._save_user_modules(user_mods)
+
+            # Физически удаляем .py файл из ~/.kitsune/modules/.
+            # Встроенные (builtin) модули НЕ трогаем — они лежат
+            # внутри пакета kitsune и должны оставаться на месте.
+            user_dir = Path.home() / ".kitsune" / "modules"
+
+            deleted_files: list[Path] = []
+
+            try:
+
+                if source_path and not is_builtin:
+
+                    p = Path(source_path)
+
+                    # На всякий случай убеждаемся, что файл лежит
+                    # именно в пользовательской папке модулей.
+                    try:
+
+                        p.resolve().relative_to(user_dir.resolve())
+
+                        in_user_dir = True
+
+                    except (ValueError, OSError):
+
+                        in_user_dir = False
+
+                    if in_user_dir and p.exists():
+
+                        try:
+
+                            p.unlink()
+
+                            deleted_files.append(p)
+
+                        except Exception:
+
+                            logger.exception("unloadmod: failed to delete %s", p)
+
+                # Подстраховка: если по какой-то причине _source_path
+                # не был сохранён (например, модуль из старой версии),
+                # пытаемся найти .py файл по имени модуля и по ключам,
+                # под которыми он был записан в user_modules.
+                if not deleted_files and user_dir.exists():
+
+                    candidates: set[str] = {name, name.lower()}
+
+                    for key in removed_keys:
+
+                        candidates.add(key)
+
+                        candidates.add(key.lower())
+
+                    for cand in candidates:
+
+                        f = user_dir / f"{cand}.py"
+
+                        if f.exists():
+
+                            try:
+
+                                f.unlink()
+
+                                deleted_files.append(f)
+
+                            except Exception:
+
+                                logger.exception("unloadmod: failed to delete %s", f)
+
+            except Exception:
+
+                logger.exception("unloadmod: cleanup failed for %s", name)
+
+            # Чистим возможный кеш .pyc, чтобы он тоже не воскрешал модуль.
+            try:
+
+                pycache = user_dir / "__pycache__"
+
+                if pycache.exists():
+
+                    for pyc in pycache.glob(f"{name}*.pyc"):
+
+                        try:
+
+                            pyc.unlink()
+
+                        except Exception:
+
+                            pass
+
+                    for key in removed_keys:
+
+                        for pyc in pycache.glob(f"{key}*.pyc"):
+
+                            try:
+
+                                pyc.unlink()
+
+                            except Exception:
+
+                                pass
+
+            except Exception:
+
+                pass
 
             await event.message.edit(
 
