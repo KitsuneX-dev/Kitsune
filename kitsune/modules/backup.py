@@ -558,6 +558,24 @@ class BackupModule(KitsuneModule):
 
         return archive.getvalue(), mod_count
 
+    async def _search_existing_backup(self) -> int | None:
+        found_id: int | None = None
+        try:
+            async for dialog in self.client.iter_dialogs(limit=500):
+                if (dialog.title or "").strip() == "KitsuneBackup":
+                    entity = dialog.entity
+                    cid = getattr(entity, "id", None)
+                    if cid:
+                        if getattr(entity, "megagroup", False) or getattr(entity, "broadcast", False):
+                            found_id = int(f"-100{cid}")
+                        else:
+                            found_id = -cid
+                        logger.info("backup: нашли существующий KitsuneBackup id=%s", found_id)
+                        break
+        except Exception as e:
+            logger.warning("backup: ошибка поиска KitsuneBackup в диалогах: %s", e)
+        return found_id
+
     async def _get_dest(self, event=None) -> int | None:
 
         chat_id = self.db.get(_DB_OWNER, "group_id", None)
@@ -602,41 +620,20 @@ class BackupModule(KitsuneModule):
 
                 logger.debug("backup: сохранённый group_id %s недоступен — ищем заново", chat_id)
 
-        found_id: int | None = None
+        logger.info("backup: group_id не сохранён — сначала ищем существующий KitsuneBackup в диалогах")
 
-        try:
-
-            async for dialog in self.client.iter_dialogs(limit=500):
-
-                if (dialog.title or "").strip() == "KitsuneBackup":
-
-                    entity = dialog.entity
-
-                    cid = getattr(entity, "id", None)
-
-                    if cid:
-
-                        if getattr(entity, "megagroup", False) or getattr(entity, "broadcast", False):
-
-                            found_id = int(f"-100{cid}")
-
-                        else:
-
-                            found_id = -cid
-
-                        logger.info("backup: нашли существующий KitsuneBackup id=%s", found_id)
-
-                        break
-
-        except Exception as e:
-
-            logger.warning("backup: ошибка поиска KitsuneBackup: %s", e)
+        found_id = await self._search_existing_backup()
 
         if found_id:
 
             await self.db.set(_DB_OWNER, "group_id", found_id)
 
             await self._ensure_bot_in_channel(found_id)
+
+            try:
+                await _ensure_kitsune_folder(self.client, found_id)
+            except Exception as e:
+                logger.debug("backup: не удалось добавить найденный KitsuneBackup в папку Kitsune: %s", e)
 
             return found_id
 

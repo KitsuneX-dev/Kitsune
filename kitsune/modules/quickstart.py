@@ -10,6 +10,8 @@ _LS_OWNER = "kitsune.quickstart"
 
 _LS_KEY   = "shown"
 
+_LS_LEGACY_CHECK_KEY = "legacy_folder_check_done"
+
 _KITSUNE_CHATS = [
 
     {"key": "logs",   "title": "Kitsune-logs",  "type": "channel", "about": "Логи Kitsune Userbot"},
@@ -188,6 +190,30 @@ class QuickstartModule(KitsuneModule):
 
                 logger.exception("Quickstart: не удалось получить input_entity")
 
+        try:
+
+            bot_username = self.db.get("kitsune.notifier", "bot_username", None)
+
+            inline = getattr(self.client, "_kitsune_inline", None)
+
+            if not bot_username and inline:
+
+                bot_username = getattr(inline, "_bot_username", None)
+
+            if bot_username:
+
+                bot_entity = await self.client.get_entity(f"@{bot_username.lstrip('@')}")
+
+                bot_peer = await self.client.get_input_entity(bot_entity)
+
+                all_input_peers.append(bot_peer)
+
+                logger.info("Quickstart: inline-бот @%s добавлен в папку Kitsune", bot_username)
+
+        except Exception:
+
+            logger.debug("Quickstart: inline-бот пока недоступен — добавлю позже", exc_info=True)
+
         all_input_peers.append(InputPeerSelf())
 
         try:
@@ -360,23 +386,104 @@ class QuickstartModule(KitsuneModule):
 
             ls = get_storage()
 
-            if ls.get(_LS_OWNER, _LS_KEY):
-
-                return
-
             import asyncio
 
             await asyncio.sleep(3)
 
-            await self._sync_kitsune_folder()
+            if not ls.get(_LS_OWNER, _LS_KEY):
 
-            ls.set(_LS_OWNER, _LS_KEY, True)
+                await self._sync_kitsune_folder()
 
-            logger.info("Quickstart: папка Kitsune и чаты синхронизированы (приветствие отправляется ботом в DM)")
+                ls.set(_LS_OWNER, _LS_KEY, True)
+
+                logger.info("Quickstart: папка Kitsune и чаты синхронизированы (приветствие отправляется ботом в DM)")
+
+            if not ls.get(_LS_OWNER, _LS_LEGACY_CHECK_KEY):
+
+                try:
+
+                    await self._legacy_one_time_check()
+
+                except Exception:
+
+                    logger.exception("Quickstart: одноразовая проверка для старых пользователей провалилась")
+
+                else:
+
+                    ls.set(_LS_OWNER, _LS_LEGACY_CHECK_KEY, True)
+
+                    logger.info(
+                        "Quickstart: одноразовая проверка папки Kitsune завершена — "
+                        "флаг сохранён, повторно запускаться не будет"
+                    )
 
         except Exception:
 
             logger.exception("Quickstart: ошибка синхронизации папки")
+
+    async def _legacy_one_time_check(self) -> None:
+        from telethon.tl.functions.messages import (
+            GetDialogFiltersRequest,
+            UpdateDialogFilterRequest,
+        )
+        from telethon.tl.types import DialogFilter, InputPeerSelf
+
+        logger.info("Quickstart: запускаю одноразовую проверку папки Kitsune (legacy users)")
+
+        chats = await self._sync_kitsune_folder()
+        for cfg in _KITSUNE_CHATS:
+            entity = chats.get(cfg["key"])
+            if entity is None:
+                logger.warning(
+                    "Quickstart[legacy]: не удалось получить «%s» — пропускаю в этой проверке",
+                    cfg["title"],
+                )
+
+        bot_username = None
+        try:
+            bot_username = self.db.get("kitsune.notifier", "bot_username", None)
+        except Exception:
+            bot_username = None
+        inline = getattr(self.client, "_kitsune_inline", None)
+        if not bot_username and inline:
+            bot_username = getattr(inline, "_bot_username", None)
+
+        if bot_username:
+            try:
+                bot_entity = await self.client.get_entity(f"@{bot_username.lstrip('@')}")
+                bot_input_peer = await self.client.get_input_entity(bot_entity)
+                filters_result = await self.client(GetDialogFiltersRequest())
+                all_filters = getattr(filters_result, "filters", filters_result)
+                folder = next(
+                    (f for f in all_filters
+                     if isinstance(f, DialogFilter) and _filter_title_str(f) == "Kitsune"),
+                    None,
+                )
+                if folder is not None:
+                    bot_id = getattr(bot_entity, "id", None)
+                    already = {_peer_id(p) for p in folder.include_peers}
+                    if bot_id and bot_id not in already:
+                        folder.include_peers.append(bot_input_peer)
+                        await self.client(UpdateDialogFilterRequest(id=folder.id, filter=folder))
+                        logger.info(
+                            "Quickstart[legacy]: inline-бот @%s добавлен в папку Kitsune",
+                            bot_username,
+                        )
+                    else:
+                        logger.info(
+                            "Quickstart[legacy]: inline-бот @%s уже в папке Kitsune",
+                            bot_username,
+                        )
+            except Exception:
+                logger.exception(
+                    "Quickstart[legacy]: не удалось добавить inline-бота в папку Kitsune"
+                )
+        else:
+            logger.info(
+                "Quickstart[legacy]: bot_username ещё не известен — "
+                "inline-бот не добавлен (флаг всё равно сохраняется, "
+                "проверка одноразовая)"
+            )
 
     @command("quickstart", required=OWNER)
 

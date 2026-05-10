@@ -280,7 +280,17 @@ async def _start_hydrogram(api_id: int, api_hash: str, session_name: str) -> Any
 
     if not hydro_session_file.exists():
 
-        logger.info("main: Hydrogram session not found, skipping to avoid console prompt")
+        logger.warning(
+            "main: Hydrogram session not found at %s — Hydrogram features disabled. "
+            "Re-run web setup (delete ~/.kitsune/kitsune.session and start) to regenerate.",
+            hydro_session_file,
+        )
+
+        try:
+            from .core.reliability import flags as _deg_flags
+            _deg_flags.mark_hydrogram_failed("session file missing")
+        except Exception:
+            pass
 
         return None
 
@@ -928,8 +938,7 @@ async def _startup(args: argparse.Namespace) -> None:
 
     logger.info("main: logged in as %s (id=%d)", me.first_name, me.id)
 
-    # Phase 3: предварительно регистрируем circuit breaker'ы в реестре,
-    # чтобы /health видел их с самого старта.
+
     try:
         from .core.reliability import get_breaker
         get_breaker("telegram_api", failure_threshold=5, cooldown=60.0)
@@ -1081,28 +1090,14 @@ async def _startup(args: argparse.Namespace) -> None:
 
     logger.info("main: watchdog started (threshold=45s)")
 
-    # ────────────────────────────────────────────────────────────────
-    # КРИТИЧЕСКИ ВАЖНО: после client.connect() Telethon НЕ получает
-    # апдейты автоматически — нужно явно запустить updates-loop.
-    # Без этого add_event_handler(events.NewMessage(...)) никогда не
-    # вызывается, и юзербот выглядит «мёртвым»: команды не отвечают,
-    # watcher'ы не срабатывают, /start у бота-нотифаера тоже мимо.
-    # ────────────────────────────────────────────────────────────────
-    # Стартуем цикл получения апдейтов ОДИН раз, до await stop_event.wait().
-    # client.run_until_disconnected() — это именно то, что
-    # "включает" доставку NewMessage/MessageEdited/etc.
-    # Без этого вызова add_event_handler регистрируется, но никогда
-    # не вызывается — и любые команды/watcher'ы молчат. Именно это
-    # приводило к «гробовой тишине» в логах.
+
     try:
-        # Подтягиваем пропущенные апдейты — чтобы не потерять сообщения,
-        # пришедшие пока юзербот был оффлайн.
+
+
         with contextlib.suppress(Exception):
             await asyncio.wait_for(client.catch_up(), timeout=15.0)
 
-        # Регистрируем run_until_disconnected() как фоновую задачу.
-        # Она будет жить рядом с stop_event.wait() и внутри Telethon
-        # запустит все нужные внутренние циклы для обработки апдейтов.
+
         _spawn(client.run_until_disconnected())
         logger.info("main: Telethon update loop started (run_until_disconnected)")
     except Exception:
@@ -1137,18 +1132,10 @@ async def _startup(args: argparse.Namespace) -> None:
 
             logger.exception("main: db shutdown failed")
 
-        # ВАЖНО: сначала корректно отключаем Telethon-клиент.
-        # Внутри disconnect() Telethon вызывает _save_states_and_entities(),
-        # который пишет в SQLite-таблицу `entities` файла .session.
-        # Если зашифровать (и удалить) .session ДО disconnect() —
-        # получим OperationalError: no such table: entities,
-        # а фоновая задача run_until_disconnected() выкинет
-        # «Task exception was never retrieved».
-        # Поэтому: 1) глушим update-loop, 2) disconnect, 3) шифруем сессию.
+
         try:
 
-            # Гасим run_until_disconnected(), чтобы он не выбросил
-            # исключение в момент disconnect().
+
             for _t in list(asyncio.all_tasks()):
 
                 _coro = getattr(_t, "get_coro", lambda: None)()
@@ -1235,7 +1222,7 @@ async def _safe_force_reconnect(client: Any) -> bool:
 
     await asyncio.sleep(0.2)
 
-    # Phase 3: retry с backoff
+
     try:
         from .core.reliability import retry_with_backoff, RetryPolicy, flags as _deg_flags
     except Exception:
@@ -1358,7 +1345,7 @@ async def _keepalive(client: Any) -> None:
                     attempts,
 
                 )
-                # Phase 3: снимаем флаг vpn_down при восстановлении
+
                 if _deg_flags is not None:
                     try: _deg_flags.clear_vpn_down()
                     except Exception: pass

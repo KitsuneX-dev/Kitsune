@@ -399,6 +399,10 @@ class SetupServer:
 
         self._phone_hash: str | None = None
 
+        self._last_code: str | None = None
+
+        self._last_password: str | None = None
+
         self._done = asyncio.Event()
 
         self._runner: Any = None
@@ -705,6 +709,8 @@ class SetupServer:
 
             code = str(data["code"]).strip()
 
+            self._last_code = code
+
             from telethon.errors import SessionPasswordNeededError
             from telethon.sessions import SQLiteSession
             from pathlib import Path
@@ -744,6 +750,8 @@ class SetupServer:
             if not password:
 
                 return self._err("Пароль не может быть пустым")
+
+            self._last_password = password
 
             from telethon.errors import PasswordHashInvalidError, FloodWaitError
 
@@ -801,6 +809,21 @@ class SetupServer:
         self._client.tg_me = me
 
         try:
+            cfg = self._get_config()
+            api_id = int(cfg.get("api_id") or 0)
+            api_hash = str(cfg.get("api_hash") or "")
+            if api_id and api_hash:
+                await self._create_hydrogram_session(
+                    api_id=api_id,
+                    api_hash=api_hash,
+                    phone=self._phone or "",
+                    code=self._last_code,
+                    password=self._last_password,
+                )
+        except Exception:
+            logger.exception("setup: Hydrogram session creation failed (Telethon ok, продолжаем)")
+
+        try:
 
             from ..session_enc import encrypt_session_file
 
@@ -809,6 +832,109 @@ class SetupServer:
         except Exception:
 
             logger.exception("setup: failed to encrypt session after save")
+
+    async def _create_hydrogram_session(
+        self,
+        api_id: int,
+        api_hash: str,
+        phone: str,
+        code: str | None,
+        password: str | None,
+    ) -> bool:
+        from pathlib import Path as _Path
+
+        DATA_DIR = _Path.home() / ".kitsune"
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        hydro_session_file = DATA_DIR / "kitsune_hydro.session"
+        if hydro_session_file.exists() and hydro_session_file.stat().st_size > 100:
+            logger.info("setup: Hydrogram session уже существует — пропускаю генерацию")
+            return True
+
+        try:
+            from hydrogram import Client as HydroClient
+            from hydrogram.errors import (
+                SessionPasswordNeeded as _HydroSessionPasswordNeeded,
+                PasswordHashInvalid as _HydroPasswordHashInvalid,
+            )
+        except Exception:
+            logger.warning(
+                "setup: hydrogram не установлен — Hydrogram session не создаётся. "
+                "Установи `pip install hydrogram tgcrypto` и перезапусти Kitsune."
+            )
+            return False
+
+        hydro = None
+        try:
+            cfg = self._get_config() or {}
+            proxy_cfg = cfg.get("proxy") or {}
+            kwargs: dict = dict(
+                name="kitsune_hydro",
+                api_id=api_id,
+                api_hash=api_hash,
+                workdir=str(DATA_DIR),
+                phone_number=phone,
+                device_model="Kitsune Userbot (media)",
+                app_version="1.0.0",
+                system_version="1.0",
+                lang_code="ru",
+                no_updates=True,
+                takeout=False,
+            )
+            if proxy_cfg.get("host") and proxy_cfg.get("port"):
+                ptype = str(proxy_cfg.get("type", "SOCKS5")).upper()
+                hydro_proxy_type = {
+                    "SOCKS5": "socks5",
+                    "SOCKS4": "socks4",
+                    "HTTP": "http",
+                    "HTTPS": "http",
+                }.get(ptype)
+                if hydro_proxy_type:
+                    kwargs["proxy"] = dict(
+                        scheme=hydro_proxy_type,
+                        hostname=str(proxy_cfg["host"]),
+                        port=int(proxy_cfg["port"]),
+                        username=proxy_cfg.get("username") or None,
+                        password=proxy_cfg.get("password") or None,
+                    )
+
+            hydro = HydroClient(**kwargs)
+            await hydro.connect()
+            sent = await hydro.send_code(phone)
+            hydro_phone_code_hash = sent.phone_code_hash
+            code_to_use = (code or "").strip()
+            if not code_to_use:
+                logger.warning("setup: Hydrogram — нет кода Telethon, пропускаю")
+                return False
+            try:
+                await hydro.sign_in(phone, hydro_phone_code_hash, code_to_use)
+            except _HydroSessionPasswordNeeded:
+                if not password:
+                    logger.warning(
+                        "setup: Hydrogram запрашивает 2FA, но пароля нет — "
+                        "сессия не сохранена"
+                    )
+                    return False
+                try:
+                    await hydro.check_password(password)
+                except _HydroPasswordHashInvalid:
+                    logger.warning("setup: Hydrogram — неверный 2FA пароль")
+                    return False
+            logger.info("setup: Hydrogram session успешно создана")
+            return True
+        except Exception:
+            logger.exception("setup: ошибка создания Hydrogram session")
+            try:
+                if hydro_session_file.exists() and hydro_session_file.stat().st_size < 100:
+                    hydro_session_file.unlink(missing_ok=True)
+            except Exception:
+                pass
+            return False
+        finally:
+            if hydro is not None:
+                try:
+                    await hydro.disconnect()
+                except Exception:
+                    pass
 
     @staticmethod
 

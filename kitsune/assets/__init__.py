@@ -308,17 +308,17 @@ async def setup_all_avatars(client: "TelegramClient", db) -> None:
 
     logger.debug("assets: ID из БД: %s", {k: v for k, v in id_map.items()})
 
-    missing_titles = {t for t, cid in id_map.items() if not cid}
+    all_known_titles = set(_CHANNEL_AVATARS.keys())
 
-    if missing_titles:
+    logger.debug("assets: всегда ищем все ассет-каналы в диалогах (вдруг пользователь не новый): %s", all_known_titles)
 
-        logger.debug("assets: ищем в диалогах: %s", missing_titles)
+    found = await _find_channels_by_title(client, all_known_titles)
 
-        found = await _find_channels_by_title(client, missing_titles)
+    for title, cid in found.items():
 
-        for title, cid in found.items():
+        if not id_map.get(title):
 
-            logger.debug("assets: нашли '%s' в диалогах: id=%s", title, cid)
+            logger.info("assets: нашли существующий '%s' в диалогах: id=%s (переиспользуем, не создаём новый)", title, cid)
 
             id_map[title] = cid
 
@@ -335,6 +335,25 @@ async def setup_all_avatars(client: "TelegramClient", db) -> None:
             except Exception as _e:
 
                 logger.debug("assets: не удалось сохранить id '%s': %s", title, _e)
+
+            if title == "KitsuneBackup":
+                try:
+                    db.set_sync("kitsune.backup", "group_id", cid)
+                    await db.force_save()
+                except Exception:
+                    pass
+            elif title == "Kitsune-logs":
+                try:
+                    db.set_sync("kitsune.logs", "channel_id", cid)
+                    await db.force_save()
+                except Exception:
+                    pass
+            elif title == "kitsune-assets":
+                try:
+                    db.set_sync("kitsune.assets_channel", "channel_id", cid)
+                    await db.force_save()
+                except Exception:
+                    pass
 
     if not id_map.get("kitsune-assets"):
 
