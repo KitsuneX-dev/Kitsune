@@ -720,13 +720,13 @@ async def _startup(args: argparse.Namespace) -> None:
     # Загрузка модулей тоже идёт параллельно с Hydrogram
     loader = Loader(client, db, dispatcher)
     client._kitsune_loader = loader
-    load_task = asyncio.create_task(
-        asyncio.gather(
+    async def _load_all_modules() -> None:
+        await asyncio.gather(
             loader.load_all_builtin(),
             loader.load_all_user(),
-        ),
-        name="loader-load-all",
-    )
+        )
+
+    load_task = asyncio.create_task(_load_all_modules(), name="loader-load-all")
     # Теперь дожидаемся Hydrogram (обычно к этому моменту он уже готов)
     hydro = None
     if hydro_task is not None:
