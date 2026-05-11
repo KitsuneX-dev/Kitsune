@@ -10,10 +10,6 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, AsyncMock
 
 
-                                                                        
-                      
-                                                                        
-
 def test_scan_ast_allows_safe_code():
     from kitsune.core.loader import _scan_ast
     safe = textwrap.dedent("""

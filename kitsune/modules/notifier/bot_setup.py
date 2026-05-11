@@ -9,17 +9,12 @@ logger = logging.getLogger(__name__)
 _DB_KEY = "kitsune.notifier"
 
                                                                           
-                                                    
-                                                                                        
 _BOTFATHER_LOCK: asyncio.Lock = asyncio.Lock()
 
                                                           
 _TOKEN_RE = re.compile(r"(\d{8,}:[A-Za-z0-9_-]{35,})")
 
                                                                        
-                                                                              
-                                                                          
-                        
 _CHOOSE_BOT_HINTS = (
     "choose a bot",
     "select a bot",

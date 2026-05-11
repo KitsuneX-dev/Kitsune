@@ -483,9 +483,6 @@ async def _startup(args: argparse.Namespace) -> None:
     else:
         extra = {"proxy": proxy, "connection": connection} if proxy else {}
         if proxy:
-            # ── Шаг 2: прокси-проверки параллельно с коротким таймаутом ────────
-            # TCP-чек и handshake запускаются одновременно. Если handshake
-            # прошёл — значит TCP заведомо жив, отдельный TCP-чек не нужен.
             from .rkn_bypass import (
                 test_connection as _proxy_tcp_check,
                 mtproxy_handshake_check as _proxy_hs_check,
@@ -508,7 +505,6 @@ async def _startup(args: argparse.Namespace) -> None:
             _hs_ok = False
             _tcp_alive = False
             try:
-                # Ждём оба чека максимум 5 секунд суммарно
                 await asyncio.wait(
                     {_tcp_task, _hs_task},
                     timeout=5.0,
@@ -516,7 +512,6 @@ async def _startup(args: argparse.Namespace) -> None:
                 )
             except Exception:
                 logger.debug("main: proxy checks: asyncio.wait failed", exc_info=True)
-            # Аккуратно собираем результаты, не падая если задача отменилась
             if _hs_task.done() and not _hs_task.cancelled():
                 try:
                     _hs_ok = bool(_hs_task.result())
@@ -527,13 +522,11 @@ async def _startup(args: argparse.Namespace) -> None:
                     _tcp_alive = bool(_tcp_task.result())
                 except Exception:
                     _tcp_alive = False
-            # Отменяем ещё работающие задачи (если есть), чтобы не утекали
             for _t in (_tcp_task, _hs_task):
                 if not _t.done():
                     _t.cancel()
                     with contextlib.suppress(Exception, asyncio.CancelledError):
                         await _t
-            # Если handshake прошёл — TCP заведомо жив, прокси годен
             if _hs_ok:
                 logger.info(
                     "main: handshake OK — поднимаю основное соединение через %s:%d",
@@ -693,21 +686,16 @@ async def _startup(args: argparse.Namespace) -> None:
         get_breaker("hydrogram_io", failure_threshold=3, cooldown=300.0)
     except Exception:
         logger.debug("main: reliability breakers preregister failed", exc_info=True)
-    # ── Шаг 1: параллельный запуск Hydrogram и инициализации БД ─────────
-    # Hydrogram умеет стартовать до 45с — раньше всё это время блокировало
-    # запуск db/security/dispatcher/модулей. Теперь поднимаем фоном.
     hydro_task: asyncio.Task | None = None
     if not args.no_hydrogram:
         hydro_task = asyncio.create_task(
             _start_hydrogram(api_id, api_hash, str(session_path)),
             name="hydrogram-startup",
         )
-    # БД инициализируется параллельно с Hydrogram
     db = DatabaseManager(client)
     db_task = asyncio.create_task(db.init(), name="db-init")
     await db_task
     client._kitsune_db = db
-    # security зависит от db — после неё, но всё ещё параллельно с hydrogram
     security = SecurityManager(client, db)
     await security.init()
     client._kitsune_security = security
@@ -717,7 +705,6 @@ async def _startup(args: argparse.Namespace) -> None:
     dispatcher = CommandDispatcher(client, db, security, prefix=prefix)
     dispatcher.set_owner(me.id)
     client._kitsune_dispatcher = dispatcher
-    # Загрузка модулей тоже идёт параллельно с Hydrogram
     loader = Loader(client, db, dispatcher)
     client._kitsune_loader = loader
     async def _load_all_modules() -> None:
@@ -727,7 +714,6 @@ async def _startup(args: argparse.Namespace) -> None:
         )
 
     load_task = asyncio.create_task(_load_all_modules(), name="loader-load-all")
-    # Теперь дожидаемся Hydrogram (обычно к этому моменту он уже готов)
     hydro = None
     if hydro_task is not None:
         try:
@@ -745,7 +731,6 @@ async def _startup(args: argparse.Namespace) -> None:
                 )
             except Exception:
                 logger.exception("main: setup_hydrogram_bridge failed, continuing without bridge")
-    # Дожидаемся загрузки модулей
     await load_task
     translator = Translator(db)
     lang = db.get("kitsune.core", "lang", "ru")

@@ -10,10 +10,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 
-                                                                        
-                    
-                                                                        
-
 class _FakeDB:
     def __init__(self):
         self._d = {}

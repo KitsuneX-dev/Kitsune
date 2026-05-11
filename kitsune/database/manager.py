@@ -221,10 +221,6 @@ class DatabaseManager:
             self._backend = SQLiteBackend(db_path)
             self._data = await self._backend.load()
             logger.info("Database: SQLite backend active (%s)", db_path)
-        # ПОПЫТКА БЫСТРОГО СТАРТА: если ID kitsune-assets уже в кэше БД —
-        # сразу ставим его в self._assets_channel без сетевого запроса. Реальная
-        # валидация / создание канала — в фоновой задаче, не блокирует загрузку
-        # модулей и диспетчера.
         try:
             cached_assets = (
                 self._data.get("kitsune.asset_channels", {}).get("kitsune-assets")
@@ -239,26 +235,14 @@ class DatabaseManager:
                 )
         except Exception:
             pass
-        # Запускаем валидацию/создание assets-канала в фоне — это сэкономит
-        # ~6–7 секунд при холодном старте.
         try:
             _bg = asyncio.ensure_future(self._init_assets_channel())
             self._bg_tasks.add(_bg)
             _bg.add_done_callback(self._bg_tasks.discard)
         except RuntimeError:
-            # Нет рабочего цикла (тесты/офлайн) — выполним синхронно
             await self._init_assets_channel()
 
     async def _init_assets_channel(self) -> None:
-        """
-        Фоновый поиск/создание kitsune-assets канала.
-
-        Раньше этот блок был внутри init() и занимал 6–8 секунд (iter_dialogs +
-        CreateChannelRequest). Теперь init() возвращается сразу после загрузки
-        SQLite/Redis, а ассет-канал инициализируется параллельно с загрузкой
-        модулей. store_asset()/fetch_asset() имеют проверку self._assets_channel,
-        поэтому ранние вызовы безопасно вернут None.
-        """
         try:
             from .. import utils
             from telethon.errors import ChannelsTooMuchError, FloodWaitError

@@ -466,11 +466,6 @@ def _is_retryable_startup_error(exc: Exception) -> bool:
 
 
 async def _get_aiogram_bot(client: typing.Any, timeout: float = 30.0) -> typing.Any:
-    """
-    Ждёт сигнал готовности aiogram-бота через asyncio.Event и только потом
-    забирает экземпляр бота. Если событие по каким-то причинам не создано,
-    используется короткий fallback-опрос для обратной совместимости.
-    """
     event = _get_bot_ready_event(client)
     if event is not None:
         try:
@@ -639,8 +634,6 @@ async def setup_tg_logging(client: typing.Any) -> None:
     global _tg_channel_handler
     try:
         from .utils import asset_channel
-        # Передаём db в asset_channel, чтобы ID группы Kitsune-logs кэшировался в БД
-        # и на последующих стартах не приходилось искать её через iter_dialogs.
         _db = (
             getattr(client, "db", None)
             or getattr(client, "database", None)
@@ -667,16 +660,6 @@ async def setup_tg_logging(client: typing.Any) -> None:
     except Exception:
         logging.getLogger(__name__).exception("log: failed to set up TG channel logging")
 async def _setup_bot_and_banner(client: typing.Any, group_id: int) -> None:
-    """
-    Готовит бота (добавляет/назначает в группу) и отправляет баннер
-    ИСКЛЮЧИТЕЛЬНО через бота. Если бот недоступен — баннер не отправляется
-    вовсе (никаких fallback'ов через юзер-аккаунт, чтобы GIF не попадал в
-    «Сохранённые GIF» и сообщение не уходило от имени пользователя).
-
-    Последовательный порядок здесь намеренный: сначала ждём готовности
-    aiogram-бота, затем добавляем его в лог-группу и только после этого
-    отправляем баннер. Это убирает race condition старта.
-    """
     log = logging.getLogger(__name__)
     try:
         bot = await _get_aiogram_bot(client)
@@ -698,11 +681,6 @@ async def _send_startup_banner_via_bot(
     *,
     bot: typing.Any,
 ) -> None:
-    """
-    Отправляет стартовый баннер ТОЛЬКО через aiogram-бота.
-    Любой fallback через юзер-аккаунт (Hydrogram/Telethon) исключён —
-    иначе GIF попадает в «Сохранённые GIF» отправителя.
-    """
     import contextlib
     log = logging.getLogger(__name__)
     if bot is None:
@@ -813,10 +791,6 @@ async def _send_startup_banner_via_bot(
     except Exception:
         log.exception("log: не удалось отправить стартовый баннер через бота")
 async def _send_startup_banner(client: typing.Any, channel_id: int) -> None:
-    """
-    Совместимость со старым API. Баннер отправляется только через бота,
-    юзер-аккаунт не используется. Если бот недоступен — баннер пропускается.
-    """
     bot = await _get_aiogram_bot(client)
     if bot is None:
         logging.getLogger(__name__).info(

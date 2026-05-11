@@ -9,17 +9,10 @@ from dataclasses import dataclass, field
 logger = logging.getLogger(__name__)
 
                                                                              
-                           
-                                                                             
-
 STATE_CLOSED    = "closed"                          
 STATE_OPEN      = "open"                                    
 STATE_HALF_OPEN = "half_open"                                
 
-
-                                                                             
-                
-                                                                             
 
 class CircuitBreakerOpenError(RuntimeError):
     pass
@@ -383,9 +376,6 @@ class DegradationFlags:
 flags = DegradationFlags()
 
                                                                              
-         
-                                                                             
-
 __all__ = [
     "STATE_CLOSED",
     "STATE_OPEN",

@@ -104,7 +104,6 @@ def find_caller(stack: list) -> str:
 _ASSET_CHANNEL_CACHE_OWNER = "kitsune.asset_channels"
 
 def _asset_cache_get(db, title: str):
-    """Безопасно прочитать кэш ID канала из БД."""
     if db is None:
         return None
     try:
@@ -116,20 +115,17 @@ def _asset_cache_get(db, title: str):
     return None
 
 def _asset_cache_set(db, title: str, channel_id: int) -> None:
-    """Безопасно записать ID канала в кэш БД."""
     if db is None or not channel_id:
         return
     try:
         db.set_sync(_ASSET_CHANNEL_CACHE_OWNER, title, int(channel_id))
     except Exception:
         try:
-            # fallback на set_no_save если есть
             db._data.setdefault(_ASSET_CHANNEL_CACHE_OWNER, {})[title] = int(channel_id)
         except Exception:
             pass
 
 def _asset_cache_drop(db, title: str) -> None:
-    """Удалить битый кэш."""
     if db is None:
         return
     try:
@@ -153,28 +149,14 @@ async def asset_channel(
     megagroup: bool = False,
     db=None,
 ):
-    """
-    Найти или создать ассет-канал/группу с заданным title.
-
-    Оптимизация: при передаче `db` функция кэширует ID найденного/созданного
-    канала в БД. На последующих стартах сначала пробуем взять ID из кэша и
-    проверить его через get_entity (один лёгкий запрос вместо тяжёлого
-    iter_dialogs по всем диалогам).
-
-    Возвращает (channel_id, created_now).
-    """
     try:
         from telethon.tl.functions.channels import CreateChannelRequest
 
-        # 1) Быстрый путь: кэш в БД -> verify через get_entity
         cached_id = _asset_cache_get(db, title)
         if cached_id:
             try:
                 ent = await client.get_entity(cached_id)
                 ent_title = getattr(ent, "title", None)
-                # Доверяем кэшу: если сущность достаётся — считаем валидной.
-                # Если title слегка изменился (пользователь переименовал) —
-                # тоже принимаем, чтобы не плодить новых каналов.
                 if ent is not None:
                     if ent_title and ent_title != title:
                         _logger.debug(
@@ -189,26 +171,20 @@ async def asset_channel(
                 )
                 _asset_cache_drop(db, title)
 
-        # 2) Поиск через iter_dialogs (медленный путь — только если нет в кэше)
         try:
             async for dialog in client.iter_dialogs():
                 if (dialog.is_channel or dialog.is_group) and dialog.title == title:
                     creator = getattr(getattr(dialog, "entity", None), "creator", None)
-                    # Если creator==True — берём; если creator==False/None и
-                    # это единственный совпадающий по названию — тоже берём.
                     if creator or creator is None:
                         cid = dialog.entity.id
                         _asset_cache_set(db, title, cid)
                         return cid, False
-                    # creator==False: пользователь не владелец, но название
-                    # совпадает — fallback на этот канал.
                     cid = dialog.entity.id
                     _asset_cache_set(db, title, cid)
                     return cid, False
         except Exception as _e:
             _logger.debug("asset_channel: iter_dialogs ошибка: %s", _e)
 
-        # 3) Создаём новый канал
         result = await client(CreateChannelRequest(
             title=title,
             about=description or "Kitsune internal asset storage",

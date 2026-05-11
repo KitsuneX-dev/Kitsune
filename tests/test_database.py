@@ -10,10 +10,6 @@ from types import SimpleNamespace
 from pathlib import Path
 
 
-                                                                        
-         
-                                                                        
-
 @pytest.fixture
 def db_path(tmp_path):
     return tmp_path / "test_kitsune.db"

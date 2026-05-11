@@ -5,7 +5,6 @@ import warnings
 from pathlib import Path
 
                                 
-                                     
 if sys.version_info < (3, 10):
     print(
         "[Kitsune] ОШИБКА: требуется Python 3.10+ (рекомендован 3.13).\n"
