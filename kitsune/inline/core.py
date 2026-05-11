@@ -361,42 +361,111 @@ class InlineManager:
 
             }
 
+        # Сообщение с кнопкой может быть документом (бэкап) или медиа —
+        # у них нет text, только caption. Telegram отвечает 'there is no text
+        # in the message to edit', поэтому пробуем edit_message_caption в fallback.
+        async def _try_text_then_caption(*, _iid=None, _chat=None, _msg=None):
+            try:
+                if _iid is not None:
+                    await self._bot.edit_message_text(
+                        inline_message_id=_iid,
+                        text=text,
+                        reply_markup=markup,
+                        parse_mode="HTML",
+                    )
+                else:
+                    await self._bot.edit_message_text(
+                        chat_id=_chat,
+                        message_id=_msg,
+                        text=text,
+                        reply_markup=markup,
+                        parse_mode="HTML",
+                    )
+            except Exception as _exc_text:
+                _msg_err = str(_exc_text).lower()
+                if (
+                    "no text in the message" in _msg_err
+                    or "there is no text" in _msg_err
+                    or "message can't be edited" in _msg_err
+                ):
+                    # Это медиа-сообщение — редактируем caption.
+                    try:
+                        if _iid is not None:
+                            await self._bot.edit_message_caption(
+                                inline_message_id=_iid,
+                                caption=text,
+                                reply_markup=markup,
+                                parse_mode="HTML",
+                            )
+                        else:
+                            await self._bot.edit_message_caption(
+                                chat_id=_chat,
+                                message_id=_msg,
+                                caption=text,
+                                reply_markup=markup,
+                                parse_mode="HTML",
+                            )
+                        return
+                    except Exception as _exc_cap:
+                        _cap_err = str(_exc_cap).lower()
+                        # Если и caption не помогает — хотя бы подчистим клавиатуру,
+                        # чтобы пользователь не жал кнопку повторно.
+                        try:
+                            if _iid is not None:
+                                await self._bot.edit_message_reply_markup(
+                                    inline_message_id=_iid, reply_markup=markup,
+                                )
+                            else:
+                                await self._bot.edit_message_reply_markup(
+                                    chat_id=_chat, message_id=_msg, reply_markup=markup,
+                                )
+                        except Exception:
+                            pass
+                        logger.debug(
+                            "InlineManager.edit: caption fallback also failed: %s", _exc_cap,
+                        )
+                        return
+                # Не наш кейс — пробрасываем внешнему except.
+                raise
+
         try:
 
             iid = inline_message_id or getattr(call_or_msg, "inline_message_id", None)
 
+            # Пытаемся вытащить chat_id/message_id из объекта call_or_msg для
+            # возможного fallback в edit_message_caption (когда _edit() падает
+            # на медиа-сообщении — например на бэкапе с кнопкой "Восстановить").
+            _cb_msg = getattr(call_or_msg, "message", None)
+            _cb_chat_id = (
+                getattr(_cb_msg, "chat", None) and getattr(_cb_msg.chat, "id", None)
+            )
+            _cb_msg_id = getattr(_cb_msg, "message_id", None)
+
             if iid:
 
-                await self._bot.edit_message_text(
-
-                    inline_message_id=iid,
-
-                    text=text,
-
-                    reply_markup=markup,
-
-                    parse_mode="HTML",
-
-                )
+                await _try_text_then_caption(_iid=iid)
 
             elif hasattr(call_or_msg, "_edit") and callable(call_or_msg._edit):
 
-                await call_or_msg._edit(text, reply_markup=markup, parse_mode="HTML")
+                try:
+                    await call_or_msg._edit(text, reply_markup=markup, parse_mode="HTML")
+                except Exception as _exc_edit:
+                    _edit_err = str(_exc_edit).lower()
+                    if (
+                        ("no text in the message" in _edit_err
+                         or "there is no text" in _edit_err
+                         or "message can't be edited" in _edit_err)
+                        and _cb_chat_id and _cb_msg_id
+                    ):
+                        # Переключаемся на caption-путь для медиа-сообщения.
+                        await _try_text_then_caption(_chat=_cb_chat_id, _msg=_cb_msg_id)
+                    else:
+                        raise
 
             elif hasattr(call_or_msg, "chat_id") and hasattr(call_or_msg, "message_id"):
 
-                await self._bot.edit_message_text(
-
-                    chat_id=call_or_msg.chat_id,
-
-                    message_id=call_or_msg.message_id,
-
-                    text=text,
-
-                    reply_markup=markup,
-
-                    parse_mode="HTML",
-
+                await _try_text_then_caption(
+                    _chat=call_or_msg.chat_id, _msg=call_or_msg.message_id,
                 )
 
             else:

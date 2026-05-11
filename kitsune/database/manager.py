@@ -322,7 +322,7 @@ class DatabaseManager:
 
         self._dirty: set[tuple[str, str]] = set()
 
-        self._deleted: list[tuple[str, str]] = []
+        self._deleted: set[tuple[str, str]] = set()
 
         self._bg_tasks: set[asyncio.Task] = set()
 
@@ -542,6 +542,10 @@ class DatabaseManager:
 
             self._dirty.add((owner, key))
 
+            # Снимаем флаг удаления — иначе ключ улетит в DELETE при flush,
+            # даже если только что записан (см. restore-баг).
+            self._deleted.discard((owner, key))
+
             self._maybe_snapshot(owner, key, old_value)
 
         self._kick_save()
@@ -559,6 +563,10 @@ class DatabaseManager:
         self._data.setdefault(owner, {})[key] = value
 
         self._dirty.add((owner, key))
+
+        # См. set(): после записи ключ нельзя оставлять в _deleted,
+        # иначе при flush его сначала вставят, а потом удалят.
+        self._deleted.discard((owner, key))
 
         self._maybe_snapshot(owner, key, old_value)
 
@@ -579,7 +587,7 @@ class DatabaseManager:
         """
         for owner, sub in list(self._data.items()):
             for key in list(sub.keys()):
-                self._deleted.append((owner, key))
+                self._deleted.add((owner, key))
         self._data.clear()
         self._dirty.clear()
         try:
@@ -607,7 +615,7 @@ class DatabaseManager:
 
             self._dirty.discard((owner, key))
 
-            self._deleted.append((owner, key))
+            self._deleted.add((owner, key))
 
         self._kick_save()
 
