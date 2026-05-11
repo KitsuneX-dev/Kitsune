@@ -632,6 +632,7 @@ async def _send_startup_banner_via_bot(
                         FSInputFile(gif_path),
                         caption=text,
                         parse_mode="HTML",
+                        protect_content=True,
                     )
                     log.info("log: баннер отправлен ботом (animation) в Kitsune-logs")
                     return
@@ -648,7 +649,7 @@ async def _send_startup_banner_via_bot(
         if os.path.exists(gif_path):
             with contextlib.suppress(Exception):
                 from .hydro_media import send_file as _hydro_send
-                await _hydro_send(client, group_id, gif_path, caption=text)
+                await _hydro_send(client, group_id, gif_path, caption=text, protect_content=True)
                 return
         await client.send_message(group_id, text, parse_mode="html", link_preview=False)
     except Exception:

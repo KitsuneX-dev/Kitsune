@@ -143,9 +143,12 @@ class BotRunner:
                         _gif = _Path(__file__).parent.parent.parent / "assets" / "welcome.gif"
                         if bot_username and _gif.exists():
                             try:
-                                await self._client.send_file(
+                                from ...hydro_media import send_file as _hydro_send_file
+                                await _hydro_send_file(
+                                    self._client,
                                     f"@{bot_username}",
                                     str(_gif),
+                                    protect_content=True,
                                 )
                                 await asyncio.sleep(1.2)
                             except Exception as _ge:
@@ -162,6 +165,7 @@ class BotRunner:
                                 photo=FSInputFile(str(_info)),
                                 caption=_build_welcome_text(self._db),
                                 parse_mode="HTML",
+                                protect_content=True,
                             )
                         else:
                             await self.bot.send_message(

@@ -199,6 +199,36 @@ class InfoModule(KitsuneModule):
             result_entities += list(ents_tail or [])
         result_entities.sort(key=lambda e: e.offset)
         return result_text, result_entities
+    async def _send_banner_protected(self, peer, banner, caption, entities, markup):
+        from telethon.tl import functions, types
+        input_peer = await self.client.get_input_entity(peer)
+        file_handle, media, _image = await self.client._file_to_media(
+            banner,
+            force_document=False,
+            mime_type=None,
+            file_size=None,
+            progress_callback=None,
+            attributes=None,
+            allow_cache=True,
+            thumb=None,
+            voice_note=False,
+            video_note=False,
+            supports_streaming=False,
+            ttl=None,
+            nosound_video=None,
+        )
+        if not media:
+            raise TypeError("banner: invalid media")
+        request = functions.messages.SendMediaRequest(
+            peer=input_peer,
+            media=media,
+            message=caption or "",
+            entities=entities,
+            reply_markup=markup,
+            noforwards=True,
+        )
+        result = await self.client(request)
+        return self.client._get_response_message(request, result, input_peer)
     @command("info", required=OWNER)
     async def info_cmd(self, event) -> None:
         import asyncio as _asyncio
@@ -223,12 +253,12 @@ class InfoModule(KitsuneModule):
                 ])
             if banner:
                 try:
-                    await self.client.send_file(
+                    await self._send_banner_protected(
                         event.peer_id,
                         banner,
-                        caption=parsed_text,
-                        formatting_entities=entities,
-                        buttons=markup,
+                        parsed_text,
+                        entities,
+                        markup,
                     )
                     await event.message.delete()
                     return

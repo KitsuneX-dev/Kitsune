@@ -136,6 +136,7 @@ async def send_file(
     force_telethon: bool = False,
     progress_msg_id: int | None = None,
     reply_to: int | None = None,
+    protect_content: bool = False,
 ) -> typing.Any:
     hydro = _hydro(client)
     buf_start: int = 0
@@ -156,6 +157,8 @@ async def send_file(
             kwargs: dict = dict(chat_id=chat_id, document=file, caption=caption, parse_mode=pm)
             if reply_to:
                 kwargs["reply_to_message_id"] = reply_to
+            if protect_content:
+                kwargs["protect_content"] = True
             if is_large and progress_msg_id:
                 label = f"📤 Загружаю{(' — ' + caption) if caption else ''}..."
                 kwargs["progress"] = _make_progress_cb(client, chat_id, progress_msg_id, label)
@@ -183,6 +186,16 @@ async def send_file(
     kwargs_tl: dict = dict(caption=caption, parse_mode=parse_mode)
     if reply_to:
         kwargs_tl["reply_to"] = reply_to
+    if protect_content:
+        try:
+            return await _telethon_send_protected(client, chat_id, file, caption=caption, parse_mode=parse_mode, reply_to=reply_to)
+        except Exception as exc:
+            logger.warning("hydro_media: Telethon protected send failed (%s), sending without protection", exc)
+            if hasattr(file, "seek"):
+                try:
+                    file.seek(buf_start)
+                except Exception:
+                    pass
     return await client.send_file(chat_id, file, **kwargs_tl)
 async def send_photo(
     client: typing.Any,
@@ -193,6 +206,7 @@ async def send_photo(
     parse_mode: str = "html",
     force_telethon: bool = False,
     reply_to: int | None = None,
+    protect_content: bool = False,
 ) -> typing.Any:
     hydro = _hydro(client)
     buf_start: int = 0
@@ -207,6 +221,8 @@ async def send_photo(
             kwargs: dict = dict(chat_id=chat_id, photo=photo, caption=caption, parse_mode=pm)
             if reply_to:
                 kwargs["reply_to_message_id"] = reply_to
+            if protect_content:
+                kwargs["protect_content"] = True
             result = await hydro.send_photo(**kwargs)
             _hydro_record_success()
             logger.debug("hydro_media: photo sent via Hydrogram")
@@ -229,6 +245,16 @@ async def send_photo(
     kwargs_tl: dict = dict(caption=caption, parse_mode=parse_mode)
     if reply_to:
         kwargs_tl["reply_to"] = reply_to
+    if protect_content:
+        try:
+            return await _telethon_send_protected(client, chat_id, photo, caption=caption, parse_mode=parse_mode, reply_to=reply_to)
+        except Exception as exc:
+            logger.warning("hydro_media: Telethon protected photo send failed (%s), sending without protection", exc)
+            if hasattr(photo, "seek"):
+                try:
+                    photo.seek(buf_start)
+                except Exception:
+                    pass
     return await client.send_file(chat_id, photo, **kwargs_tl)
 async def download_media(
     client: typing.Any,
@@ -308,6 +334,51 @@ def hydro_force_revive() -> None:
         _deg_flags.clear_hydrogram_failed()
     except Exception:
         pass
+async def _telethon_send_protected(
+    client: typing.Any,
+    chat_id: typing.Any,
+    file: typing.Any,
+    *,
+    caption: str = "",
+    parse_mode: str = "html",
+    reply_to: int | None = None,
+) -> typing.Any:
+    from telethon.tl import functions, types
+    peer = await client.get_input_entity(chat_id)
+    if isinstance(caption, str) and caption:
+        msg_text, msg_entities = await client._parse_message_text(caption, parse_mode)
+    else:
+        msg_text, msg_entities = (caption or ""), None
+    file_handle, media, _image = await client._file_to_media(
+        file,
+        force_document=False,
+        mime_type=None,
+        file_size=None,
+        progress_callback=None,
+        attributes=None,
+        allow_cache=True,
+        thumb=None,
+        voice_note=False,
+        video_note=False,
+        supports_streaming=False,
+        ttl=None,
+        nosound_video=None,
+    )
+    if not media:
+        raise TypeError("Cannot use given file as media")
+    reply_obj = None
+    if reply_to:
+        reply_obj = types.InputReplyToMessage(reply_to)
+    request = functions.messages.SendMediaRequest(
+        peer=peer,
+        media=media,
+        message=msg_text,
+        entities=msg_entities,
+        reply_to=reply_obj,
+        noforwards=True,
+    )
+    result = await client(request)
+    return client._get_response_message(request, result, peer)
 __all__ = [
     "send_file",
     "send_photo",
