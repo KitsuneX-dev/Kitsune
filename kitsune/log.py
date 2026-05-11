@@ -552,24 +552,38 @@ async def setup_tg_logging(client: typing.Any) -> None:
     except Exception:
         logging.getLogger(__name__).exception("log: failed to set up TG channel logging")
 async def _setup_bot_and_banner(client: typing.Any, group_id: int) -> None:
-    _sent = [False]
-    async def _try_via_bot() -> None:
+    log = logging.getLogger(__name__)
+    sent_via_bot = False
+    try:
         bot_added, bot = await asyncio.gather(
             _ensure_bot_in_group(client, group_id),
             _get_aiogram_bot(client),
         )
-        if not _sent[0] and bot and bot_added:
-            _sent[0] = True
-            await _send_startup_banner_via_bot(client, group_id, bot=bot, bot_added=True)
-    async def _try_via_hydro() -> None:
-        await asyncio.sleep(5)
-        if not _sent[0]:
-            _sent[0] = True
-            await _send_startup_banner_via_bot(client, group_id, bot=None, bot_added=False)
-    await asyncio.gather(
-        _try_via_bot(),
-        _try_via_hydro(),
-    )
+        if bot and bot_added:
+            try:
+                await _send_startup_banner_via_bot(
+                    client, group_id, bot=bot, bot_added=True
+                )
+                sent_via_bot = True
+            except Exception:
+                log.exception(
+                    "log: ошибка при отправке баннера через бота, "
+                    "переключаюсь на Hydrogram"
+                )
+                sent_via_bot = False
+    except Exception:
+        log.exception(
+            "log: ошибка при подготовке бота для баннера, "
+            "переключаюсь на Hydrogram"
+        )
+        sent_via_bot = False
+    if not sent_via_bot:
+        try:
+            await _send_startup_banner_via_bot(
+                client, group_id, bot=None, bot_added=False
+            )
+        except Exception:
+            log.exception("log: не удалось отправить баннер через Hydrogram")
 async def _send_startup_banner_via_bot(
     client: typing.Any,
     group_id: int,
