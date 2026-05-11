@@ -372,7 +372,11 @@ class CommandDispatcher:
 
         self._loader: typing.Any = None
 
-        self._commands: dict[str, tuple[typing.Callable, int]] = {}
+        # _commands: cmd_name -> (handler, required, module)
+        #   required может быть int (битовая маска) или str (имя кастомной роли).
+        #   module хранится для разрешения имени владельца роли в БД
+        #   (ключ ``<module_db_owner>.<role_name>_users``).
+        self._commands: dict[str, tuple[typing.Callable, typing.Any, typing.Any]] = {}
 
         self._watchers: list[tuple[typing.Callable | None, typing.Callable, tuple[str, ...]]] = []
 
@@ -386,15 +390,95 @@ class CommandDispatcher:
 
         self._client.add_event_handler(self._on_in_message,   events.NewMessage(incoming=True))
 
-    def register_command(self, name: str, handler: typing.Callable, required: int = OWNER) -> None:
+    def register_command(
+        self,
+        name: str,
+        handler: typing.Callable,
+        required: "int | str" = OWNER,
+        *,
+        module: typing.Any = None,
+    ) -> None:
+        """Регистрирует команду в диспетчере.
 
-        self._commands[name.lower()] = (handler, required)
-
-        logger.debug("Dispatcher: registered command .%s (required=%d)", name, required)
+        Args:
+            name: имя команды (без префикса).
+            handler: bound-method модуля.
+            required: ``int`` — битовая маска прав; ``str`` — имя кастомной
+                роли модуля (проверяется по БД).
+            module: экземпляр модуля-владельца (нужен для резолва
+                строковых ролей). Если не передан — пытаемся вывести из ``handler.__self__``.
+        """
+        if module is None:
+            module = getattr(handler, "__self__", None)
+        self._commands[name.lower()] = (handler, required, module)
+        if isinstance(required, str):
+            logger.debug(
+                "Dispatcher: registered command .%s (role=%r, module=%s)",
+                name, required,
+                getattr(module, "name", type(module).__name__ if module else "?"),
+            )
+        else:
+            logger.debug("Dispatcher: registered command .%s (required=%d)", name, int(required or 0))
 
     def unregister_command(self, name: str) -> None:
 
         self._commands.pop(name.lower(), None)
+
+    # ------------------------------------------------------------------
+    # Строковые (кастомные) роли модулей.
+    # ------------------------------------------------------------------
+    def _resolve_role_db_owner(self, module: typing.Any) -> str:
+        """Имя владельца ключа в БД для хранения списка роли.
+
+        По умолчанию — ``module.name`` (имя класса модуля). Модуль может
+        переопределить владельца, выставив атрибут ``role_db_owner``
+        (например, если нужно разделить списки между несколькими модулями
+        или изолировать их).
+        """
+        if module is None:
+            return ""
+        custom = getattr(module, "role_db_owner", None)
+        if isinstance(custom, str) and custom.strip():
+            return custom.strip()
+        name = getattr(module, "name", None) or type(module).__name__
+        return str(name)
+
+    def _get_role_users(self, module: typing.Any, role_name: str) -> list[int]:
+        """Читает список allowed_users для строковой роли из БД.
+
+        Ключ: ``<module_db_owner>.<role_name>_users``.
+        """
+        owner = self._resolve_role_db_owner(module)
+        if not owner or not role_name:
+            return []
+        raw = self._db.get(owner, f"{role_name}_users", []) or []
+        if not isinstance(raw, (list, tuple, set)):
+            return []
+        users: list[int] = []
+        for item in raw:
+            try:
+                users.append(int(item))
+            except (TypeError, ValueError):
+                continue
+        return users
+
+    def _check_role(self, module: typing.Any, role_name: str, sender_id: int) -> bool:
+        """True, если ``sender_id`` входит в список роли модуля.
+
+        Владелец (OWNER) и co-owner'ы всегда проходят проверку строковых
+        ролей — чтобы они могли использовать любые команды без доп.
+        настроек (аналогично тому, как OWNER проходит битовые маски).
+        """
+        if not sender_id:
+            return False
+        # Владелец
+        own_id = getattr(self._client, "tg_id", None)
+        if own_id and sender_id == own_id:
+            return True
+        # Co-owner'ы
+        if sender_id in self._get_co_owners():
+            return True
+        return sender_id in self._get_role_users(module, role_name)
 
     def register_watcher(self, handler: typing.Callable, filter_func: typing.Callable | None = None) -> None:
 
@@ -467,6 +551,7 @@ class CommandDispatcher:
         if not sender_id or sender_id == own_id:
 
             return
+
 
         pending = self._pending_input
 
@@ -625,7 +710,7 @@ class CommandDispatcher:
 
                 if entry is not None:
 
-                    handler, _required = entry
+                    handler, _required, _module = entry
 
                     if getattr(handler, "_incoming", False):
 
@@ -652,6 +737,7 @@ class CommandDispatcher:
             return
 
         await self._handle_message(event, is_own=False, is_co_owner=is_co_owner)
+
 
     async def _handle_message(self, event: events.NewMessage.Event, *, is_own: bool, is_co_owner: bool = False, is_incoming: bool = False) -> None:
 
@@ -703,7 +789,7 @@ class CommandDispatcher:
 
                 return
 
-            handler, required = entry
+            handler, required, module = entry
 
             if is_co_owner:
 
@@ -721,8 +807,18 @@ class CommandDispatcher:
 
             # Для incoming-команд проверку прав делает SecurityManager.check
             # (ниже по коду). Старый guard на required>=OWNER применяется
-            # только к классическому пути sudo/co-owner.
-            if not is_incoming and not is_own and not is_co_owner and required >= OWNER:
+            # только к классическому пути sudo/co-owner. Для строковых ролей
+            # этот guard пропускается — проверка всегда идёт по списку
+            # роли в БД ниже по коду.
+            is_str_role = isinstance(required, str)
+            if (
+                not is_incoming
+                and not is_own
+                and not is_co_owner
+                and not is_str_role
+                and isinstance(required, int)
+                and required >= OWNER
+            ):
 
                 return
 
@@ -742,15 +838,33 @@ class CommandDispatcher:
 
                 return
 
-            try:
+            # ------------------------------------------------------------
+            # Проверка доступа.
+            # ------------------------------------------------------------
+            if is_str_role:
+                # Кастомная роль модуля: берём список allowed_users из БД
+                # и проверяем sender_id. is_own (владелец или прокси-co-owner)
+                # всегда проходит — это симметрично обработке OWNER-бита.
+                try:
+                    if is_own:
+                        allowed = True
+                    else:
+                        allowed = self._check_role(module, required, sender_id)
+                except Exception:
+                    logger.exception(
+                        "Dispatcher: role check failed for .%s (role=%r)",
+                        cmd_name, required,
+                    )
+                    return
+            else:
+                try:
+                    allowed = await self._security.check(message, required)
 
-                allowed = await self._security.check(message, required)
+                except Exception:
 
-            except Exception:
+                    logger.exception("Dispatcher: security check failed for .%s", cmd_name)
 
-                logger.exception("Dispatcher: security check failed for .%s", cmd_name)
-
-                return
+                    return
 
             if not allowed:
 

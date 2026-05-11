@@ -167,7 +167,7 @@ class KitsuneModule:
 def command(
     name: str | None = None,
     *,
-    required: int = 0,
+    required: "int | str" = 0,
     aliases: list[str] | None = None,
     incoming: bool = False,
 ) -> typing.Callable:
@@ -175,7 +175,17 @@ def command(
 
     Параметры:
         name: имя команды (по умолчанию — имя функции без суффикса ``_cmd``).
-        required: требуемые права (битовая маска из ``kitsune.core.security``).
+        required: требуемые права. Может быть:
+            * ``int`` — битовая маска из ``kitsune.core.security``
+              (OWNER, SUDO, SUPPORT, GROUP_ADMIN и т.д.) — старое поведение.
+            * ``str`` — имя кастомной роли модуля. Dispatcher автоматически
+              проверит, что ``sender_id`` присутствует в списке
+              ``<module_db_owner>.<role_name>_users`` в БД. ``module_db_owner``
+              по умолчанию — имя класса модуля; разработчик сам управляет
+              списком пользователей (через ``self.db.set(...)``), а dispatcher
+              делает gating автоматически. Команды со строковой ролью
+              ВСЕГДА работают как ``incoming=True`` — иначе их некому было
+              бы вызывать кроме владельца.
         aliases: дополнительные имена-алиасы команды.
         incoming: если ``True`` — команда срабатывает также на входящие
             сообщения (от других пользователей, не только владельца).
@@ -186,12 +196,22 @@ def command(
             сообщения владельца / co-owner / sudo через текущую логику
             ``CommandDispatcher``).
     """
+    if required is not None and not isinstance(required, (int, str)):
+        raise TypeError(
+            f"@command(required=...) must be int (bitmask) or str (role name), "
+            f"got {type(required).__name__}"
+        )
+    if isinstance(required, str) and not required.strip():
+        raise ValueError("@command(required=...) string role name must be non-empty")
+
     def decorator(func: typing.Callable) -> typing.Callable:
         func._is_command = True
         func._command_name = name or func.__name__.removesuffix("_cmd")
         func._required = required
         func._aliases = aliases or []
-        func._incoming = bool(incoming)
+        # Строковая роль автоматически подразумевает incoming=True —
+        # иначе чужие пользователи не смогли бы её активировать.
+        func._incoming = bool(incoming) or isinstance(required, str)
         return func
     return decorator
 
@@ -516,7 +536,10 @@ class Loader:
         except Exception:
             logger.exception("Loader: on_unload failed for %s", name)
         for cmd_name in list(self._dispatcher._commands):
-            handler, _ = self._dispatcher._commands[cmd_name]
+            entry = self._dispatcher._commands[cmd_name]
+            # Обратная совместимость: раньше _commands хранил пары
+            # (handler, required); теперь — тройки (handler, required, module).
+            handler = entry[0]
             if getattr(handler, "__self__", None) is mod:
                 self._dispatcher.unregister_command(cmd_name)
         self._dispatcher.unregister_watchers_for(mod)
@@ -670,9 +693,9 @@ class Loader:
             if getattr(method, "_is_command", False):
                 name = method._command_name
                 required = method._required
-                self._dispatcher.register_command(name, method, required)
+                self._dispatcher.register_command(name, method, required, module=mod)
                 for alias in getattr(method, "_aliases", []):
-                    self._dispatcher.register_command(alias, method, required)
+                    self._dispatcher.register_command(alias, method, required, module=mod)
             if getattr(method, "_is_watcher", False):
                 filter_func = method._watcher_filter
                 self._dispatcher.register_watcher(method, filter_func)

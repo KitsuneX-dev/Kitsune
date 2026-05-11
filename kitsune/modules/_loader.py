@@ -227,11 +227,29 @@ def command(
 
     *,
 
-    required: int = 0,
+    required: "int | str" = 0,
 
     aliases: list[str] | None = None,
 
+    incoming: bool = False,
+
 ) -> typing.Callable:
+    """Декоратор регистрации команды. ``required`` может быть ``int`` (битовая
+    маска из ``kitsune.core.security``) или ``str`` — имя кастомной роли
+    модуля, проверяемой диспетчером по списку в БД
+    ``<module_db_owner>.<role_name>_users``.
+    """
+
+    if required is not None and not isinstance(required, (int, str)):
+
+        raise TypeError(
+            f"@command(required=...) must be int (bitmask) or str (role name), "
+            f"got {type(required).__name__}"
+        )
+
+    if isinstance(required, str) and not required.strip():
+
+        raise ValueError("@command(required=...) string role name must be non-empty")
 
     def decorator(func: typing.Callable) -> typing.Callable:
 
@@ -242,6 +260,9 @@ def command(
         func._required = required
 
         func._aliases = aliases or []
+
+        # Строковая роль автоматически подразумевает incoming=True.
+        func._incoming = bool(incoming) or isinstance(required, str)
 
         return func
 
@@ -663,7 +684,11 @@ class Loader:
 
         for cmd_name in list(self._dispatcher._commands):
 
-            handler, _ = self._dispatcher._commands[cmd_name]
+            entry = self._dispatcher._commands[cmd_name]
+
+            # Совместимость с расширенным форматом (handler, required, module)
+            # и со старым (handler, required).
+            handler = entry[0]
 
             if getattr(handler, "__self__", None) is mod:
 
@@ -986,11 +1011,18 @@ class Loader:
 
                 required = method._required
 
-                self._dispatcher.register_command(name, method, required)
+                try:
+                    self._dispatcher.register_command(name, method, required, module=mod)
+                except TypeError:
+                    # Старый dispatcher без аргумента ``module=`` (совместимость).
+                    self._dispatcher.register_command(name, method, required)
 
                 for alias in getattr(method, "_aliases", []):
 
-                    self._dispatcher.register_command(alias, method, required)
+                    try:
+                        self._dispatcher.register_command(alias, method, required, module=mod)
+                    except TypeError:
+                        self._dispatcher.register_command(alias, method, required)
 
             if getattr(method, "_is_watcher", False):
 
