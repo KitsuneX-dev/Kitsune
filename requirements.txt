@@ -1,5 +1,8 @@
 telethon>=1.36.0,<2.0.0
-TgCrypto-pyrofork>=1.2.5
+# pyrogram / TgCrypto-pyrofork удалены — в коде не использовались.
+# Hydrogram + tgcrypto закрывают все нужные сценарии MTProto.
+tgcrypto>=1.2.5
+hydrogram>=0.1.4
 
 aiohttp>=3.9.3,<4.0.0
 aiohttp-jinja2>=1.6,<2.0

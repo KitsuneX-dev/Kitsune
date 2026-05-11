@@ -483,6 +483,9 @@ async def _startup(args: argparse.Namespace) -> None:
     else:
         extra = {"proxy": proxy, "connection": connection} if proxy else {}
         if proxy:
+            # ── Шаг 2: прокси-проверки параллельно с коротким таймаутом ────────
+            # TCP-чек и handshake запускаются одновременно. Если handshake
+            # прошёл — значит TCP заведомо жив, отдельный TCP-чек не нужен.
             from .rkn_bypass import (
                 test_connection as _proxy_tcp_check,
                 mtproxy_handshake_check as _proxy_hs_check,
@@ -490,30 +493,64 @@ async def _startup(args: argparse.Namespace) -> None:
             _phost = proxy_cfg.get("host")
             _pport = int(proxy_cfg.get("port") or 443)
             _psecret = str(proxy_cfg.get("secret") or "")
-            logger.info("main: проверяю TCP-доступность прокси %s:%d…", _phost, _pport)
-            _proxy_alive = await _proxy_tcp_check(_phost, _pport, timeout=8.0)
-            if not _proxy_alive:
+            logger.info(
+                "main: проверяю прокси %s:%d (TCP+MTProto handshake параллельно)…",
+                _phost, _pport,
+            )
+            _tcp_task = asyncio.create_task(
+                _proxy_tcp_check(_phost, _pport, timeout=3.0),
+                name="proxy-tcp-check",
+            )
+            _hs_task = asyncio.create_task(
+                _proxy_hs_check(_phost, _pport, _psecret, timeout=5.0),
+                name="proxy-hs-check",
+            )
+            _hs_ok = False
+            _tcp_alive = False
+            try:
+                # Ждём оба чека максимум 5 секунд суммарно
+                await asyncio.wait(
+                    {_tcp_task, _hs_task},
+                    timeout=5.0,
+                    return_when=asyncio.ALL_COMPLETED,
+                )
+            except Exception:
+                logger.debug("main: proxy checks: asyncio.wait failed", exc_info=True)
+            # Аккуратно собираем результаты, не падая если задача отменилась
+            if _hs_task.done() and not _hs_task.cancelled():
+                try:
+                    _hs_ok = bool(_hs_task.result())
+                except Exception:
+                    _hs_ok = False
+            if _tcp_task.done() and not _tcp_task.cancelled():
+                try:
+                    _tcp_alive = bool(_tcp_task.result())
+                except Exception:
+                    _tcp_alive = False
+            # Отменяем ещё работающие задачи (если есть), чтобы не утекали
+            for _t in (_tcp_task, _hs_task):
+                if not _t.done():
+                    _t.cancel()
+                    with contextlib.suppress(Exception, asyncio.CancelledError):
+                        await _t
+            # Если handshake прошёл — TCP заведомо жив, прокси годен
+            if _hs_ok:
+                logger.info(
+                    "main: handshake OK — поднимаю основное соединение через %s:%d",
+                    _phost, _pport,
+                )
+            elif _tcp_alive:
                 logger.warning(
-                    "main: прокси %s:%d НЕ отвечает на TCP за 8s — пропускаю и иду на fallback",
+                    "main: прокси %s:%d отвечает на TCP, но MTProto handshake провален. Иду на fallback.",
                     _phost, _pport,
                 )
                 extra = {}
             else:
-                logger.info(
-                    "main: TCP OK, проверяю MTProto handshake %s:%d…", _phost, _pport,
+                logger.warning(
+                    "main: прокси %s:%d не прошёл проверки (TCP/handshake) за 5s — пропускаю и иду на fallback",
+                    _phost, _pport,
                 )
-                _hs_ok = await _proxy_hs_check(_phost, _pport, _psecret, timeout=10.0)
-                if _hs_ok:
-                    logger.info(
-                        "main: handshake OK — поднимаю основное соединение через %s:%d",
-                        _phost, _pport,
-                    )
-                else:
-                    logger.warning(
-                        "main: прокси %s:%d отвечает на TCP, но MTProto handshake провален. Иду на fallback.",
-                        _phost, _pport,
-                    )
-                    extra = {}
+                extra = {}
         client = KitsuneTelegramClient(
             str(session_path),
             api_id=api_id,
@@ -656,13 +693,21 @@ async def _startup(args: argparse.Namespace) -> None:
         get_breaker("hydrogram_io", failure_threshold=3, cooldown=300.0)
     except Exception:
         logger.debug("main: reliability breakers preregister failed", exc_info=True)
-    hydro = None
+    # ── Шаг 1: параллельный запуск Hydrogram и инициализации БД ─────────
+    # Hydrogram умеет стартовать до 45с — раньше всё это время блокировало
+    # запуск db/security/dispatcher/модулей. Теперь поднимаем фоном.
+    hydro_task: asyncio.Task | None = None
     if not args.no_hydrogram:
-        hydro = await _start_hydrogram(api_id, api_hash, str(session_path))
-        client.hydrogram = hydro
+        hydro_task = asyncio.create_task(
+            _start_hydrogram(api_id, api_hash, str(session_path)),
+            name="hydrogram-startup",
+        )
+    # БД инициализируется параллельно с Hydrogram
     db = DatabaseManager(client)
-    await db.init()
+    db_task = asyncio.create_task(db.init(), name="db-init")
+    await db_task
     client._kitsune_db = db
+    # security зависит от db — после неё, но всё ещё параллельно с hydrogram
     security = SecurityManager(client, db)
     await security.init()
     client._kitsune_security = security
@@ -671,17 +716,37 @@ async def _startup(args: argparse.Namespace) -> None:
         prefix = db_prefix
     dispatcher = CommandDispatcher(client, db, security, prefix=prefix)
     dispatcher.set_owner(me.id)
-    if hydro:
-        from .core.hydro_bridge import setup_hydrogram_bridge
-        await setup_hydrogram_bridge(hydro, client, dispatcher, db)
-        logger.info("main: HydrogramBridge active — single dispatcher for both clients")
     client._kitsune_dispatcher = dispatcher
+    # Загрузка модулей тоже идёт параллельно с Hydrogram
     loader = Loader(client, db, dispatcher)
     client._kitsune_loader = loader
-    await asyncio.gather(
-        loader.load_all_builtin(),
-        loader.load_all_user(),
+    load_task = asyncio.create_task(
+        asyncio.gather(
+            loader.load_all_builtin(),
+            loader.load_all_user(),
+        ),
+        name="loader-load-all",
     )
+    # Теперь дожидаемся Hydrogram (обычно к этому моменту он уже готов)
+    hydro = None
+    if hydro_task is not None:
+        try:
+            hydro = await hydro_task
+        except Exception:
+            logger.exception("main: Hydrogram startup task raised")
+            hydro = None
+        client.hydrogram = hydro
+        if hydro:
+            from .core.hydro_bridge import setup_hydrogram_bridge
+            try:
+                await setup_hydrogram_bridge(hydro, client, dispatcher, db)
+                logger.info(
+                    "main: HydrogramBridge active — single dispatcher for both clients"
+                )
+            except Exception:
+                logger.exception("main: setup_hydrogram_bridge failed, continuing without bridge")
+    # Дожидаемся загрузки модулей
+    await load_task
     translator = Translator(db)
     lang = db.get("kitsune.core", "lang", "ru")
     translator.set_language(lang)

@@ -826,7 +826,7 @@ def init() -> None:
     root.handlers = []
     root.addHandler(KitsuneLogsHandler([console_handler, rotating_handler], capacity=7000))
     root.setLevel(logging.NOTSET)
-    for noisy in ("telethon", "pyrogram", "hydrogram", "matplotlib", "aiohttp", "aiogram", "httpx"):
+    for noisy in ("telethon", "hydrogram", "matplotlib", "aiohttp", "aiogram", "httpx"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
     _network_noise_filter = _NetworkNoiseFilter()
     _hydro_session_filter = _HydrogramSessionNoiseFilter()

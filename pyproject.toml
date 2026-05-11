@@ -27,8 +27,8 @@ classifiers = [
 
 dependencies = [
     "heroku-tl-new>=2.0.0",
-    "TgCrypto-pyrofork",
-    "pyrogram>=2.0.106",
+    # NOTE: pyrogram и TgCrypto-pyrofork удалены — в коде не использовались.
+    # Остаётся hydrogram (для медиа) + tgcrypto (для ускорения hydrogram).
     "tgcrypto>=1.2.5",
     "aiohttp>=3.9.3",
     "aiohttp-jinja2>=1.6",
