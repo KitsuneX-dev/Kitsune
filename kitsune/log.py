@@ -396,6 +396,8 @@ class _ConsoleStartupFilter(logging.Filter):
         "log: бот недоступен",
         "log: бот добавлен",
         "log: бот уже в",
+        "log: ожидание бота",
+        "log: баннер пропущен",
         "BotRunner: polling started",
         "Notifier: InlineManager attached",
         "main: Telethon update loop started",
@@ -419,8 +421,12 @@ rotating_handler.setFormatter(_main_formatter)
 
 _tg_channel_handler: TelegramChannelHandler | None = None
 
-async def _get_aiogram_bot(client: typing.Any) -> typing.Any:
-    for _ in range(100):
+async def _get_aiogram_bot(client: typing.Any, max_attempts: int = 150) -> typing.Any:
+    """
+    Ожидает готовности aiogram-бота. По умолчанию ждёт до ~30 секунд
+    (150 попыток × 0.2с). Возвращает bot или None.
+    """
+    for _ in range(max_attempts):
         try:
             loader = getattr(client, "_kitsune_loader", None)
             if loader:
@@ -432,9 +438,6 @@ async def _get_aiogram_bot(client: typing.Any) -> typing.Any:
         await asyncio.sleep(0.2)
     return None
 async def _is_bot_already_admin(client: typing.Any, group_id: int, bot_entity) -> bool:
-\
-\
-\
     log = logging.getLogger(__name__)
     try:
         from telethon.tl.functions.channels import GetParticipantRequest
@@ -456,7 +459,7 @@ async def _is_bot_already_admin(client: typing.Any, group_id: int, bot_entity) -
 async def _ensure_bot_in_group(client: typing.Any, group_id: int) -> bool:
     log = logging.getLogger(__name__)
     bot_username: str | None = None
-    for _ in range(100):
+    for _ in range(150):
         try:
             db = getattr(client, "_kitsune_db", None)
             if db:
@@ -467,7 +470,7 @@ async def _ensure_bot_in_group(client: typing.Any, group_id: int) -> bool:
             pass
         await asyncio.sleep(0.2)
     if not bot_username:
-        log.debug("log: bot_username не найден за 20с — баннер пойдёт через Hydrogram")
+        log.debug("log: bot_username не найден за 30с — баннер пропущен")
         return False
     try:
         bot_entity = await client.get_entity(f"@{bot_username}")
@@ -515,7 +518,7 @@ async def _ensure_bot_in_group(client: typing.Any, group_id: int) -> bool:
                             "сессии — бот @%s остаётся обычным участником",
                             bot_username,
                         )
-                        return False
+                        return True
                     log.warning("log: не удалось назначить бота админом — %s", admin_exc)
                     return False
             log.warning("log: не удалось добавить бота в группу — %s", invite_exc)
@@ -552,48 +555,43 @@ async def setup_tg_logging(client: typing.Any) -> None:
     except Exception:
         logging.getLogger(__name__).exception("log: failed to set up TG channel logging")
 async def _setup_bot_and_banner(client: typing.Any, group_id: int) -> None:
+    """
+    Готовит бота (добавляет/назначает в группу) и отправляет баннер
+    ИСКЛЮЧИТЕЛЬНО через бота. Если бот недоступен — баннер не отправляется
+    вовсе (никаких fallback'ов через юзер-аккаунт, чтобы GIF не попадал в
+    «Сохранённые GIF» и сообщение не уходило от имени пользователя).
+    """
     log = logging.getLogger(__name__)
-    sent_via_bot = False
     try:
         bot_added, bot = await asyncio.gather(
             _ensure_bot_in_group(client, group_id),
             _get_aiogram_bot(client),
         )
-        if bot and bot_added:
-            try:
-                await _send_startup_banner_via_bot(
-                    client, group_id, bot=bot, bot_added=True
-                )
-                sent_via_bot = True
-            except Exception:
-                log.exception(
-                    "log: ошибка при отправке баннера через бота, "
-                    "переключаюсь на Hydrogram"
-                )
-                sent_via_bot = False
+        if not bot:
+            log.info("log: ожидание бота истекло — баннер пропущен (юзер-аккаунт не используется)")
+            return
+        if not bot_added:
+            log.info("log: бот не добавлен в Kitsune-logs — баннер пропущен (юзер-аккаунт не используется)")
+            return
+        await _send_startup_banner_via_bot(client, group_id, bot=bot)
     except Exception:
-        log.exception(
-            "log: ошибка при подготовке бота для баннера, "
-            "переключаюсь на Hydrogram"
-        )
-        sent_via_bot = False
-    if not sent_via_bot:
-        try:
-            await _send_startup_banner_via_bot(
-                client, group_id, bot=None, bot_added=False
-            )
-        except Exception:
-            log.exception("log: не удалось отправить баннер через Hydrogram")
+        log.exception("log: не удалось подготовить бота для баннера — баннер пропущен")
 async def _send_startup_banner_via_bot(
     client: typing.Any,
     group_id: int,
     *,
-    bot: typing.Any = None,
-    bot_added: bool = False,
+    bot: typing.Any,
 ) -> None:
+    """
+    Отправляет стартовый баннер ТОЛЬКО через aiogram-бота.
+    Любой fallback через юзер-аккаунт (Hydrogram/Telethon) исключён —
+    иначе GIF попадает в «Сохранённые GIF» отправителя.
+    """
     import contextlib
-    import os
     log = logging.getLogger(__name__)
+    if bot is None:
+        log.info("log: бот недоступен — баннер пропущен")
+        return
     try:
         from .version import __version_str__, branch
         commit_sha = "unknown"
@@ -636,40 +634,80 @@ async def _send_startup_banner_via_bot(
         gif_path = os.path.abspath(
             os.path.join(os.path.dirname(__file__), "..", "banner.gif")
         )
+        png_path = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "..", "banner.png")
+        )
         bot_api_id = _to_bot_api_id(group_id)
-        if bot and bot_added:
-            if os.path.exists(gif_path):
-                with contextlib.suppress(Exception):
-                    from aiogram.types import FSInputFile
-                    await bot.send_animation(
-                        bot_api_id,
-                        FSInputFile(gif_path),
-                        caption=text,
-                        parse_mode="HTML",
-                        protect_content=True,
-                    )
-                    log.info("log: баннер отправлен ботом (animation) в Kitsune-logs")
-                    return
-            with contextlib.suppress(Exception):
-                await bot.send_message(
-                    bot_api_id,
-                    text,
-                    parse_mode="HTML",
-                    disable_web_page_preview=True,
-                )
-                log.info("log: баннер отправлен ботом (text) в Kitsune-logs")
-                return
-        log.info("log: бот недоступен/не добавлен, баннер отправляется через Hydrogram")
+
+                                                                       
         if os.path.exists(gif_path):
-            with contextlib.suppress(Exception):
-                from .hydro_media import send_file as _hydro_send
-                await _hydro_send(client, group_id, gif_path, caption=text, protect_content=True)
+            try:
+                from aiogram.types import FSInputFile
+                await bot.send_animation(
+                    bot_api_id,
+                    FSInputFile(gif_path),
+                    caption=text,
+                    parse_mode="HTML",
+                    protect_content=True,
+                )
+                log.info("log: баннер отправлен ботом (animation) в Kitsune-logs")
                 return
-        await client.send_message(group_id, text, parse_mode="html", link_preview=False)
+            except Exception as anim_exc:
+                log.warning(
+                    "log: не удалось отправить animation ботом (%s) — пробую photo",
+                    anim_exc,
+                )
+
+                                                              
+        if os.path.exists(png_path):
+            try:
+                from aiogram.types import FSInputFile
+                await bot.send_photo(
+                    bot_api_id,
+                    FSInputFile(png_path),
+                    caption=text,
+                    parse_mode="HTML",
+                    protect_content=True,
+                )
+                log.info("log: баннер отправлен ботом (photo) в Kitsune-logs")
+                return
+            except Exception as photo_exc:
+                log.warning(
+                    "log: не удалось отправить photo ботом (%s) — пробую текст",
+                    photo_exc,
+                )
+
+                                                            
+        try:
+            await bot.send_message(
+                bot_api_id,
+                text,
+                parse_mode="HTML",
+                disable_web_page_preview=True,
+                protect_content=True,
+            )
+            log.info("log: баннер отправлен ботом (text) в Kitsune-logs")
+            return
+        except Exception as text_exc:
+            log.warning(
+                "log: бот не смог отправить даже текст (%s) — баннер пропущен "
+                "(юзер-аккаунт не используется намеренно)",
+                text_exc,
+            )
     except Exception:
-        log.exception("log: не удалось отправить стартовый баннер")
+        log.exception("log: не удалось отправить стартовый баннер через бота")
 async def _send_startup_banner(client: typing.Any, channel_id: int) -> None:
-    await _send_startup_banner_via_bot(client, channel_id)
+    """
+    Совместимость со старым API. Баннер отправляется только через бота,
+    юзер-аккаунт не используется. Если бот недоступен — баннер пропускается.
+    """
+    bot = await _get_aiogram_bot(client)
+    if bot is None:
+        logging.getLogger(__name__).info(
+            "log: бот недоступен — баннер пропущен (юзер-аккаунт не используется)"
+        )
+        return
+    await _send_startup_banner_via_bot(client, channel_id, bot=bot)
 def init() -> None:
     import sys
     console_handler = logging.StreamHandler(sys.stdout)
