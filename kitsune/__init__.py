@@ -13,7 +13,6 @@ _PATCHES_INSTALLED = False
 
 
 def _chmod_session_files(filename) -> None:
-    """Чиним права на основной файл сессии и его WAL/SHM/journal-спутники."""
     if not filename or filename == ":memory:":
         return
     try:
@@ -35,14 +34,10 @@ def _chmod_session_files(filename) -> None:
                     pass
     except Exception:
         pass
-
-
 def install_patches() -> None:
     global _PATCHES_INSTALLED
     if _PATCHES_INSTALLED:
         return
-
-    # ── 1. Hardening MTProxy readexactly ────────────────────────────────────
     try:
         from telethon.network.connection import tcpmtproxy as _m
         _target = None
@@ -55,14 +50,12 @@ def install_patches() -> None:
             _target.readexactly, "_kitsune_size_guard", False
         ):
             _orig = _target.readexactly
-
             async def _readexactly_safe(self, n):
                 if n is None or n < 0:
                     raise ConnectionError(f"MTProxy: invalid packet size ({n!r})")
                 if n == 0:
                     return b""
                 return await _orig(self, n)
-
             _readexactly_safe._kitsune_size_guard = True
             _target.readexactly = _readexactly_safe
             _log.info(
@@ -71,8 +64,6 @@ def install_patches() -> None:
             )
     except Exception as _exc:
         _log.debug("kitsune: MTProxyIO patch skipped — %s", _exc)
-
-    # ── 2. Hardening IntermediatePacketCodec ────────────────────────────────
     try:
         from telethon.network.connection import tcpintermediate as _ti
         _cls = getattr(_ti, "IntermediatePacketCodec", None)
@@ -82,7 +73,6 @@ def install_patches() -> None:
             and not getattr(_cls.read_packet, "_kitsune_len_guard", False)
         ):
             import struct as _struct
-
             async def _read_packet_safe(self, reader):
                 length_bytes = await reader.readexactly(4)
                 if not length_bytes or len(length_bytes) < 4:
@@ -96,7 +86,6 @@ def install_patches() -> None:
                         f"Intermediate codec: bogus packet length ({length})"
                     )
                 return await reader.readexactly(length)
-
             _read_packet_safe._kitsune_len_guard = True
             _cls.read_packet = _read_packet_safe
             _log.info(
@@ -105,14 +94,10 @@ def install_patches() -> None:
             )
     except Exception as _exc:
         _log.debug("kitsune: IntermediatePacketCodec patch skipped — %s", _exc)
-
-    # ── 3. SQLiteSession.process_entities: лечим "no such table"/readonly ───
     try:
         from telethon.sessions import sqlite as _ts_sqlite
         import sqlite3 as _sqlite3
-
         _SQLiteSession = getattr(_ts_sqlite, "SQLiteSession", None)
-
         if (
             _SQLiteSession is not None
             and "process_entities" in _SQLiteSession.__dict__
@@ -121,7 +106,6 @@ def install_patches() -> None:
             )
         ):
             _orig_pe = _SQLiteSession.process_entities
-
             _SCHEMA = {
                 "entities": (
                     "CREATE TABLE IF NOT EXISTS entities ("
@@ -150,7 +134,6 @@ def install_patches() -> None:
                     "tmp_auth_key blob)"
                 ),
             }
-
             def _ensure_tables(self) -> None:
                 try:
                     cur = self._cursor()
@@ -165,14 +148,12 @@ def install_patches() -> None:
                         pass
                 except Exception as _e:
                     _log.debug("kitsune: _ensure_tables failed — %s", _e)
-
             def _safe_process_entities(self, tlo):
                 try:
                     return _orig_pe(self, tlo)
                 except _sqlite3.OperationalError as exc:
                     msg = str(exc).lower()
                     if "readonly" in msg or "read-only" in msg:
-                        # Чиним права и пробуем ещё раз
                         _chmod_session_files(getattr(self, "filename", None))
                         try:
                             return _orig_pe(self, tlo)
@@ -202,7 +183,6 @@ def install_patches() -> None:
                         "kitsune: process_entities silently swallowed — %s", _e,
                     )
                     return
-
             _safe_process_entities._kitsune_table_guard = True
             _SQLiteSession.process_entities = _safe_process_entities
             _log.info(
@@ -211,19 +191,10 @@ def install_patches() -> None:
             )
     except Exception as _exc:
         _log.debug("kitsune: SQLiteSession patch skipped — %s", _exc)
-
-    # ── 4. SQLiteSession._create_table: идемпотентный CREATE ────────────────
-    #
-    # ИСПРАВЛЕНО: вместо ловли ошибки "already exists" пост-фактум — превентивно
-    # подставляем "IF NOT EXISTS" в определение, чтобы запрос вообще не падал.
-    # Это нужно потому, что патч может применяться УЖЕ ПОСЛЕ того, как Telethon
-    # успел импортировать класс (например, через tl_cache.py на верхнем уровне).
     try:
         from telethon.sessions import sqlite as _ts_sqlite2
         import re as _re
-
         _SQLiteSession2 = getattr(_ts_sqlite2, "SQLiteSession", None)
-
         if (
             _SQLiteSession2 is not None
             and "_create_table" in _SQLiteSession2.__dict__
@@ -231,11 +202,8 @@ def install_patches() -> None:
                 _SQLiteSession2._create_table, "_kitsune_idempotent_guard", False
             )
         ):
-
             def _safe_create_table(self, c, *definitions):
                 for definition in definitions:
-                    # Превентивно превращаем "name (...)" в "IF NOT EXISTS name (..."
-                    # чтобы запрос был идемпотентным изначально.
                     stmt = "create table if not exists {}".format(definition)
                     try:
                         c.execute(stmt)
@@ -246,8 +214,6 @@ def install_patches() -> None:
                                 "kitsune: _create_table — таблица уже есть, пропускаю"
                             )
                             continue
-                        # Если SQLite по какой-то причине не поддерживает синтаксис —
-                        # пробуем старый CREATE TABLE как fallback.
                         try:
                             c.execute("create table {}".format(definition))
                         except Exception as _e2:
@@ -255,7 +221,6 @@ def install_patches() -> None:
                             if "already exists" in msg2:
                                 continue
                             raise
-
             _safe_create_table._kitsune_idempotent_guard = True
             _SQLiteSession2._create_table = _safe_create_table
             _log.info(
@@ -263,14 +228,10 @@ def install_patches() -> None:
             )
     except Exception as _exc:
         _log.debug("kitsune: SQLiteSession._create_table patch skipped — %s", _exc)
-
-    # ── 5. SQLiteSession.set_update_state / save: readonly-safe ─────────────
     try:
         from telethon.sessions import sqlite as _ts_sqlite3
         import sqlite3 as _sqlite3_v3
-
         _SQLiteSession3 = getattr(_ts_sqlite3, "SQLiteSession", None)
-
         if (
             _SQLiteSession3 is not None
             and "set_update_state" in _SQLiteSession3.__dict__
@@ -279,14 +240,12 @@ def install_patches() -> None:
             )
         ):
             _orig_sus = _SQLiteSession3.set_update_state
-
             def _safe_set_update_state(self, entity_id, state):
                 try:
                     return _orig_sus(self, entity_id, state)
                 except _sqlite3_v3.OperationalError as exc:
                     msg = str(exc).lower()
                     if "readonly" in msg or "read-only" in msg:
-                        # Чиним права на основной файл + WAL/SHM/journal
                         _chmod_session_files(getattr(self, "filename", None))
                         try:
                             return _orig_sus(self, entity_id, state)
@@ -303,20 +262,17 @@ def install_patches() -> None:
                         "kitsune: set_update_state silently swallowed — %s", _e,
                     )
                     return
-
             _safe_set_update_state._kitsune_ro_guard = True
             _SQLiteSession3.set_update_state = _safe_set_update_state
             _log.info(
                 "kitsune: SQLiteSession.set_update_state patched (readonly-safe)",
             )
-
         if (
             _SQLiteSession3 is not None
             and "save" in _SQLiteSession3.__dict__
             and not getattr(_SQLiteSession3.save, "_kitsune_ro_guard", False)
         ):
             _orig_save = _SQLiteSession3.save
-
             def _safe_save(self):
                 try:
                     return _orig_save(self)
@@ -337,20 +293,15 @@ def install_patches() -> None:
                 except Exception as _e:
                     _log.debug("kitsune: SQLiteSession.save() swallowed — %s", _e)
                     return
-
             _safe_save._kitsune_ro_guard = True
             _SQLiteSession3.save = _safe_save
             _log.info("kitsune: SQLiteSession.save patched (readonly-safe)")
     except Exception as _exc:
         _log.debug("kitsune: SQLiteSession set_update_state patch skipped — %s", _exc)
-
-    # ── 6. TelegramBaseClient._save_states_and_entities: readonly-safe ──────
     try:
         from telethon.client import telegrambaseclient as _tbc
         import sqlite3 as _sqlite3_v4
-
         _TBC = getattr(_tbc, "TelegramBaseClient", None)
-
         if (
             _TBC is not None
             and "_save_states_and_entities" in _TBC.__dict__
@@ -359,7 +310,6 @@ def install_patches() -> None:
             )
         ):
             _orig_sse = _TBC._save_states_and_entities
-
             async def _safe_sse(self):
                 try:
                     return await _orig_sse(self)
@@ -370,7 +320,6 @@ def install_patches() -> None:
                         or "read-only" in msg
                         or "no such table" in msg
                     ):
-                        # Пробуем починить права и повторить (важно для shutdown)
                         try:
                             sess = getattr(self, "session", None)
                             _chmod_session_files(getattr(sess, "filename", None))
@@ -389,7 +338,6 @@ def install_patches() -> None:
                         _e,
                     )
                     return
-
             _safe_sse._kitsune_ro_guard = True
             _TBC._save_states_and_entities = _safe_sse
             _log.info(
@@ -400,16 +348,7 @@ def install_patches() -> None:
             "kitsune: TelegramBaseClient._save_states_and_entities patch skipped — %s",
             _exc,
         )
-
     _PATCHES_INSTALLED = True
-
-
-# ── АВТО-ПРИМЕНЕНИЕ ПАТЧЕЙ ПРИ ИМПОРТЕ ПАКЕТА ───────────────────────────────
-# КРИТИЧНО: патчи должны быть применены ДО того, как любой другой модуль пакета
-# (например, kitsune/tl_cache.py) выполнит `from telethon import TelegramClient`.
-# Поэтому вызываем install_patches() прямо здесь, на этапе импорта пакета kitsune.
-# main.py всё равно вызовет install_patches() повторно — это безопасно благодаря
-# _PATCHES_INSTALLED-флагу.
 try:
     install_patches()
 except Exception as _e:

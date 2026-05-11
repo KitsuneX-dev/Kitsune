@@ -9,7 +9,6 @@ try:
     _PSUTIL = True
 except ImportError:
     _PSUTIL = False
-
 from ..core.loader import KitsuneModule, command
 from ..core.security import OWNER
 from ..core.reliability import flags as _degradation_flags, global_registry as _cb_registry
@@ -22,33 +21,28 @@ _DEFAULT_INTERVAL  = 5 * 60
 _DEFAULT_RAM_LIMIT = 85
 _DEFAULT_CPU_LIMIT = 90
 
-
-# ---------------------------------------------------------------------------
-# ---------------------------------------------------------------------------
+                                                                             
+                                                                             
 
 async def probe_sqlite(db: typing.Any) -> dict:
-    """Проверить доступность SQLite-бэкенда.
-
-    Делает SELECT 1 в executor — если бэкенд жив, отвечает мгновенно.
-    Возвращает dict со статусом и временем отклика.
-    """
+\
+\
+\
+\
     try:
         from ..database.manager import SQLiteBackend
     except Exception:
         return {"alive": False, "error": "SQLiteBackend import failed"}
-
     backend = getattr(db, "_backend", None)
     if backend is None:
         return {"alive": False, "error": "no backend"}
     if not isinstance(backend, SQLiteBackend):
-        # «n/a» но без ошибки.
         return {"alive": False, "error": "not active (redis primary)", "active": False}
-
     t0 = time.monotonic()
     try:
         loop = asyncio.get_event_loop()
         def _ping() -> int:
-            conn = backend._get_conn()  # idempotent, переиспользуется
+            conn = backend._get_conn()                                
             cur = conn.execute("SELECT 1")
             row = cur.fetchone()
             return int(row[0]) if row else 0
@@ -65,27 +59,22 @@ async def probe_sqlite(db: typing.Any) -> dict:
         return {"alive": False, "active": True, "error": "timeout (>5s)"}
     except Exception as exc:
         return {"alive": False, "active": True, "error": f"{type(exc).__name__}: {exc}"}
-
 async def probe_redis(db: typing.Any) -> dict:
-    """Проверить доступность Redis-бэкенда.
-
-    Если Redis не сконфигурирован — возвращаем active=False (это не ошибка).
-    Если сконфигурирован, делаем PING.
-    """
+\
+\
+\
+\
     try:
         from ..database.manager import RedisBackend
     except Exception:
         return {"alive": False, "configured": False}
-
     backend = getattr(db, "_backend", None)
     configured = isinstance(backend, RedisBackend)
     if not configured:
         return {"alive": False, "configured": False, "active": False}
-
     redis_client = getattr(backend, "_redis", None)
     if redis_client is None:
         return {"alive": False, "configured": True, "error": "no redis client"}
-
     t0 = time.monotonic()
     try:
         loop = asyncio.get_event_loop()
@@ -111,39 +100,29 @@ async def probe_redis(db: typing.Any) -> dict:
             "configured": True,
             "error": f"{type(exc).__name__}: {exc}",
         }
-
 async def probe_telegram(client: typing.Any) -> dict:
-    """Проверить активность Telegram-сессии.
-
-    Делаем GetState (быстрый низкоуровневый запрос) под защитой breaker'а
-    «telegram_api», чтобы не нагружать Telegram при отвале.
-    """
+\
+\
+\
+\
     if client is None:
         return {"alive": False, "error": "no client"}
-
-    # Быстрая проверка connected без RPC
     try:
         connected = bool(client.is_connected())
     except Exception as exc:
         return {"alive": False, "error": f"is_connected: {exc}"}
-
     if not connected:
         return {"alive": False, "connected": False}
-
     sender = getattr(client, "_sender", None)
     if sender is None:
         return {"alive": False, "connected": True, "error": "no sender"}
-
     t0 = time.monotonic()
     try:
         from telethon.tl.functions.updates import GetStateRequest
-        # Защищаем circuit breaker'ом
         from ..core.reliability import get_breaker, CircuitBreakerOpenError
         cb = get_breaker("telegram_api", failure_threshold=5, cooldown=60.0)
-
         async def _do() -> typing.Any:
             return await asyncio.wait_for(client(GetStateRequest()), timeout=10.0)
-
         try:
             await cb.call(_do)
         except CircuitBreakerOpenError:
@@ -153,9 +132,7 @@ async def probe_telegram(client: typing.Any) -> dict:
                 "error": "circuit breaker OPEN — paused",
                 "breaker_state": cb.state,
             }
-
         latency_ms = (time.monotonic() - t0) * 1000.0
-        # Авторизация
         authorized = False
         try:
             authorized = await client.is_user_authorized()
@@ -176,9 +153,7 @@ async def probe_telegram(client: typing.Any) -> dict:
             "connected": True,
             "error": f"{type(exc).__name__}: {exc}",
         }
-
 def collect_system() -> dict:
-    """Снять снимок системных ресурсов (RAM/CPU/disk/uptime процесса)."""
     out: dict = {
         "psutil": _PSUTIL,
         "cpu_pct": 0.0,
@@ -216,32 +191,23 @@ def collect_system() -> dict:
     except Exception:
         pass
     return out
-
 async def collect_health(client: typing.Any, db: typing.Any) -> dict:
-    """Собрать полный health-snapshot. Используется и .health командой,
-    и /health endpoint'ом."""
+\
     system = collect_system()
-
-    # Параллельно опросим все три бэкенда
     sqlite_t = asyncio.ensure_future(probe_sqlite(db))
     redis_t = asyncio.ensure_future(probe_redis(db))
     tg_t = asyncio.ensure_future(probe_telegram(client))
     results = await asyncio.gather(sqlite_t, redis_t, tg_t, return_exceptions=True)
-
     sqlite_r, redis_r, tg_r = (
         r if isinstance(r, dict) else {"alive": False, "error": str(r)}
         for r in results
     )
-
-    # Hydrogram graceful-degradation статус
     try:
         from ..hydro_media import hydro_status as _hydro_status
         hydro_info = _hydro_status()
         hydro_info["present"] = bool(getattr(client, "hydrogram", None))
     except Exception:
         hydro_info = {"present": bool(getattr(client, "hydrogram", None))}
-
-    # Uptime процесса
     start_time = None
     try:
         start_time = db.get("kitsune.ping", "start_time", None)
@@ -249,18 +215,15 @@ async def collect_health(client: typing.Any, db: typing.Any) -> dict:
         pass
     if start_time is None:
         try:
-            import psutil as _ps  # noqa: F401
+            import psutil as _ps              
             start_time = psutil.Process().create_time() if _PSUTIL else time.time()
         except Exception:
             start_time = time.time()
     uptime_s = max(0, int(time.time() - float(start_time)))
-
-    # Общий статус: ok если SQLite жив И (Redis не настроен ИЛИ Redis жив) И TG живой.
     redis_ok = (not redis_r.get("configured", False)) or redis_r.get("alive", False)
     overall_ok = bool(
         sqlite_r.get("alive", False) or sqlite_r.get("active", True) is False
     ) and redis_ok and tg_r.get("alive", False)
-
     return {
         "ok": bool(overall_ok),
         "uptime_s": uptime_s,
@@ -273,11 +236,6 @@ async def collect_health(client: typing.Any, db: typing.Any) -> dict:
         "degradation": _degradation_flags.to_dict(),
         "timestamp": int(time.time()),
     }
-
-# ---------------------------------------------------------------------------
-# Format helpers
-# ---------------------------------------------------------------------------
-
 def _fmt_uptime(sec: int) -> str:
     sec = int(sec)
     d, rem = divmod(sec, 86400)
@@ -289,10 +247,8 @@ def _fmt_uptime(sec: int) -> str:
     parts.append(f"{m:02d}м")
     parts.append(f"{s:02d}с")
     return " ".join(parts)
-
 def _emoji_bool(ok: bool) -> str:
     return "✅" if ok else "❌"
-
 def render_health_text(snapshot: dict) -> str:
     sys_ = snapshot["system"]
     sq   = snapshot["sqlite"]
@@ -300,15 +256,12 @@ def render_health_text(snapshot: dict) -> str:
     tg   = snapshot["telegram"]
     deg  = snapshot["degradation"]
     cbs  = snapshot["circuit_breakers"]
-
     lines: list[str] = []
     lines.append(
         f"{'🟢' if snapshot['ok'] else '🔴'} <b>Kitsune Health</b>"
     )
     lines.append(f"⏱ Uptime: <code>{_fmt_uptime(snapshot['uptime_s'])}</code>")
     lines.append("")
-
-    # Storage
     lines.append("<b>📦 Хранилище</b>")
     if sq.get("active", True):
         lat = sq.get("latency_ms")
@@ -324,8 +277,6 @@ def render_health_text(snapshot: dict) -> str:
         lines.append(f"  {_emoji_bool(rd.get('alive', False))} Redis{info}{err}")
     else:
         lines.append("  ⚪ Redis (не настроен)")
-
-    # Telegram
     lines.append("")
     lines.append("<b>📡 Telegram</b>")
     lat = tg.get("latency_ms")
@@ -341,8 +292,6 @@ def render_health_text(snapshot: dict) -> str:
     lines.append(f"  {_emoji_bool(tg.get('alive', False))} Session{info}{err}")
     if tg.get("tg_id"):
         lines.append(f"  🆔 ID: <code>{tg['tg_id']}</code>")
-
-    # Resources
     lines.append("")
     lines.append("<b>🖥 Ресурсы</b>")
     lines.append(f"  🧠 RAM: <code>{sys_['ram_used_mb']} / {sys_['ram_total_mb']} МБ</code> ({sys_['ram_pct']:.1f}%)")
@@ -350,8 +299,6 @@ def render_health_text(snapshot: dict) -> str:
     lines.append(f"  💾 Disk: <code>{sys_['disk_used_gb']:.1f} / {sys_['disk_total_gb']:.1f} ГБ</code> ({sys_['disk_pct']:.1f}%)")
     if sys_.get("process_rss_mb"):
         lines.append(f"  📊 Process RSS: <code>{sys_['process_rss_mb']} МБ</code>")
-
-    # Circuit breakers
     if cbs:
         lines.append("")
         lines.append("<b>🛡 Circuit Breakers</b>")
@@ -364,8 +311,6 @@ def render_health_text(snapshot: dict) -> str:
                 f"  {ico} <code>{cb['name']}</code> [{cb['state']}] "
                 f"fails={cb['consecutive_failures']}/{cb['failure_threshold']}{tail}"
             )
-
-    # Degradation
     if deg.get("hydrogram_failed") or deg.get("assets_unavailable") \
             or deg.get("redis_unavailable") or deg.get("vpn_down"):
         lines.append("")
@@ -379,22 +324,14 @@ def render_health_text(snapshot: dict) -> str:
             lines.append(f"  • Redis off → SQLite fallback ({reasons.get('redis', '—')})")
         if deg.get("vpn_down"):
             lines.append(f"  • VPN/proxy down ({reasons.get('vpn', '—')})")
-
     return "\n".join(lines)
-
-# ---------------------------------------------------------------------------
-# Module
-# ---------------------------------------------------------------------------
-
 class HealthModule(KitsuneModule):
-
     name        = "health"
     description = "Расширенный мониторинг и health-check всех подсистем"
     author      = "Yushi"
     version     = "1.3.0"
     icon        = "💗"
     category    = "system"
-
     strings_ru = {
         "alert_ram":   "⚠️ <b>RAM Alert:</b> использование {pct:.1f}% (порог {limit}%)",
         "alert_cpu":   "⚠️ <b>CPU Alert:</b> использование {pct:.1f}% (порог {limit}%)",
@@ -404,14 +341,11 @@ class HealthModule(KitsuneModule):
         "breaker_reset": "✅ Circuit breaker <code>{name}</code> сброшен в CLOSED",
         "breakers_empty": "ℹ️ Зарегистрированных circuit breaker'ов нет",
     }
-
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self._monitor_task: asyncio.Task | None = None
         self._start_time: float = time.time()
-
     async def on_load(self) -> None:
-        # Сохраняем стартовое время в БД (если ping модуль ещё не успел)
         try:
             if not self.db.get("kitsune.ping", "start_time", None):
                 await self.db.set("kitsune.ping", "start_time", self._start_time)
@@ -419,29 +353,18 @@ class HealthModule(KitsuneModule):
             pass
         if self.db.get(_DB_OWNER, "monitor_enabled", False):
             self._start_monitor()
-
     async def on_unload(self) -> None:
         self._stop_monitor()
-
-    # -------- .health -------------------------------------------------------
-
     @command("health", required=OWNER)
     async def health_cmd(self, event) -> None:
-        """health — общий health-check всех подсистем (БД, сеть, Telethon, aiogram)."""
-
         msg = await event.reply("⏳ <i>Проверяю подсистемы...</i>", parse_mode="html")
         snapshot = await collect_health(self.client, self.db)
         try:
             await msg.edit(render_health_text(snapshot), parse_mode="html")
         except Exception:
             await event.reply(render_health_text(snapshot), parse_mode="html")
-
-    # -------- .monitor on/off ----------------------------------------------
-
     @command("monitor", required=OWNER)
     async def monitor_cmd(self, event) -> None:
-        """monitor — развернутый мониторинг ресурсов (CPU/RAM/диск/uptime)."""
-
         parts = (event.message.text or "").split()
         action = parts[1].lower() if len(parts) > 1 else "on"
         if action == "off":
@@ -461,13 +384,8 @@ class HealthModule(KitsuneModule):
             self.strings("monitor_on", interval=interval_min),
             parse_mode="html",
         )
-
-    # -------- .breakers ----------------------------------------------------
-
     @command("breakers", required=OWNER)
     async def breakers_cmd(self, event) -> None:
-        """breakers — показать состояние circuit breaker'ов модулей."""
-
         items = _cb_registry.to_list()
         if not items:
             await event.reply(self.strings("breakers_empty"), parse_mode="html")
@@ -488,13 +406,8 @@ class HealthModule(KitsuneModule):
                 )
             lines.append("")
         await event.reply("\n".join(lines).rstrip(), parse_mode="html")
-
-    # -------- .resetbreaker <name> -----------------------------------------
-
     @command("resetbreaker", required=OWNER)
     async def resetbreaker_cmd(self, event) -> None:
-        """resetbreaker — сбросить circuit breaker конкретной подсистемы."""
-
         parts = (event.message.text or "").split()
         if len(parts) < 2:
             await event.reply(
@@ -509,20 +422,15 @@ class HealthModule(KitsuneModule):
             return
         cb.reset()
         await event.reply(self.strings("breaker_reset", name=name), parse_mode="html")
-
-    # -------- monitoring loop ----------------------------------------------
-
     def _start_monitor(self, interval: int | None = None) -> None:
         self._stop_monitor()
         if interval is None:
             interval = int(self.db.get(_DB_OWNER, "monitor_interval", _DEFAULT_INTERVAL))
         self._monitor_task = asyncio.ensure_future(self._monitor_loop(interval))
-
     def _stop_monitor(self) -> None:
         if self._monitor_task and not self._monitor_task.done():
             self._monitor_task.cancel()
         self._monitor_task = None
-
     async def _monitor_loop(self, interval: int) -> None:
         while True:
             try:
@@ -535,7 +443,6 @@ class HealthModule(KitsuneModule):
                 break
             except Exception:
                 logger.exception("HealthModule: threshold check failed")
-
     async def _check_thresholds(self) -> None:
         ram_limit = self.db.get(_DB_OWNER, "ram_limit", _DEFAULT_RAM_LIMIT)
         cpu_limit = self.db.get(_DB_OWNER, "cpu_limit", _DEFAULT_CPU_LIMIT)

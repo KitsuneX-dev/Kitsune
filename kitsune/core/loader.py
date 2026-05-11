@@ -37,13 +37,10 @@ _BLOCKED_ATTRS: frozenset[str] = frozenset({
 
 _BUILTIN_MODULES_DIR = Path(__file__).parent.parent / "modules"
 
-
 class ModuleLoadError(Exception):
     pass
-
 class ASTSecurityError(ModuleLoadError):
     pass
-
 class ConfigValue:
     def __init__(
         self,
@@ -57,7 +54,6 @@ class ConfigValue:
         self.doc = doc
         self.validator = validator
         self.value = default
-
     def set(self, raw_value: typing.Any) -> None:
         if self.validator is not None:
             from ..validators import ValidationError
@@ -67,41 +63,29 @@ class ConfigValue:
                 raise
         else:
             self.value = raw_value
-
 class ModuleConfig:
     def __init__(self, *values: ConfigValue) -> None:
         self._config: dict[str, ConfigValue] = {v.key: v for v in values}
-
     def __getitem__(self, key: str) -> typing.Any:
         return self._config[key].value
-
     def __setitem__(self, key: str, value: typing.Any) -> None:
         self._config[key].set(value)
-
     def __contains__(self, key: object) -> bool:
         return key in self._config
-
     def __iter__(self):
         return iter(self._config)
-
     def keys(self):
         return self._config.keys()
-
     def items(self):
         return {k: v.value for k, v in self._config.items()}.items()
-
     def get_default(self, key: str) -> typing.Any:
         return self._config[key].default
-
     def get_doc(self, key: str) -> str:
         return self._config[key].doc
-
     def get_validator(self, key: str) -> typing.Any:
         return self._config[key].validator
-
     def get_config_value(self, key: str) -> ConfigValue:
         return self._config[key]
-
 class KitsuneModule:
     name: str = ""
     description: str = ""
@@ -110,7 +94,6 @@ class KitsuneModule:
     icon: str = "📦"
     category: str = "other"
     requires: typing.ClassVar[list[str]] = []
-
     def __init__(self, client: typing.Any, db: typing.Any) -> None:
         self.client = client
         self.db = db
@@ -118,13 +101,10 @@ class KitsuneModule:
         self.inline: typing.Any = None
         if not hasattr(self, "config"):
             self.config: ModuleConfig | None = None
-
     async def on_load(self) -> None:
         pass
-
     async def on_unload(self) -> None:
         pass
-
     def get_args(self, event: "typing.Any") -> str:
         dispatcher = getattr(self.client, "_kitsune_dispatcher", None)
         prefix = dispatcher._prefix if dispatcher else "."
@@ -134,7 +114,6 @@ class KitsuneModule:
             parts = remainder.split(maxsplit=1)
             return parts[1] if len(parts) > 1 else ""
         return ""
-
     def strings(self, key: str, **kwargs: typing.Any) -> str:
         db = getattr(self, "db", None)
         lang = db.get("kitsune.core", "lang", "ru") if db else "ru"
@@ -151,7 +130,6 @@ class KitsuneModule:
                 text,
             )
         return text.format(**kwargs) if kwargs else text
-
     def _load_config_from_db(self) -> None:
         if self.config is None:
             return
@@ -163,7 +141,6 @@ class KitsuneModule:
                     self.config[key] = saved
                 except Exception:
                     pass
-
 def command(
     name: str | None = None,
     *,
@@ -171,31 +148,30 @@ def command(
     aliases: list[str] | None = None,
     incoming: bool = False,
 ) -> typing.Callable:
-    """Декоратор регистрации команды модуля.
-
-    Параметры:
-        name: имя команды (по умолчанию — имя функции без суффикса ``_cmd``).
-        required: требуемые права. Может быть:
-            * ``int`` — битовая маска из ``kitsune.core.security``
-              (OWNER, SUDO, SUPPORT, GROUP_ADMIN и т.д.) — старое поведение.
-            * ``str`` — имя кастомной роли модуля. Dispatcher автоматически
-              проверит, что ``sender_id`` присутствует в списке
-              ``<module_db_owner>.<role_name>_users`` в БД. ``module_db_owner``
-              по умолчанию — имя класса модуля; разработчик сам управляет
-              списком пользователей (через ``self.db.set(...)``), а dispatcher
-              делает gating автоматически. Команды со строковой ролью
-              ВСЕГДА работают как ``incoming=True`` — иначе их некому было
-              бы вызывать кроме владельца.
-        aliases: дополнительные имена-алиасы команды.
-        incoming: если ``True`` — команда срабатывает также на входящие
-            сообщения (от других пользователей, не только владельца).
-            Доступ при этом проверяется через
-            ``SecurityManager.check(message, required)``: если отправитель
-            не проходит проверку прав, сообщение тихо игнорируется.
-            По умолчанию ``False`` — старое поведение (исходящие
-            сообщения владельца / co-owner / sudo через текущую логику
-            ``CommandDispatcher``).
-    """
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
     if required is not None and not isinstance(required, (int, str)):
         raise TypeError(
             f"@command(required=...) must be int (bitmask) or str (role name), "
@@ -203,18 +179,14 @@ def command(
         )
     if isinstance(required, str) and not required.strip():
         raise ValueError("@command(required=...) string role name must be non-empty")
-
     def decorator(func: typing.Callable) -> typing.Callable:
         func._is_command = True
         func._command_name = name or func.__name__.removesuffix("_cmd")
         func._required = required
         func._aliases = aliases or []
-        # Строковая роль автоматически подразумевает incoming=True —
-        # иначе чужие пользователи не смогли бы её активировать.
         func._incoming = bool(incoming) or isinstance(required, str)
         return func
     return decorator
-
 def watcher(
     filter_func: typing.Callable | None = None,
     **tags: typing.Any,
@@ -226,27 +198,22 @@ def watcher(
             setattr(func, tag_name, tag_value)
         return func
     return decorator
-
 class _ASTScanner(ast.NodeVisitor):
     def __init__(self) -> None:
         self.errors: list[str] = []
-
     def visit_Import(self, node: ast.Import) -> None:
         for alias in node.names:
             root = alias.name.split(".")[0]
             if root in _BLOCKED_IMPORTS:
                 self.errors.append(f"Blocked import: {alias.name} (line {node.lineno})")
         self.generic_visit(node)
-
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
         if node.module:
             root = node.module.split(".")[0]
             if root in _BLOCKED_IMPORTS:
                 self.errors.append(f"Blocked import: {node.module} (line {node.lineno})")
         self.generic_visit(node)
-
     def visit_Call(self, node: ast.Call) -> None:
-        # importlib.import_module("subprocess") bypass
         if isinstance(node.func, ast.Attribute) and node.func.attr == "import_module":
             if isinstance(node.func.value, ast.Name) and node.func.value.id == "importlib":
                 if node.args and isinstance(node.args[0], ast.Constant):
@@ -259,12 +226,9 @@ class _ASTScanner(ast.NodeVisitor):
                     self.errors.append(
                         f"Blocked dynamic importlib.import_module call (line {node.lineno})"
                     )
-
-        # base64.b64decode / codecs.decode obfuscation feeding exec/eval
         if isinstance(node.func, ast.Name) and node.func.id in ("exec", "eval"):
             for arg in node.args:
                 if isinstance(arg, ast.Call):
-                    # exec(base64.b64decode(...)) or exec(codecs.decode(...))
                     if isinstance(arg.func, ast.Attribute) and arg.func.attr in (
                         "b64decode", "b32decode", "b16decode", "decode",
                         "decompress", "decodestring",
@@ -272,14 +236,12 @@ class _ASTScanner(ast.NodeVisitor):
                         self.errors.append(
                             f"Blocked obfuscated {node.func.id}() with encoded payload (line {node.lineno})"
                         )
-                    # exec(__import__("base64").b64decode(...))
                     if isinstance(arg.func, ast.Attribute) and isinstance(arg.func.value, ast.Call):
                         inner = arg.func.value
                         if isinstance(inner.func, ast.Name) and inner.func.id == "__import__":
                             self.errors.append(
                                 f"Blocked obfuscated {node.func.id}() via __import__ chain (line {node.lineno})"
                             )
-
         if isinstance(node.func, ast.Name) and node.func.id == "__import__":
             if node.args and isinstance(node.args[0], ast.Constant):
                 root = str(node.args[0].value).split(".")[0]
@@ -322,7 +284,6 @@ class _ASTScanner(ast.NodeVisitor):
                         f"Blocked os.{attr_name}() call (line {node.lineno})"
                     )
         self.generic_visit(node)
-
     def visit_Attribute(self, node: ast.Attribute) -> None:
         if node.attr in _BLOCKED_ATTRS:
             if isinstance(node.value, ast.Name) and node.value.id in _BLOCKED_IMPORTS:
@@ -338,14 +299,12 @@ class _ASTScanner(ast.NodeVisitor):
                 f"Blocked dunder attribute access: {node.attr} (line {node.lineno})"
             )
         self.generic_visit(node)
-
     def visit_Subscript(self, node: ast.Subscript) -> None:
         if isinstance(node.value, ast.Name) and node.value.id == "__builtins__":
             self.errors.append(
                 f"Blocked __builtins__ subscript access (line {node.lineno})"
             )
         self.generic_visit(node)
-
 def _scan_ast(source: str, filename: str = "<module>") -> None:
     try:
         tree = ast.parse(source, filename=filename)
@@ -357,7 +316,6 @@ def _scan_ast(source: str, filename: str = "<module>") -> None:
         raise ASTSecurityError(
             "Security scan failed:\n" + "\n".join(f"  • {e}" for e in scanner.errors)
         )
-
 _ast_cache: dict[str, ast.AST] = {}
 
 def _scan_ast_with_cache(source: str, filename: str = "<module>") -> None:
@@ -365,7 +323,6 @@ def _scan_ast_with_cache(source: str, filename: str = "<module>") -> None:
     if key not in _ast_cache:
         _scan_ast(source, filename)
         _ast_cache[key] = ast.parse(source, filename=filename)
-
 def _extract_missing_package(exc: ImportError) -> str | None:
     name = getattr(exc, "name", None)
     if name:
@@ -376,7 +333,6 @@ def _extract_missing_package(exc: ImportError) -> str | None:
     if m:
         return m.group(1).split(".")[0]
     return None
-
 _IMPORT_TO_PIP: dict[str, str] = {
     "PIL": "Pillow",
     "cv2": "opencv-python",
@@ -420,7 +376,6 @@ async def _pip_install(package: str) -> bool:
     except Exception as exc:
         logger.warning("Loader: pip install %r exception: %s", pip_name, exc)
         return False
-
 _INIT_SIGNATURE_CACHE: dict[type, int] = {}
 
 def _module_param_count(mod_class: type) -> int:
@@ -434,7 +389,6 @@ def _module_param_count(mod_class: type) -> int:
         count = 2
     _INIT_SIGNATURE_CACHE[mod_class] = count
     return count
-
 class Loader:
     def __init__(
         self,
@@ -446,22 +400,17 @@ class Loader:
         self._db = db
         self._dispatcher = dispatcher
         self._modules: dict[str, KitsuneModule] = {}
-
     @property
     def modules(self) -> dict[str, KitsuneModule]:
         return self._modules
-
     def get_modules(self) -> dict[str, KitsuneModule]:
         return dict(self._modules)
-
     def get_module(self, name: str) -> KitsuneModule | None:
         return self._modules.get(name.lower())
-
     def get_prefix(self, userbot: typing.Optional[str] = None) -> str:
         key = "dragon.prefix" if userbot == "dragon" else "kitsune.main"
         default = "," if userbot == "dragon" else "."
         return self._db.get(key, "command_prefix", default)
-
     async def _load_one_builtin(self, path: Path) -> None:
         try:
             await self._load_from_path(path, is_builtin=True)
@@ -472,13 +421,11 @@ class Loader:
                 logger.warning("Loader: failed to load builtin %s: %s", path.name, exc)
         except Exception:
             logger.warning("Loader: failed to load builtin %s", path.name, exc_info=True)
-
     async def _load_one_user(self, path: Path) -> None:
         try:
             await self._load_from_path(path, is_builtin=False)
         except Exception:
             logger.exception("Loader: failed to load user module %s", path.name)
-
     async def load_all_builtin(self) -> None:
         if not _BUILTIN_MODULES_DIR.exists():
             return
@@ -492,14 +439,12 @@ class Loader:
             if p.is_dir() and not p.name.startswith("_") and (p / "__init__.py").exists()
         ]
         await asyncio.gather(*[self._load_one_builtin(p) for p in paths + pkg_paths])
-
     async def load_all_user(self) -> None:
         user_dir = Path.home() / ".kitsune" / "modules"
         if not user_dir.exists():
             return
         paths = sorted(user_dir.glob("*.py"))
         await asyncio.gather(*[self._load_one_user(p) for p in paths])
-
     async def load_from_url(self, url: str, progress_cb=None) -> KitsuneModule:
         import aiohttp
         async with aiohttp.ClientSession() as session:
@@ -518,7 +463,6 @@ class Loader:
             path, is_builtin=False, progress_cb=progress_cb,
             already_scanned=True, prefetched_source=source,
         )
-
     async def load_from_file(self, path: Path, progress_cb=None) -> KitsuneModule:
         source = path.read_text(encoding="utf-8")
         _scan_ast_with_cache(source, filename=str(path))
@@ -526,7 +470,6 @@ class Loader:
             path, is_builtin=False, progress_cb=progress_cb,
             already_scanned=True, prefetched_source=source,
         )
-
     async def unload_module(self, name: str) -> bool:
         mod = self._modules.get(name.lower())
         if mod is None:
@@ -537,8 +480,6 @@ class Loader:
             logger.exception("Loader: on_unload failed for %s", name)
         for cmd_name in list(self._dispatcher._commands):
             entry = self._dispatcher._commands[cmd_name]
-            # Обратная совместимость: раньше _commands хранил пары
-            # (handler, required); теперь — тройки (handler, required, module).
             handler = entry[0]
             if getattr(handler, "__self__", None) is mod:
                 self._dispatcher.unregister_command(cmd_name)
@@ -548,7 +489,6 @@ class Loader:
         del self._modules[name.lower()]
         logger.info("Loader: unloaded %s", name)
         return True
-
     async def reload_module(self, name: str, progress_cb=None) -> KitsuneModule:
         mod = self._modules.get(name.lower())
         if mod is None:
@@ -561,7 +501,6 @@ class Loader:
         if source_info:
             return await self._load_from_path(Path(source_info), is_builtin=False, progress_cb=progress_cb)
         raise ModuleLoadError(f"Cannot reload {name!r}: source unknown")
-
     async def _load_from_path(
         self,
         path: Path,
@@ -576,11 +515,9 @@ class Loader:
             module_name = f"kitsune.modules.{path.parent.name}"
         else:
             module_name = f"kitsune.modules.{path.stem}"
-
         source = prefetched_source if prefetched_source is not None else path.read_text(encoding="utf-8")
         if not is_builtin and not already_scanned:
             _scan_ast_with_cache(source, filename=str(path))
-
         spec = importlib.util.spec_from_file_location(
             module_name, path,
             submodule_search_locations=[str(path.parent)] if is_pkg else None,
@@ -628,16 +565,12 @@ class Loader:
         except Exception as exc:
             sys.modules.pop(module_name, None)
             raise ModuleLoadError(f"Execution failed: {exc}") from exc
-
         mod_class = self._find_module_class(py_module)
-
         if mod_class is None:
             sys.modules.pop(module_name, None)
             raise ModuleLoadError(f"No KitsuneModule subclass found in {path.name}")
-
         if not getattr(mod_class, "name", ""):
             mod_class.name = mod_class.__name__
-
         if mod_class.requires:
             missing = [r for r in mod_class.requires if r not in self._modules]
             if missing:
@@ -645,7 +578,6 @@ class Loader:
                 raise ModuleLoadError(
                     f"Missing dependencies: {', '.join(missing)}"
                 )
-
         param_count = _module_param_count(mod_class)
         try:
             if param_count >= 2:
@@ -658,26 +590,21 @@ class Loader:
                 mod._db = self._db
         except (ValueError, TypeError):
             mod = mod_class(self._client, self._db)
-
         mod.tg_id = self._client.tg_id
         mod._source_path = str(path)
         mod._is_builtin = is_builtin
         mod._load_config_from_db()
-
         existing = self._modules.get(mod.name.lower())
         if existing:
             await self.unload_module(mod.name)
-
         await mod.on_load()
         self._modules[mod.name.lower()] = mod
         self._register_module(mod)
-
         from .._types import ModuleLoadedEvent
         from ..events import bus
         bus.emit_sync(ModuleLoadedEvent(module_name=mod.name, is_builtin=is_builtin))
         logger.info("Loader: loaded %s v%s (%s)", mod.name, mod.version, path.name)
         return mod
-
     def _find_module_class(self, py_module: ModuleType) -> type | None:
         for obj in vars(py_module).values():
             if (
@@ -687,7 +614,6 @@ class Loader:
             ):
                 return obj
         return None
-
     def _register_module(self, mod: KitsuneModule) -> None:
         for _, method in inspect.getmembers(mod, predicate=inspect.ismethod):
             if getattr(method, "_is_command", False):

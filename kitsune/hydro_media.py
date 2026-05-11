@@ -11,22 +11,20 @@ logger = logging.getLogger(__name__)
 
 _LARGE_FILE_THRESHOLD = 10 * 1024 * 1024
 
-# Phase 3: внутренние счётчики деградации Hydrogram
-_HYDRO_FAIL_THRESHOLD = 3      # после стольких подряд провалов считаем мёртвым
-_HYDRO_REVIVE_TTL_S   = 300.0  # через 5 минут попробуем заново
+                                                   
+_HYDRO_FAIL_THRESHOLD = 3                                                      
+_HYDRO_REVIVE_TTL_S   = 300.0                                  
 
 _hydro_consecutive_fails: int = 0
 _hydro_dead_until: float = 0.0
 
 
 def _is_hydro_dead() -> bool:
-    """Помечен ли Hydrogram как «мёртвый» (cooldown ещё не истёк)?"""
     if _hydro_dead_until <= 0:
         return False
     if time.monotonic() >= _hydro_dead_until:
         return False
     return True
-
 def _hydro_record_failure(reason: str) -> None:
     global _hydro_consecutive_fails, _hydro_dead_until
     _hydro_consecutive_fails += 1
@@ -41,7 +39,6 @@ def _hydro_record_failure(reason: str) -> None:
             _deg_flags.mark_hydrogram_failed(reason)
         except Exception:
             pass
-
 def _hydro_record_success() -> None:
     global _hydro_consecutive_fails, _hydro_dead_until
     if _hydro_consecutive_fails > 0 or _hydro_dead_until > 0:
@@ -54,17 +51,14 @@ def _hydro_record_success() -> None:
         _deg_flags.clear_hydrogram_failed()
     except Exception:
         pass
-
 def _hydro(client: typing.Any) -> typing.Any | None:
-    """Получить hydrogram-клиент с учётом degradation flag.
-
-    Возвращает None если Hydrogram «мёртв» по нашему breaker'у — тогда вся
-    цепочка пойдёт через Telethon без попыток.
-    """
+\
+\
+\
+\
     if _is_hydro_dead():
         return None
     return getattr(client, "hydrogram", None)
-
 def _file_size(file: typing.Any) -> int:
     if isinstance(file, (str, Path)):
         try:
@@ -83,13 +77,11 @@ def _file_size(file: typing.Any) -> int:
     if isinstance(file, (bytes, bytearray)):
         return len(file)
     return 0
-
 def _make_progress_bar(done: int, total: int, width: int = 10) -> str:
     if total <= 0:
         return "░" * width
     filled = int(width * done / total)
     return "█" * filled + "░" * (width - filled)
-
 async def _edit_progress(
     client: typing.Any,
     chat_id: int,
@@ -117,7 +109,6 @@ async def _edit_progress(
         await client.edit_message(chat_id, msg_id, text, parse_mode="html")
     except Exception:
         pass
-
 def _make_progress_cb(
     client: typing.Any,
     chat_id: int,
@@ -126,7 +117,6 @@ def _make_progress_cb(
 ) -> typing.Callable:
     start_time = time.monotonic()
     last_update: list[float] = [0.0]
-
     def cb(current: int, total: int) -> None:
         now = time.monotonic()
         if now - last_update[0] < 2.0 and current < total:
@@ -135,9 +125,7 @@ def _make_progress_cb(
         asyncio.ensure_future(
             _edit_progress(client, chat_id, msg_id, current, total, caption, start_time)
         )
-
     return cb
-
 async def send_file(
     client: typing.Any,
     chat_id: typing.Any,
@@ -150,17 +138,14 @@ async def send_file(
     reply_to: int | None = None,
 ) -> typing.Any:
     hydro = _hydro(client)
-
     buf_start: int = 0
     if hasattr(file, "seek") and hasattr(file, "tell"):
         try:
             buf_start = file.tell()
         except Exception:
             pass
-
     size = _file_size(file)
     is_large = size >= _LARGE_FILE_THRESHOLD
-
     if hydro and not force_telethon:
         try:
             try:
@@ -190,18 +175,15 @@ async def send_file(
                     file.seek(buf_start)
                 except Exception:
                     pass
-
     if hasattr(file, "seek"):
         try:
             file.seek(buf_start)
         except Exception:
             pass
-
     kwargs_tl: dict = dict(caption=caption, parse_mode=parse_mode)
     if reply_to:
         kwargs_tl["reply_to"] = reply_to
     return await client.send_file(chat_id, file, **kwargs_tl)
-
 async def send_photo(
     client: typing.Any,
     chat_id: typing.Any,
@@ -213,14 +195,12 @@ async def send_photo(
     reply_to: int | None = None,
 ) -> typing.Any:
     hydro = _hydro(client)
-
     buf_start: int = 0
     if hasattr(photo, "seek") and hasattr(photo, "tell"):
         try:
             buf_start = photo.tell()
         except Exception:
             pass
-
     if hydro and not force_telethon:
         try:
             pm = "html" if parse_mode.lower() == "html" else None
@@ -241,18 +221,15 @@ async def send_photo(
                     photo.seek(buf_start)
                 except Exception:
                     pass
-
     if hasattr(photo, "seek"):
         try:
             photo.seek(buf_start)
         except Exception:
             pass
-
     kwargs_tl: dict = dict(caption=caption, parse_mode=parse_mode)
     if reply_to:
         kwargs_tl["reply_to"] = reply_to
     return await client.send_file(chat_id, photo, **kwargs_tl)
-
 async def download_media(
     client: typing.Any,
     message: typing.Any,
@@ -284,9 +261,7 @@ async def download_media(
         except Exception as exc:
             _hydro_record_failure(f"download_media: {type(exc).__name__}")
             logger.warning("hydro_media: Hydrogram download failed (%s), falling back to Telethon", exc)
-
     return await message.download_media(bytes)
-
 def _msg_chat_id(message: typing.Any) -> int:
     cid = getattr(message, "chat_id", None)
     if cid:
@@ -300,7 +275,6 @@ def _msg_chat_id(message: typing.Any) -> int:
             or 0
         )
     return 0
-
 def _get_hydro_file_ref(message: typing.Any) -> str | None:
     media = getattr(message, "media", None)
     if media is None:
@@ -316,13 +290,7 @@ def _get_hydro_file_ref(message: typing.Any) -> str | None:
         if raw_id:
             return str(raw_id)
     return None
-
-# ---------------------------------------------------------------------------
-# Public introspection helpers (для health endpoint)
-# ---------------------------------------------------------------------------
-
 def hydro_status() -> dict:
-    """Текущее состояние Hydrogram-fallback-логики."""
     remaining = max(0.0, _hydro_dead_until - time.monotonic()) if _hydro_dead_until else 0.0
     return {
         "consecutive_fails": _hydro_consecutive_fails,
@@ -331,9 +299,7 @@ def hydro_status() -> dict:
         "revive_in_s": round(remaining, 1),
         "revive_ttl_s": _HYDRO_REVIVE_TTL_S,
     }
-
 def hydro_force_revive() -> None:
-    """Сбросить deg-флаг Hydrogram (для команды/тестов)."""
     global _hydro_consecutive_fails, _hydro_dead_until
     _hydro_consecutive_fails = 0
     _hydro_dead_until = 0.0
@@ -342,7 +308,6 @@ def hydro_force_revive() -> None:
         _deg_flags.clear_hydrogram_failed()
     except Exception:
         pass
-
 __all__ = [
     "send_file",
     "send_photo",

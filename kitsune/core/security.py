@@ -37,13 +37,9 @@ EVERYONE                 = 1 << 13
 BITMAP: dict[str, int] = {k: v for k, v in globals().items() if isinstance(v, int) and v > 0}
 
 GROUP_ADMIN_ANY = (
-
     GROUP_ADMIN_ADD_ADMINS | GROUP_ADMIN_CHANGE_INFO | GROUP_ADMIN_BAN_USERS
-
     | GROUP_ADMIN_DELETE_MSGS | GROUP_ADMIN_PIN_MESSAGES | GROUP_ADMIN_INVITE_USERS
-
     | GROUP_ADMIN
-
 )
 
 DEFAULT_PERMISSIONS = OWNER
@@ -52,38 +48,23 @@ _CACHE_TTL = 60.0
 
 _DB_KEY    = "kitsune.security"
 
-
 class SecurityManager:
-
     def __init__(self, client: typing.Any, db: typing.Any) -> None:
-
         self._client = client
-
         self._db     = db
-
-        # _me — полный объект User (если удалось получить),
-        # _me_id — числовой id владельца (надёжно сохраняется отдельно).
         self._me: typing.Any = None
-
         self._me_id: int | None = None
-
         self._cache: dict[tuple[int, int], tuple[int, float]] = {}
-
         self._lock = asyncio.Lock()
-
     async def init(self) -> None:
-        """Инициализация менеджера безопасности.
-
-        КРИТИЧЕСКИ ВАЖНО: не падать и не оставлять _me_id=None, если
-        get_me() временно вернул None. Сначала пытаемся переиспользовать
-        client.tg_me / client.tg_id, которые уже выставлены в main.py
-        после всех ретраев. Только если их нет — пробуем get_me() сами.
-        """
-
-        # 1) Самый надёжный путь — взять то, что уже сохранил main.py.
+\
+\
+\
+\
+\
+\
         cached_me = getattr(self._client, "tg_me", None)
         cached_id = getattr(self._client, "tg_id", None)
-
         if cached_me is not None:
             self._me = cached_me
             try:
@@ -95,25 +76,18 @@ class SecurityManager:
                 self._me_id = int(cached_id)
             except Exception:
                 self._me_id = None
-
-        # 2) Если по какой-то причине ничего не сохранено — пробуем сами,
-        # но НИКОГДА не выкидываем исключение наружу: оно тихо съестся
-        # диспетчером и команда просто не сработает.
         if self._me is None:
             try:
                 me = await self._client.get_me()
             except Exception:
                 logger.exception("SecurityManager.init: get_me() raised")
                 me = None
-
             if me is not None:
                 self._me = me
                 try:
                     self._me_id = int(me.id)
                 except Exception:
                     pass
-
-                # Подстрахуем main.py — если он этого ещё не сделал.
                 if not hasattr(self._client, "tg_me") or getattr(self._client, "tg_me", None) is None:
                     try:
                         self._client.tg_me = me
@@ -124,19 +98,14 @@ class SecurityManager:
                         self._client.tg_id = int(me.id)
                     except Exception:
                         pass
-
         if self._me_id is None:
             logger.warning(
                 "SecurityManager.init: owner id is still unknown — "
                 "OWNER permission checks will be unavailable until first successful get_me()."
             )
-
     async def _ensure_me(self) -> None:
-        """Ленивая повторная инициализация, если _me_id ещё не установлен."""
         if self._me_id is not None:
             return
-
-        # Сначала ещё раз глянем кеш на клиенте — он мог появиться позже.
         cached_me = getattr(self._client, "tg_me", None)
         cached_id = getattr(self._client, "tg_id", None)
         if cached_me is not None and self._me is None:
@@ -146,171 +115,86 @@ class SecurityManager:
                 self._me_id = int(cached_id)
             except Exception:
                 pass
-
         if self._me_id is None:
             await self.init()
-
     async def check(self, message: typing.Any, required: int) -> bool:
-
         await self._ensure_me()
-
         sender_id: int = getattr(message, "sender_id", None)
-
         if sender_id is None:
-
             return False
-
-        # Если по какой-то причине id владельца всё ещё неизвестен,
-        # не падаем — просто пропускаем OWNER-ветку и идём дальше.
         if self._me_id is not None and sender_id == self._me_id and (required & OWNER):
-
             return True
-
         resolved = await self._resolve(message, sender_id)
-
         return bool(resolved & required)
-
     def get_sudo_users(self) -> list[int]:
-
         return self._db.get(_DB_KEY, "sudo", [])
-
     def get_support_users(self) -> list[int]:
-
         return self._db.get(_DB_KEY, "support", [])
-
     async def add_sudo(self, user_id: int) -> None:
-
         users = list(set(self.get_sudo_users() + [user_id]))
-
         await self._db.set(_DB_KEY, "sudo", users)
-
     async def remove_sudo(self, user_id: int) -> None:
-
         users = [u for u in self.get_sudo_users() if u != user_id]
-
         await self._db.set(_DB_KEY, "sudo", users)
-
     async def _resolve(self, message: typing.Any, sender_id: int) -> int:
-
         bits = 0
-
-        # Сравниваем с _me_id, а не с self._me.id — last сохраняет нас от NoneType.
         if self._me_id is not None and sender_id == self._me_id:
-
             bits |= OWNER
-
         co_owners = self._db.get("kitsune.security", "co_owners", [])
-
         if isinstance(co_owners, list) and sender_id in co_owners:
-
             bits |= OWNER
-
         if sender_id in self.get_sudo_users():
-
             bits |= SUDO
-
         if sender_id in self.get_support_users():
-
             bits |= SUPPORT
-
         chat_id = getattr(message, "chat_id", None)
-
         if chat_id is None:
-
             return bits
-
         if chat_id == sender_id:
-
             bits |= PM
-
         else:
-
             bits |= await self._resolve_group_bits(chat_id, sender_id)
-
         bits |= EVERYONE
-
         return bits
-
     async def _resolve_group_bits(self, chat_id: int, user_id: int) -> int:
-
         cache_key = (chat_id, user_id)
-
         now = time.monotonic()
-
         async with self._lock:
-
             if cache_key in self._cache:
-
                 cached_bits, expires = self._cache[cache_key]
-
                 if now < expires:
-
                     return cached_bits
-
         bits = GROUP_MEMBER
-
         try:
-
             participant = await self._client.get_permissions(chat_id, user_id)
-
             if getattr(participant, "is_creator", False):
-
                 bits |= GROUP_OWNER
-
             if getattr(participant, "is_admin", False):
-
                 bits |= GROUP_ADMIN
-
                 rights = getattr(participant, "banned_rights", None) or getattr(
-
                     participant, "admin_rights", None
-
                 )
-
                 if rights:
-
                     if getattr(rights, "add_admins", False):
-
                         bits |= GROUP_ADMIN_ADD_ADMINS
-
                     if getattr(rights, "change_info", False):
-
                         bits |= GROUP_ADMIN_CHANGE_INFO
-
                     if getattr(rights, "ban_users", False):
-
                         bits |= GROUP_ADMIN_BAN_USERS
-
                     if getattr(rights, "delete_messages", False):
-
                         bits |= GROUP_ADMIN_DELETE_MSGS
-
                     if getattr(rights, "pin_messages", False):
-
                         bits |= GROUP_ADMIN_PIN_MESSAGES
-
                     if getattr(rights, "invite_users", False):
-
                         bits |= GROUP_ADMIN_INVITE_USERS
-
         except Exception:
-
             pass
-
         async with self._lock:
-
             self._cache[cache_key] = (bits, now + _CACHE_TTL)
-
         return bits
-
     def invalidate_cache(self, chat_id: int | None = None) -> None:
-
         if chat_id is None:
-
             self._cache.clear()
-
         else:
-
             for key in [k for k in self._cache if k[0] == chat_id]:
-
                 del self._cache[key]

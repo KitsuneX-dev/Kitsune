@@ -9,9 +9,6 @@ __version_str__ = ".".join(map(str, __version__))
 branch: str = "main"
 
 with contextlib.suppress(Exception):
-
     import git
-
     _repo_path = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-
     branch = git.Repo(path=_repo_path).active_branch.name

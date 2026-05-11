@@ -563,72 +563,43 @@ async function check2fa2(){
 </body>
 </html>"""
 
-
 class SetupServer:
-
     def __init__(
         self,
         save_config_fn: Callable,
         get_config_fn: Callable,
         hydrogram_only: bool = False,
     ) -> None:
-
         self._save_config = save_config_fn
         self._get_config = get_config_fn
-
-        # === Telethon stage ===
         self._client: Any = None
         self._phone: str | None = None
         self._phone_hash: str | None = None
         self._last_code: str | None = None
         self._last_password: str | None = None
-
-        # Сигнал завершения всего мастера: устанавливается ТОЛЬКО после
-        # успешного завершения и Telethon, и Hydrogram (либо после finalize
-        # в hydrogram-only режиме).
         self._done = asyncio.Event()
         self._runner: Any = None
-
-        # === Hydrogram stage ===
         self._hydrogram_only: bool = bool(hydrogram_only)
-
-        # Флаги «успехов» по этапам
         self._telethon_success: bool = False
         self._hydrogram_success: bool = False
-
-        # Hydrogram-клиент, который живёт всё время второй регистрации
-        # (нужен, чтобы send_code → sign_in использовали один и тот же auth_key).
         self._hydro_client: Any = None
         self._hydro_phone: str | None = None
         self._hydro_phone_code_hash: str | None = None
-
-    # ──────────────────────────────────────────────────────────────────
-    # Lifecycle
-    # ──────────────────────────────────────────────────────────────────
-
     async def start(self, host: str = "0.0.0.0", port: int = 8080) -> None:
-
         app = web.Application()
-
         app.router.add_get("/", self._index)
         app.router.add_post("/api/sendcode", self._api_sendcode)
         app.router.add_post("/api/signin", self._api_signin)
         app.router.add_post("/api/2fa", self._api_2fa)
         app.router.add_get("/api/mode", self._api_mode)
-
         self._runner = web.AppRunner(app)
         await self._runner.setup()
         site = web.TCPSite(self._runner, host, port)
         await site.start()
-
         url = f"http://127.0.0.1:{port}"
-
         import os as _os
-
         is_termux = bool(_os.environ.get("PREFIX", "").find("com.termux") != -1)
-
         lan_url = url
-
         if is_termux:
             try:
                 import socket as _socket
@@ -638,135 +609,85 @@ class SetupServer:
                 lan_url = f"http://{_lan_ip}:{port}"
             except Exception:
                 pass
-
         print(f"\n{'━' * 42}")
-
         if is_termux:
             print(f"  🌐  Открой в браузере на телефоне:")
             print(f"      \033[1;36m{lan_url}\033[0m")
             print(f"  💡  Или на ПК в локальной сети: {lan_url}")
         else:
             print(f"  🌐  Открой в браузере: \033[1;36m{url}\033[0m для регистрации")
-
         print(f"{'━' * 42}\n")
-
         if not is_termux:
             try:
                 webbrowser.open(url)
             except Exception:
                 pass
-
     async def wait_done(self) -> None:
         await self._done.wait()
-
-        # Корректно отключаем Hydrogram-клиента, если он остался открытым
         if self._hydro_client is not None:
             try:
                 await self._hydro_client.disconnect()
             except Exception:
                 pass
             self._hydro_client = None
-
         if self._runner:
             await self._runner.cleanup()
-
     def get_client(self) -> Any:
         return self._client
-
     def hydrogram_only_success(self) -> bool:
         return bool(self._hydrogram_success)
-
-    # ──────────────────────────────────────────────────────────────────
-    # Routes
-    # ──────────────────────────────────────────────────────────────────
-
     async def _index(self, _: web.Request) -> web.Response:
         return web.Response(text=_HTML, content_type="text/html")
-
     async def _api_mode(self, _: web.Request) -> web.Response:
         cfg = self._get_config() or {}
         return web.json_response({
             "hydrogram_only": bool(self._hydrogram_only),
             "api_id": cfg.get("api_id") if self._hydrogram_only else None,
             "api_hash": cfg.get("api_hash") if self._hydrogram_only else None,
-            # Дадим фронту префилл номера, если он сохранён в конфиге
             "phone": cfg.get("phone") if self._hydrogram_only else None,
         })
-
-    # ──────────────────────────────────────────────────────────────────
-    # /api/sendcode — диспатчер по stage
-    # ──────────────────────────────────────────────────────────────────
-
     async def _api_sendcode(self, request: web.Request) -> web.Response:
         try:
             data = await request.json()
         except Exception:
             return self._err("Невалидный JSON")
-
         stage = str(data.get("stage", "")).strip().lower()
-
-        # Backward compatibility: если stage не указан, и мы в hydrogram_only
-        # режиме — делаем hydrogram, иначе telethon.
         if not stage:
             stage = "hydrogram" if self._hydrogram_only else "telethon"
-
         if stage == "hydrogram":
             return await self._api_sendcode_hydrogram(data)
         return await self._api_sendcode_telethon(data)
-
-    # ──────────────────────────────────────────────────────────────────
-    # /api/signin — диспатчер
-    # ──────────────────────────────────────────────────────────────────
-
     async def _api_signin(self, request: web.Request) -> web.Response:
         try:
             data = await request.json()
         except Exception:
             return self._err("Невалидный JSON")
-
         stage = str(data.get("stage", "")).strip().lower()
         if not stage:
             stage = "hydrogram" if self._hydrogram_only else "telethon"
-
         if stage == "hydrogram":
             return await self._api_signin_hydrogram(data)
         return await self._api_signin_telethon(data)
-
-    # ──────────────────────────────────────────────────────────────────
-    # /api/2fa — диспатчер
-    # ──────────────────────────────────────────────────────────────────
-
     async def _api_2fa(self, request: web.Request) -> web.Response:
         try:
             data = await request.json()
         except Exception:
             return self._err("Невалидный JSON")
-
         stage = str(data.get("stage", "")).strip().lower()
         if not stage:
             stage = "hydrogram" if self._hydrogram_only else "telethon"
-
         if stage == "hydrogram":
             return await self._api_2fa_hydrogram(data)
         return await self._api_2fa_telethon(data)
-
-    # ==================================================================
-    # ===== TELETHON FLOW ==============================================
-    # ==================================================================
-
     async def _build_proxy(self, cfg: dict) -> tuple[Any, dict]:
-        """Возвращает (proxy, extra-kwargs) для Telethon на основе cfg."""
         proxy_cfg = cfg.get("proxy") or {}
         proxy = None
         extra: dict = {}
-
         if not (proxy_cfg.get("host") and proxy_cfg.get("port")):
             return proxy, extra
-
         ptype = str(proxy_cfg.get("type", "SOCKS5")).upper()
-
         try:
-            import python_socks  # noqa: F401
+            import python_socks              
             _has_python_socks = True
         except ImportError:
             _has_python_socks = False
@@ -783,7 +704,7 @@ class SetupServer:
                 )
                 import importlib
                 importlib.invalidate_caches()
-                import python_socks  # noqa: F401
+                import python_socks              
                 _has_python_socks = True
                 logger.info("setup: python-socks[asyncio] установлен в рантайме")
             except Exception as _exc:
@@ -791,10 +712,8 @@ class SetupServer:
                     "setup: не удалось установить python-socks: %s. "
                     "Прокси будет отключён.", _exc,
                 )
-
         if not _has_python_socks:
             return proxy, extra
-
         if ptype == "MTPROTO":
             secret = proxy_cfg.get("secret", "00000000000000000000000000000000")
             try:
@@ -834,30 +753,23 @@ class SetupServer:
                 )
             except ImportError:
                 logger.warning("setup: PySocks not installed, proxy disabled")
-
         return proxy, extra
-
     async def _api_sendcode_telethon(self, data: dict) -> web.Response:
         try:
             api_id = int(data["api_id"])
             api_hash = str(data["api_hash"]).strip()
             self._phone = str(data["phone"]).strip()
-
             cfg = self._get_config()
             cfg["api_id"] = api_id
             cfg["api_hash"] = api_hash
             cfg["phone"] = self._phone
             self._save_config(cfg)
-
             from ..tl_cache import KitsuneTelegramClient
             from telethon.sessions import MemorySession
             from pathlib import Path
-
             DATA_DIR = Path.home() / ".kitsune"
             DATA_DIR.mkdir(parents=True, exist_ok=True)
-
             proxy, extra = await self._build_proxy(cfg)
-
             self._client = KitsuneTelegramClient(
                 MemorySession(),
                 api_id=api_id,
@@ -872,56 +784,42 @@ class SetupServer:
                 proxy=proxy,
                 **extra,
             )
-
             await asyncio.wait_for(self._client.connect(), timeout=30)
             result = await self._client.send_code_request(self._phone)
             self._phone_hash = result.phone_code_hash
-
             return web.json_response({"ok": True})
-
         except asyncio.TimeoutError:
             self._client = None
             return self._err("Не удалось подключиться к Telegram. Проверь интернет-соединение.")
         except Exception as exc:
             logger.exception("setup: /api/sendcode (telethon) error")
             return self._err(str(exc))
-
     async def _api_signin_telethon(self, data: dict) -> web.Response:
         try:
             code = str(data["code"]).strip()
             self._last_code = code
-
             from telethon.errors import SessionPasswordNeededError
-
             try:
                 me = await self._client.sign_in(
                     self._phone, code, phone_code_hash=self._phone_hash
                 )
                 await self._save_telethon_session(me)
-                # НЕ ставим self._done — дальше пользователь будет регистрировать Hydrogram
                 return web.json_response({
                     "ok": True,
                     "message": f"👤 {me.first_name}  |  id: {me.id}",
                 })
-
             except SessionPasswordNeededError:
                 return web.json_response({"ok": False, "need_2fa": True})
-
         except Exception as exc:
             logger.exception("setup: /api/signin (telethon) error")
             return self._err(str(exc))
-
     async def _api_2fa_telethon(self, data: dict) -> web.Response:
         try:
             password = str(data.get("password", "")).strip()
-
             if not password:
                 return self._err("Пароль не может быть пустым")
-
             self._last_password = password
-
             from telethon.errors import PasswordHashInvalidError, FloodWaitError
-
             try:
                 me = await self._client.sign_in(password=password)
             except PasswordHashInvalidError:
@@ -936,26 +834,19 @@ class SetupServer:
                     "error": f"Слишком много попыток. Подожди {e.seconds} секунд.",
                     "flood": True,
                 })
-
             await self._save_telethon_session(me)
             return web.json_response({
                 "ok": True,
                 "message": f"👤 {me.first_name}  |  id: {me.id}",
             })
-
         except Exception as exc:
             logger.exception("setup: /api/2fa (telethon) error")
             return self._err(str(exc))
-
     async def _save_telethon_session(self, me: Any) -> None:
         from telethon.sessions import SQLiteSession
         from pathlib import Path
-
         DATA_DIR = Path.home() / ".kitsune"
         DATA_DIR.mkdir(parents=True, exist_ok=True)
-
-        # Удаляем повреждённый/старый файл сессии перед созданием нового,
-        # иначе SQLiteSession падает если таблица version есть, но пустая.
         session_file = DATA_DIR / "kitsune.session"
         for _suf in ("", "-wal", "-shm", "-journal"):
             _p = Path(str(session_file) + _suf)
@@ -964,9 +855,7 @@ class SetupServer:
                     _p.unlink()
             except Exception:
                 pass
-
         session = SQLiteSession(str(DATA_DIR / "kitsune"))
-
         session.set_dc(
             self._client.session.dc_id,
             self._client.session.server_address,
@@ -974,56 +863,34 @@ class SetupServer:
         )
         session.auth_key = self._client.session.auth_key
         session.save()
-
-        # Гарантируем правильные права на свежесозданный файл
         try:
             import os as _os
             if session_file.exists():
                 _os.chmod(session_file, 0o644)
         except Exception:
             pass
-
         self._client.session = session
         self._client.tg_id = me.id
         self._client.tg_me = me
-
         self._telethon_success = True
         logger.info("setup: Telethon session создана и сохранена")
-
-        # Шифруем сессию ПОСЛЕ того как Hydrogram отработает,
-        # потому что иначе .session-файл будет удалён до того, как
-        # main.py успеет его подхватить. Шифрование делается уже в main.py
-        # на shutdown.
-        # ВАЖНО: тут НЕ ставим self._done — нужно ещё пройти Hydrogram.
-
-    # ==================================================================
-    # ===== HYDROGRAM FLOW =============================================
-    # ==================================================================
-
     async def _api_sendcode_hydrogram(self, data: dict) -> web.Response:
         try:
             self._hydro_phone = str(data.get("phone", "")).strip() or self._phone or ""
-
             if not self._hydro_phone:
                 return self._err("Введи номер телефона")
-
             cfg = self._get_config() or {}
             api_id = int(cfg.get("api_id") or 0)
             api_hash = str(cfg.get("api_hash") or "")
-
             if not api_id or not api_hash:
                 return self._err(
                     "В config.toml не найдены api_id / api_hash. "
                     "Сначала пройди регистрацию Telethon."
                 )
-
             from pathlib import Path as _Path
             DATA_DIR = _Path.home() / ".kitsune"
             DATA_DIR.mkdir(parents=True, exist_ok=True)
-
             hydro_session_file = DATA_DIR / "kitsune_hydro.session"
-
-            # Сносим остатки от прошлых попыток, чтобы Hydrogram не ругался.
             for _suf in ("", "-journal", ".wal", ".shm"):
                 _p = _Path(str(hydro_session_file) + _suf)
                 try:
@@ -1031,14 +898,12 @@ class SetupServer:
                         _p.unlink()
                 except Exception:
                     pass
-
             try:
                 from hydrogram import Client as HydroClient
             except Exception:
                 return self._err(
                     "hydrogram не установлен. Выполни: pip install hydrogram tgcrypto"
                 )
-
             kwargs: dict = dict(
                 name="kitsune_hydro",
                 api_id=api_id,
@@ -1052,7 +917,6 @@ class SetupServer:
                 no_updates=True,
                 takeout=False,
             )
-
             proxy_cfg = (cfg.get("proxy") or {})
             if proxy_cfg.get("host") and proxy_cfg.get("port"):
                 ptype = str(proxy_cfg.get("type", "SOCKS5")).upper()
@@ -1070,40 +934,29 @@ class SetupServer:
                         username=proxy_cfg.get("username") or None,
                         password=proxy_cfg.get("password") or None,
                     )
-
-            # Если от прошлой попытки остался открытый клиент — закроем.
             if self._hydro_client is not None:
                 try:
                     await self._hydro_client.disconnect()
                 except Exception:
                     pass
                 self._hydro_client = None
-
             self._hydro_client = HydroClient(**kwargs)
             await self._hydro_client.connect()
-
             sent = await asyncio.wait_for(
                 self._hydro_client.send_code(self._hydro_phone), timeout=30.0,
             )
-
             self._hydro_phone_code_hash = sent.phone_code_hash
-
             return web.json_response({"ok": True})
-
         except asyncio.TimeoutError:
             return self._err("Не удалось подключиться к Telegram (timeout). Проверь связь.")
-
         except Exception as exc:
             logger.exception("setup: /api/sendcode (hydrogram) error")
             return self._err(str(exc))
-
     async def _api_signin_hydrogram(self, data: dict) -> web.Response:
         try:
             code = str(data.get("code", "")).strip()
-
             if not code:
                 return self._err("Введи код")
-
             if (
                 self._hydro_client is None
                 or not self._hydro_phone
@@ -1112,14 +965,12 @@ class SetupServer:
                 return self._err(
                     "Сессия потеряна. Перезапусти мастер и запроси код заново."
                 )
-
             try:
                 from hydrogram.errors import (
                     SessionPasswordNeeded as _HydroSessionPasswordNeeded,
                 )
             except Exception:
-                _HydroSessionPasswordNeeded = Exception  # type: ignore[assignment]
-
+                _HydroSessionPasswordNeeded = Exception                            
             try:
                 me = await self._hydro_client.sign_in(
                     self._hydro_phone,
@@ -1128,40 +979,31 @@ class SetupServer:
                 )
             except _HydroSessionPasswordNeeded:
                 return web.json_response({"ok": False, "need_2fa": True})
-
             await self._finalize_hydrogram()
-
             first_name = getattr(me, "first_name", "") or "Готово"
             user_id = getattr(me, "id", 0)
-
             return web.json_response({
                 "ok": True,
                 "message": f"👤 {first_name}  |  id: {user_id}",
             })
-
         except Exception as exc:
             logger.exception("setup: /api/signin (hydrogram) error")
             return self._err(str(exc))
-
     async def _api_2fa_hydrogram(self, data: dict) -> web.Response:
         try:
             password = str(data.get("password", "")).strip()
-
             if not password:
                 return self._err("Пароль не может быть пустым")
-
             if self._hydro_client is None:
                 return self._err(
                     "Сессия потеряна. Перезапусти мастер и запроси код заново."
                 )
-
             try:
                 from hydrogram.errors import (
                     PasswordHashInvalid as _HydroPasswordHashInvalid,
                 )
             except Exception:
-                _HydroPasswordHashInvalid = Exception  # type: ignore[assignment]
-
+                _HydroPasswordHashInvalid = Exception                            
             try:
                 me = await self._hydro_client.check_password(password)
             except _HydroPasswordHashInvalid:
@@ -1170,58 +1012,32 @@ class SetupServer:
                     "error": "Неверный пароль. Попробуй ещё раз.",
                     "wrong_password": True,
                 })
-
             await self._finalize_hydrogram()
-
             first_name = getattr(me, "first_name", "") or "Готово"
             user_id = getattr(me, "id", 0)
-
             return web.json_response({
                 "ok": True,
                 "message": f"👤 {first_name}  |  id: {user_id}",
             })
-
         except Exception as exc:
             logger.exception("setup: /api/2fa (hydrogram) error")
             return self._err(str(exc))
-
     async def _finalize_hydrogram(self) -> None:
-        """Корректно завершаем Hydrogram-регистрацию: отключаем клиента
-        (чтобы Hydrogram сбросил session-файл на диск), выставляем флаг успеха
-        и разбуживаем wait_done()."""
-
+\
+\
         if self._hydro_client is not None:
             try:
                 await self._hydro_client.disconnect()
             except Exception:
                 logger.debug("setup: hydro disconnect failed", exc_info=True)
             self._hydro_client = None
-
         self._hydrogram_success = True
-
         logger.info(
             "setup: Hydrogram-сессия успешно создана и сохранена на диск"
         )
-
-        # На этом этапе обе сессии готовы:
-        #   - Telethon: либо успешно создан (telethon_success=True),
-        #     либо мы в hydrogram_only режиме (его не делали).
-        #   - Hydrogram: только что закончили.
-        # → можно ставить общий флаг done и переходить к запуску основного клиента.
-
         if not self._hydrogram_only:
-            # В обычном режиме после Hydrogram нужно зашифровать Telethon-сессию
-            # (это делает main.py при shutdown, но если main.py не успеет —
-            # хотя бы убедимся, что зашифрованная копия не потерялась).
-            # Шифрование тут НЕ делаем: main.py сам решит когда.
             pass
-
         self._done.set()
-
-    # ──────────────────────────────────────────────────────────────────
-    # Helpers
-    # ──────────────────────────────────────────────────────────────────
-
     @staticmethod
     def _err(msg: str) -> web.Response:
         return web.json_response({"ok": False, "error": msg})
