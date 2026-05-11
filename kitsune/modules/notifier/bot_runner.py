@@ -10,6 +10,17 @@ logger = logging.getLogger(__name__)
 
 _DB_KEY = "kitsune.notifier"
 
+
+def _get_bot_ready_event(client) -> asyncio.Event | None:
+    event = getattr(client, "_kitsune_bot_ready", None)
+    if event is None:
+        try:
+            event = asyncio.Event()
+            setattr(client, "_kitsune_bot_ready", event)
+        except Exception:
+            return None
+    return event
+
 def _load_socks_proxy_url() -> str | None:
     try:
         from kitsune.rkn_bypass import get_socks_proxy_url
@@ -99,6 +110,9 @@ class BotRunner:
             logger.warning("BotRunner: aiogram not installed, polling disabled")
             return
         await self.stop()
+        ready_event = _get_bot_ready_event(self._client)
+        if ready_event is not None:
+            ready_event.clear()
         try:
             from kitsune.rkn_bypass import (
                 ensure_aiohttp_socks,
@@ -131,6 +145,8 @@ class BotRunner:
             self._polling_task = asyncio.ensure_future(
                 self.dp.start_polling(self.bot, handle_signals=False)
             )
+            if ready_event is not None:
+                ready_event.set()
             logger.info("BotRunner: polling started (first_run=%s)", first_run)
             asyncio.ensure_future(_run_asset_setup(self._client, self._db))
             if first_run:
@@ -181,6 +197,8 @@ class BotRunner:
                         await backup.show_interval_setup(self.bot, int(owner_id))
                         await self._db.set(_DB_KEY, "backup_interval_asked", True)
         except Exception as exc:
+            if ready_event is not None:
+                ready_event.clear()
             err = str(exc).lower()
             _net = ("network", "connection", "ssl", "timeout", "certificate",
                     "connect", "resolve", "reset", "eof", "broken pipe")
@@ -200,6 +218,9 @@ class BotRunner:
                     parse_mode="html",
                 )
     async def stop(self) -> None:
+        ready_event = _get_bot_ready_event(self._client)
+        if ready_event is not None:
+            ready_event.clear()
         if self._polling_task and not self._polling_task.done():
             self._polling_task.cancel()
         if self.dp:

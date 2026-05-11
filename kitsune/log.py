@@ -421,23 +421,80 @@ rotating_handler.setFormatter(_main_formatter)
 
 _tg_channel_handler: TelegramChannelHandler | None = None
 
-async def _get_aiogram_bot(client: typing.Any, max_attempts: int = 150) -> typing.Any:
-    """
-    Ожидает готовности aiogram-бота. По умолчанию ждёт до ~30 секунд
-    (150 попыток × 0.2с). Возвращает bot или None.
-    """
-    for _ in range(max_attempts):
+def _get_bot_ready_event(client: typing.Any) -> asyncio.Event | None:
+    event = getattr(client, "_kitsune_bot_ready", None)
+    if event is None:
         try:
-            loader = getattr(client, "_kitsune_loader", None)
-            if loader:
-                notifier = loader.modules.get("notifier")
-                if notifier and notifier._runner and notifier._runner.bot:
-                    return notifier._runner.bot
+            event = asyncio.Event()
+            setattr(client, "_kitsune_bot_ready", event)
         except Exception:
-            pass
+            return None
+    return event
+
+
+def _get_aiogram_bot_now(client: typing.Any) -> typing.Any:
+    try:
+        loader = getattr(client, "_kitsune_loader", None)
+        if loader:
+            notifier = loader.modules.get("notifier")
+            if notifier and notifier._runner and notifier._runner.bot:
+                return notifier._runner.bot
+    except Exception:
+        pass
+    return None
+
+
+def _is_retryable_startup_error(exc: Exception) -> bool:
+    err_text = str(exc).lower()
+    transient_fragments = (
+        "timeout",
+        "timed out",
+        "network",
+        "connection",
+        "connect",
+        "disconnect",
+        "reset",
+        "closed",
+        "eof",
+        "temporary",
+        "temporarily unavailable",
+        "transport",
+    )
+    if exc.__class__.__name__ in {"TimeoutError", "ConnectionError", "OSError"}:
+        return True
+    return any(fragment in err_text for fragment in transient_fragments)
+
+
+async def _get_aiogram_bot(client: typing.Any, timeout: float = 30.0) -> typing.Any:
+    """
+    Ждёт сигнал готовности aiogram-бота через asyncio.Event и только потом
+    забирает экземпляр бота. Если событие по каким-то причинам не создано,
+    используется короткий fallback-опрос для обратной совместимости.
+    """
+    event = _get_bot_ready_event(client)
+    if event is not None:
+        try:
+            await asyncio.wait_for(event.wait(), timeout=timeout)
+        except asyncio.TimeoutError:
+            return _get_aiogram_bot_now(client)
+        bot = _get_aiogram_bot_now(client)
+        if bot is not None:
+            return bot
+
+    max_attempts = max(1, int(timeout / 0.2))
+    for _ in range(max_attempts):
+        bot = _get_aiogram_bot_now(client)
+        if bot is not None:
+            return bot
         await asyncio.sleep(0.2)
     return None
-async def _is_bot_already_admin(client: typing.Any, group_id: int, bot_entity) -> bool:
+async def _is_bot_already_admin(
+    client: typing.Any,
+    group_id: int,
+    bot_entity,
+    *,
+    attempts: int = 3,
+) -> bool:
     log = logging.getLogger(__name__)
     try:
         from telethon.tl.functions.channels import GetParticipantRequest
@@ -445,35 +502,82 @@ async def _is_bot_already_admin(client: typing.Any, group_id: int, bot_entity) -
             ChannelParticipantAdmin,
             ChannelParticipantCreator,
         )
+    except Exception as exc:
+        log.debug("log: _is_bot_already_admin import failed — %s", exc)
+        return False
+
+    for attempt in range(1, attempts + 1):
         try:
             res = await client(GetParticipantRequest(channel=group_id, participant=bot_entity))
+            participant = getattr(res, "participant", None)
+            return isinstance(participant, (ChannelParticipantAdmin, ChannelParticipantCreator))
         except Exception as exc:
+            if attempt < attempts and _is_retryable_startup_error(exc):
+                await asyncio.sleep(0.5 * attempt)
+                continue
             log.debug("log: GetParticipantRequest(@bot) — %s", exc)
             return False
-        participant = getattr(res, "participant", None)
-        if isinstance(participant, (ChannelParticipantAdmin, ChannelParticipantCreator)):
-            return True
-    except Exception as exc:
-        log.debug("log: _is_bot_already_admin failed — %s", exc)
+
     return False
-async def _ensure_bot_in_group(client: typing.Any, group_id: int) -> bool:
-    log = logging.getLogger(__name__)
-    bot_username: str | None = None
-    for _ in range(150):
+async def _resolve_bot_username(
+    client: typing.Any,
+    bot: typing.Any | None = None,
+) -> str | None:
+    try:
+        db = getattr(client, "_kitsune_db", None)
+        if db:
+            bot_username = db.get("kitsune.notifier", "bot_username", None)
+            if bot_username:
+                return str(bot_username).lstrip("@")
+    except Exception:
+        pass
+
+    if bot is not None:
         try:
-            db = getattr(client, "_kitsune_db", None)
-            if db:
-                bot_username = db.get("kitsune.notifier", "bot_username", None)
-                if bot_username:
-                    break
+            me = await bot.get_me()
+            username = getattr(me, "username", None)
+            if username:
+                return str(username).lstrip("@")
         except Exception:
             pass
-        await asyncio.sleep(0.2)
-    if not bot_username:
-        log.debug("log: bot_username не найден за 30с — баннер пропущен")
+
+    return None
+
+
+async def _ensure_bot_in_group(
+    client: typing.Any,
+    group_id: int,
+    *,
+    bot: typing.Any | None = None,
+) -> bool:
+    log = logging.getLogger(__name__)
+    bot = bot or await _get_aiogram_bot(client)
+    if bot is None:
+        log.info("log: aiogram-бот не готов — баннер пропущен")
         return False
+
+    bot_username = await _resolve_bot_username(client, bot)
+    if not bot_username:
+        log.debug("log: bot_username не найден после готовности бота — баннер пропущен")
+        return False
+
+    bot_entity = None
+    for attempt in range(1, 4):
+        try:
+            bot_entity = await client.get_entity(f"@{bot_username}")
+            break
+        except Exception as exc:
+            if attempt < 3 and _is_retryable_startup_error(exc):
+                await asyncio.sleep(0.5 * attempt)
+                continue
+            log.warning("log: ошибка при получении сущности бота — %s", exc)
+            return False
+
+    if bot_entity is None:
+        log.warning("log: сущность бота @%s не получена", bot_username)
+        return False
+
     try:
-        bot_entity = await client.get_entity(f"@{bot_username}")
         if await _is_bot_already_admin(client, group_id, bot_entity):
             log.info("log: бот @%s уже админ в Kitsune-logs — пропускаю", bot_username)
             return True
@@ -560,19 +664,23 @@ async def _setup_bot_and_banner(client: typing.Any, group_id: int) -> None:
     ИСКЛЮЧИТЕЛЬНО через бота. Если бот недоступен — баннер не отправляется
     вовсе (никаких fallback'ов через юзер-аккаунт, чтобы GIF не попадал в
     «Сохранённые GIF» и сообщение не уходило от имени пользователя).
+
+    Последовательный порядок здесь намеренный: сначала ждём готовности
+    aiogram-бота, затем добавляем его в лог-группу и только после этого
+    отправляем баннер. Это убирает race condition старта.
     """
     log = logging.getLogger(__name__)
     try:
-        bot_added, bot = await asyncio.gather(
-            _ensure_bot_in_group(client, group_id),
-            _get_aiogram_bot(client),
-        )
+        bot = await _get_aiogram_bot(client)
         if not bot:
             log.info("log: ожидание бота истекло — баннер пропущен (юзер-аккаунт не используется)")
             return
+
+        bot_added = await _ensure_bot_in_group(client, group_id, bot=bot)
         if not bot_added:
             log.info("log: бот не добавлен в Kitsune-logs — баннер пропущен (юзер-аккаунт не используется)")
             return
+
         await _send_startup_banner_via_bot(client, group_id, bot=bot)
     except Exception:
         log.exception("log: не удалось подготовить бота для баннера — баннер пропущен")

@@ -647,6 +647,7 @@ async def _startup(args: argparse.Namespace) -> None:
         )
     client.tg_id = me.id
     client.tg_me = me
+    client._kitsune_bot_ready = asyncio.Event()
     logger.info("main: logged in as %s (id=%d)", me.first_name, me.id)
     try:
         from .core.reliability import get_breaker
