@@ -221,18 +221,59 @@ class DatabaseManager:
             self._backend = SQLiteBackend(db_path)
             self._data = await self._backend.load()
             logger.info("Database: SQLite backend active (%s)", db_path)
+        # ПОПЫТКА БЫСТРОГО СТАРТА: если ID kitsune-assets уже в кэше БД —
+        # сразу ставим его в self._assets_channel без сетевого запроса. Реальная
+        # валидация / создание канала — в фоновой задаче, не блокирует загрузку
+        # модулей и диспетчера.
+        try:
+            cached_assets = (
+                self._data.get("kitsune.asset_channels", {}).get("kitsune-assets")
+                or self._data.get("kitsune.assets_channel", {}).get("channel_id")
+                or self._data.get("kitsune.assets", {}).get("known_kitsune_assets")
+            )
+            if isinstance(cached_assets, int) and cached_assets:
+                self._assets_channel = cached_assets
+                logger.debug(
+                    "Database: assets channel id=%s взят из кэша БД (без сетевого запроса)",
+                    cached_assets,
+                )
+        except Exception:
+            pass
+        # Запускаем валидацию/создание assets-канала в фоне — это сэкономит
+        # ~6–7 секунд при холодном старте.
+        try:
+            _bg = asyncio.ensure_future(self._init_assets_channel())
+            self._bg_tasks.add(_bg)
+            _bg.add_done_callback(self._bg_tasks.discard)
+        except RuntimeError:
+            # Нет рабочего цикла (тесты/офлайн) — выполним синхронно
+            await self._init_assets_channel()
+
+    async def _init_assets_channel(self) -> None:
+        """
+        Фоновый поиск/создание kitsune-assets канала.
+
+        Раньше этот блок был внутри init() и занимал 6–8 секунд (iter_dialogs +
+        CreateChannelRequest). Теперь init() возвращается сразу после загрузки
+        SQLite/Redis, а ассет-канал инициализируется параллельно с загрузкой
+        модулей. store_asset()/fetch_asset() имеют проверку self._assets_channel,
+        поэтому ранние вызовы безопасно вернут None.
+        """
         try:
             from .. import utils
             from telethon.errors import ChannelsTooMuchError, FloodWaitError
             import asyncio as _aio
             for _attempt in range(3):
                 try:
-                    self._assets_channel, _ = await utils.asset_channel(
+                    new_id, _created = await utils.asset_channel(
                         self._client,
                         "kitsune-assets",
                         description="🦊 Your Kitsune assets are stored here",
                         archive=True,
+                        db=self,
                     )
+                    if new_id:
+                        self._assets_channel = new_id
                     break
                 except ChannelsTooMuchError:
                     logger.warning(
@@ -240,7 +281,10 @@ class DatabaseManager:
                     )
                     break
                 except FloodWaitError as _e:
-                    logger.debug("Database: FloodWait %ds before creating assets channel", _e.seconds)
+                    logger.debug(
+                        "Database: FloodWait %ds before creating assets channel",
+                        _e.seconds,
+                    )
                     await _aio.sleep(min(_e.seconds, 10))
                 except Exception:
                     if _attempt < 2:
@@ -248,10 +292,15 @@ class DatabaseManager:
                     else:
                         raise
         except Exception as _exc:
-            logger.debug("Database: assets channel unavailable (%s) — asset storage disabled", _exc)
+            logger.debug(
+                "Database: assets channel unavailable (%s) — asset storage disabled",
+                _exc,
+            )
             try:
                 from ..core.reliability import flags as _deg_flags
-                _deg_flags.mark_assets_unavailable(f"{type(_exc).__name__}: {_exc}")
+                _deg_flags.mark_assets_unavailable(
+                    f"{type(_exc).__name__}: {_exc}"
+                )
             except Exception:
                 pass
         else:

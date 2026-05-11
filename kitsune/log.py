@@ -639,12 +639,20 @@ async def setup_tg_logging(client: typing.Any) -> None:
     global _tg_channel_handler
     try:
         from .utils import asset_channel
+        # Передаём db в asset_channel, чтобы ID группы Kitsune-logs кэшировался в БД
+        # и на последующих стартах не приходилось искать её через iter_dialogs.
+        _db = (
+            getattr(client, "db", None)
+            or getattr(client, "database", None)
+            or getattr(client, "_db", None)
+        )
         group_id, created = await asset_channel(
             client,
             title="Kitsune-logs",
             description="Kitsune Userbot — системные логи",
             archive=True,
             megagroup=True,
+            db=_db,
         )
         if not group_id:
             logging.getLogger(__name__).error("log: не удалось создать/найти группу Kitsune-logs")
