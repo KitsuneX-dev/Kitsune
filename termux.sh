@@ -140,8 +140,12 @@ else
 fi
 
 step "Hydrogram"
-pip_install "hydrogram" && pip_install "tgcrypto" && \
+pip_install "hydrogram" && \
     ok "Hydrogram установлен" || warn "Hydrogram не установился — продолжаю без него"
+
+pip install --prefer-binary --no-cache-dir -q "tgcrypto>=1.2.5" 2>/dev/null && \
+    ok "tgcrypto установлен" || \
+    warn "tgcrypto не установился — Hydrogram будет работать без C-ускорения"
 
 step "Директории и права"
 mkdir -p "$HOME/.kitsune/modules" "$HOME/.kitsune/logs"

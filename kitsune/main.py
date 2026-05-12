@@ -768,7 +768,8 @@ async def _startup(args: argparse.Namespace) -> None:
         while not stop_event.is_set():
             _time.sleep(10)
             try:
-                asyncio.run_coroutine_threadsafe(_wdog_tick(), _wdog_loop)
+                fut = asyncio.run_coroutine_threadsafe(_wdog_tick(), _wdog_loop)
+                fut.result(timeout=5)
             except Exception:
                 pass
             _time.sleep(5)

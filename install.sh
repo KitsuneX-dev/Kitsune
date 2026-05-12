@@ -294,6 +294,12 @@ else
     ok "pyaes уже установлен — пропускаю"
 fi
 rm -rf "$_PYAES_TMP"
+"$PIP" install --prefer-binary --no-cache-dir --no-warn-script-location \
+    --disable-pip-version-check --quiet "tgcrypto>=1.2.5" \
+    || "$PIP" install --no-build-isolation --no-cache-dir --no-warn-script-location \
+    --disable-pip-version-check --quiet "tgcrypto>=1.2.5" \
+    || warn "tgcrypto не установился — Hydrogram будет работать без C-ускорения"
+
 "$PIP" install --no-cache-dir -r requirements.txt \
     --no-warn-script-location --disable-pip-version-check --quiet \
     --no-build-isolation \
