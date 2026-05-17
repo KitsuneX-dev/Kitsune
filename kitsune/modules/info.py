@@ -52,6 +52,15 @@ class InfoModule(KitsuneModule):
                     "На видео и GIF параметр НЕ влияет — они всегда отправляются как медиа."
                 ),
             ),
+            ConfigValue(
+                "invert_media",
+                default=True,
+                doc=(
+                    "Положение фото относительно текста (только при quote_media = True). "
+                    "True — фото сверху, текст снизу (по умолчанию). "
+                    "False — текст сверху, фото снизу."
+                ),
+            ),
         )
     strings_ru = {
         "owner":           "Владелец",
@@ -245,18 +254,14 @@ class InfoModule(KitsuneModule):
             return 0
         return sum(2 if ord(c) > 0xFFFF else 1 for c in text)
 
-    async def _send_webpage_quote(self, peer, banner_url, caption, entities, markup):
-        """Отправить сообщение с фото в виде web-preview (цитаты).
-
-        Используется ТОЛЬКО для статических фото при включённом quote_media.
-        Лимит текста — 4096 символов (как у обычного сообщения).
-        """
+    async def _send_webpage_quote(self, peer, banner_url, caption, entities, markup, invert_media: bool = True):
         from telethon.tl import functions
         from telethon.tl.types import InputMediaWebPage
         input_peer = await self.client.get_input_entity(peer)
         media = InputMediaWebPage(
             url=str(banner_url),
             force_large_media=True,
+            invert_media=invert_media,
             optional=True,
         )
         request = functions.messages.SendMediaRequest(
@@ -394,6 +399,7 @@ class InfoModule(KitsuneModule):
                             parsed_text,
                             entities,
                             markup,
+                            invert_media=bool(self.config["invert_media"]),
                         )
                         await event.message.delete()
                         return
