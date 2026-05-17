@@ -42,6 +42,16 @@ class InfoModule(KitsuneModule):
                 default="https://cdn.jsdelivr.net/gh/KitsuneX-dev/Kitsune@main/banner.gif",
                 doc="Ссылка на баннер (видео/гифка). Используй прямую ссылку. Для GitHub: используй команду .cdn чтобы конвертировать ссылку в CDN.",
             ),
+            ConfigValue(
+                "quote_media",
+                default=True,
+                doc=(
+                    "Цитирование (web-preview) для фото-баннера. "
+                    "True — фото отображается как превью-цитата над текстом (по умолчанию). "
+                    "False — фото отправляется как обычное медиа с подписью. "
+                    "На видео и GIF параметр НЕ влияет — они всегда отправляются как медиа."
+                ),
+            ),
         )
     strings_ru = {
         "owner":           "Владелец",
@@ -199,6 +209,67 @@ class InfoModule(KitsuneModule):
             result_entities += list(ents_tail or [])
         result_entities.sort(key=lambda e: e.offset)
         return result_text, result_entities
+    @staticmethod
+    def _is_photo_url(url: str) -> bool:
+        """Heuristic: True if URL points to a static photo (jpg/png/webp/bmp).
+
+        Видео (mp4/webm/mov/mkv/avi) и анимации (gif) считаются НЕ фото —
+        для них функция quote_media не должна применяться.
+        """
+        if not url:
+            return False
+        try:
+            from urllib.parse import urlparse
+            path = urlparse(str(url)).path.lower()
+        except Exception:
+            path = str(url).lower()
+        photo_exts = (".jpg", ".jpeg", ".png", ".webp", ".bmp", ".heic", ".heif")
+        video_or_gif_exts = (".gif", ".mp4", ".webm", ".mov", ".mkv", ".avi", ".m4v")
+        if path.endswith(video_or_gif_exts):
+            return False
+        if path.endswith(photo_exts):
+            return True
+        # Если расширение неизвестно — не считаем фото (безопасное поведение,
+        # видео/гифки случайно не сломаем).
+        return False
+
+    # Безопасный лимит подписи к медиа в Telegram (UTF-16 code units): 1024.
+    # Используем чуть меньший порог, чтобы учесть служебные символы/энтити.
+    _CAPTION_LIMIT = 1024
+    _MESSAGE_LIMIT = 4096
+
+    @staticmethod
+    def _utf16_len(text: str) -> int:
+        """Длина строки в UTF-16 code units (так Telegram считает лимит)."""
+        if not text:
+            return 0
+        return sum(2 if ord(c) > 0xFFFF else 1 for c in text)
+
+    async def _send_webpage_quote(self, peer, banner_url, caption, entities, markup):
+        """Отправить сообщение с фото в виде web-preview (цитаты).
+
+        Используется ТОЛЬКО для статических фото при включённом quote_media.
+        Лимит текста — 4096 символов (как у обычного сообщения).
+        """
+        from telethon.tl import functions
+        from telethon.tl.types import InputMediaWebPage
+        input_peer = await self.client.get_input_entity(peer)
+        media = InputMediaWebPage(
+            url=str(banner_url),
+            force_large_media=True,
+            optional=True,
+        )
+        request = functions.messages.SendMediaRequest(
+            peer=input_peer,
+            media=media,
+            message=caption or "",
+            entities=entities,
+            reply_markup=markup,
+            noforwards=True,
+        )
+        result = await self.client(request)
+        return self.client._get_response_message(request, result, input_peer)
+
     async def _send_banner_protected(self, peer, banner, caption, entities, markup):
         from telethon.tl import functions, types
         input_peer = await self.client.get_input_entity(peer)
@@ -229,6 +300,59 @@ class InfoModule(KitsuneModule):
         )
         result = await self.client(request)
         return self.client._get_response_message(request, result, input_peer)
+
+    async def _send_long_text_protected(self, peer, text, entities, markup):
+        """Отправить длинный текст (без медиа) с защитой от пересылки.
+
+        Используется, когда баннер — видео/GIF, а текст не помещается
+        в подпись (caption, 1024 симв.). В таком случае сначала отправляем
+        медиа без подписи, а текст — отдельным сообщением.
+        """
+        from telethon.tl import functions
+        input_peer = await self.client.get_input_entity(peer)
+        # SendMessage позволяет до 4096 символов
+        request = functions.messages.SendMessageRequest(
+            peer=input_peer,
+            message=text or "",
+            entities=entities,
+            reply_markup=markup,
+            no_webpage=True,
+            noforwards=True,
+        )
+        result = await self.client(request)
+        return self.client._get_response_message(request, result, input_peer)
+
+    async def _send_banner_no_caption(self, peer, banner):
+        """Отправить только баннер (видео/GIF) без подписи и без markup."""
+        from telethon.tl import functions
+        input_peer = await self.client.get_input_entity(peer)
+        file_handle, media, _image = await self.client._file_to_media(
+            banner,
+            force_document=False,
+            mime_type=None,
+            file_size=None,
+            progress_callback=None,
+            attributes=None,
+            allow_cache=True,
+            thumb=None,
+            voice_note=False,
+            video_note=False,
+            supports_streaming=False,
+            ttl=None,
+            nosound_video=None,
+        )
+        if not media:
+            raise TypeError("banner: invalid media")
+        request = functions.messages.SendMediaRequest(
+            peer=input_peer,
+            media=media,
+            message="",
+            entities=[],
+            reply_markup=None,
+            noforwards=True,
+        )
+        result = await self.client(request)
+        return self.client._get_response_message(request, result, input_peer)
     @command("info", required=OWNER)
     async def info_cmd(self, event) -> None:
         import asyncio as _asyncio
@@ -252,10 +376,55 @@ class InfoModule(KitsuneModule):
                     ])
                 ])
             if banner:
+                is_photo = self._is_photo_url(banner)
+                use_quote = bool(self.config["quote_media"]) and is_photo
+                text_len = self._utf16_len(parsed_text)
                 try:
-                    await self._send_banner_protected(
+                    if use_quote:
+                        # Фото + quote_media: web-preview, лимит 4096.
+                        # Если вдруг текст всё-таки длиннее 4096 — режем безопасно.
+                        if text_len > self._MESSAGE_LIMIT:
+                            logger.warning(
+                                "info: текст (%d UTF-16) превышает лимит сообщения %d, будет обрезан",
+                                text_len, self._MESSAGE_LIMIT,
+                            )
+                        await self._send_webpage_quote(
+                            event.peer_id,
+                            banner,
+                            parsed_text,
+                            entities,
+                            markup,
+                        )
+                        await event.message.delete()
+                        return
+
+                    # Иначе — обычная отправка медиа.
+                    # Видео/GIF: подпись жёстко ограничена 1024.
+                    # Если текст помещается — отправляем как раньше (медиа + caption).
+                    if text_len <= self._CAPTION_LIMIT:
+                        await self._send_banner_protected(
+                            event.peer_id,
+                            banner,
+                            parsed_text,
+                            entities,
+                            markup,
+                        )
+                        await event.message.delete()
+                        return
+
+                    # Длинный текст + видео/GIF (или фото с выключенным quote_media):
+                    # отправляем медиа без подписи, затем длинный текст отдельным
+                    # сообщением (лимит 4096), чтобы ничего не обрезалось.
+                    logger.info(
+                        "info: текст (%d UTF-16) > %d, отправляю медиа и текст раздельно",
+                        text_len, self._CAPTION_LIMIT,
+                    )
+                    try:
+                        await self._send_banner_no_caption(event.peer_id, banner)
+                    except Exception:
+                        logger.exception("info: не удалось отправить баннер без подписи")
+                    await self._send_long_text_protected(
                         event.peer_id,
-                        banner,
                         parsed_text,
                         entities,
                         markup,
@@ -264,7 +433,21 @@ class InfoModule(KitsuneModule):
                     return
                 except Exception:
                     logger.exception("info: не удалось отправить баннер с подписью")
-            await event.message.edit(parsed_text, formatting_entities=entities, buttons=markup)
+            # Без баннера — просто редактируем исходное сообщение.
+            # Если текст длиннее лимита редактирования — отправим отдельным сообщением.
+            text_len = self._utf16_len(parsed_text)
+            if text_len <= self._MESSAGE_LIMIT:
+                await event.message.edit(parsed_text, formatting_entities=entities, buttons=markup)
+            else:
+                logger.warning(
+                    "info: текст без баннера превышает лимит сообщения %d (UTF-16 %d), будет обрезан",
+                    self._MESSAGE_LIMIT, text_len,
+                )
+                await event.message.edit(
+                    parsed_text[: self._MESSAGE_LIMIT],
+                    formatting_entities=entities,
+                    buttons=markup,
+                )
             return
         if inline and inline._bot:
             markup = [[mark]] if mark else []
