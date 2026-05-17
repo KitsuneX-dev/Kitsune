@@ -5,6 +5,20 @@ import time
 from ..core.loader import KitsuneModule, command, ModuleConfig, ConfigValue
 from ..core.security import OWNER
 
+# Ошибки Telegram, возникающие при попытке отправить webpage-превью:
+# — WebpageCurlFailedError: сервер ТГ не смог скачать картинку (кириллица,
+#                            недоступный хост, 403/404 и т.п.)
+# — WebpageMediaEmptyError: у превью нет пригодного медиа (не картинка и не видео)
+# Обе хотим ловить отдельно, чтобы тихо откатиться на отправку медиа файлом.
+try:
+    from telethon.errors import WebpageCurlFailedError, WebpageMediaEmptyError
+except Exception:  # pragma: no cover
+    # Старые версии Telethon могут не иметь одного из этих классов;
+    # в этом случае используем «пустые» классы-заглушки — except просто никогда
+    # не сработает, и мы провалимся в общий except Exception ниже.
+    class WebpageCurlFailedError(Exception): pass  # type: ignore
+    class WebpageMediaEmptyError(Exception): pass  # type: ignore
+
 logger = logging.getLogger(__name__)
 
 _DB_OWNER = "kitsune.info"
@@ -384,6 +398,11 @@ class InfoModule(KitsuneModule):
                 is_photo = self._is_photo_url(banner)
                 use_quote = bool(self.config["quote_media"]) and is_photo
                 text_len = self._utf16_len(parsed_text)
+                # Обнаруживаем признаки blockquote / других блочных entity в исходном HTML.
+                # collapsed/expandable blockquote в подписи к видео/GIF некоторые
+                # клиенты отображают обрезанно — принудительно отправляем текст отдельно.
+                has_blockquote = bool(re.search(r"<\s*blockquote\b", text, re.IGNORECASE))
+                fits_caption = (text_len <= self._CAPTION_LIMIT) and not has_blockquote
                 try:
                     if use_quote:
                         # Фото + quote_media: web-preview, лимит 4096.
@@ -393,42 +412,73 @@ class InfoModule(KitsuneModule):
                                 "info: текст (%d UTF-16) превышает лимит сообщения %d, будет обрезан",
                                 text_len, self._MESSAGE_LIMIT,
                             )
-                        await self._send_webpage_quote(
-                            event.peer_id,
-                            banner,
-                            parsed_text,
-                            entities,
-                            markup,
-                            invert_media=bool(self.config["invert_media"]),
-                        )
-                        await event.message.delete()
-                        return
+                        try:
+                            await self._send_webpage_quote(
+                                event.peer_id,
+                                banner,
+                                parsed_text,
+                                entities,
+                                markup,
+                                invert_media=bool(self.config["invert_media"]),
+                            )
+                            await event.message.delete()
+                            return
+                        except (WebpageCurlFailedError, WebpageMediaEmptyError) as e:
+                            # ТГ не смог скачать/распарсить превью — тихо фолбэк на обычную
+                            # отправку медиа файлом. Не падаем, не спамим traceback в лог.
+                            logger.warning(
+                                "info: Telegram не смог загрузить превью (%s), отправляю как обычное медиа",
+                                type(e).__name__,
+                            )
+                            # Проваливаемся в ветку обычной отправки ниже (фактически
+                            # переводим в «как будто use_quote=False»).
+                            use_quote = False
 
                     # Иначе — обычная отправка медиа.
-                    # Видео/GIF: подпись жёстко ограничена 1024.
-                    # Если текст помещается — отправляем как раньше (медиа + caption).
-                    if text_len <= self._CAPTION_LIMIT:
-                        await self._send_banner_protected(
-                            event.peer_id,
-                            banner,
-                            parsed_text,
-                            entities,
-                            markup,
-                        )
-                        await event.message.delete()
-                        return
+                    # Видео/GIF: подпись жёстко ограничена 1024. При наличии
+                    # blockquote в тексте отправка в caption плохо рендерится в некоторых
+                    # клиентах — тогда принудительно разделяем на медиа + отдельный текст.
+                    if fits_caption:
+                        try:
+                            await self._send_banner_protected(
+                                event.peer_id,
+                                banner,
+                                parsed_text,
+                                entities,
+                                markup,
+                            )
+                            await event.message.delete()
+                            return
+                        except (WebpageCurlFailedError, WebpageMediaEmptyError) as e:
+                            # На _send_banner_protected это почти никогда не летит (файл
+                            # отправляется бинарно), но если прилетело — также фолбэк.
+                            logger.warning(
+                                "info: отправка медиа с caption не удалась (%s), отправляю раздельно",
+                                type(e).__name__,
+                            )
+                            # падаем в ветку раздельной отправки ниже
 
-                    # Длинный текст + видео/GIF (или фото с выключенным quote_media):
-                    # отправляем медиа без подписи, затем длинный текст отдельным
-                    # сообщением (лимит 4096), чтобы ничего не обрезалось.
+                    # Отправляем медиа без подписи + текст отдельным сообщением
+                    # (лимит 4096), чтобы ничего не обрезалось и blockquote
+                    # отображался корректно во всех клиентах.
                     logger.info(
-                        "info: текст (%d UTF-16) > %d, отправляю медиа и текст раздельно",
-                        text_len, self._CAPTION_LIMIT,
+                        "info: text_len=%d, has_blockquote=%s — раздельная отправка",
+                        text_len, has_blockquote,
                     )
                     try:
                         await self._send_banner_no_caption(event.peer_id, banner)
+                    except (WebpageCurlFailedError, WebpageMediaEmptyError) as e:
+                        logger.warning(
+                            "info: не удалось отправить баннер (%s), пропускаю медиа",
+                            type(e).__name__,
+                        )
                     except Exception:
                         logger.exception("info: не удалось отправить баннер без подписи")
+                    if text_len > self._MESSAGE_LIMIT:
+                        logger.warning(
+                            "info: текст (%d UTF-16) превышает %d, будет обрезан",
+                            text_len, self._MESSAGE_LIMIT,
+                        )
                     await self._send_long_text_protected(
                         event.peer_id,
                         parsed_text,
@@ -437,6 +487,14 @@ class InfoModule(KitsuneModule):
                     )
                     await event.message.delete()
                     return
+                except (WebpageCurlFailedError, WebpageMediaEmptyError) as e:
+                    # Самый верхний фолбэк — если все попытки отправить медиа провалились,
+                    # по крайней мере покажем текст без баннера, а не вывалимся в traceback.
+                    logger.warning(
+                        "info: все попытки отправить баннер провалились (%s), показываю текст без медиа",
+                        type(e).__name__,
+                    )
+                    # проваливаемся в ветку «без баннера» ниже
                 except Exception:
                     logger.exception("info: не удалось отправить баннер с подписью")
             # Без баннера — просто редактируем исходное сообщение.

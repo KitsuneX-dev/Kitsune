@@ -201,6 +201,19 @@ def watcher(
 class _ASTScanner(ast.NodeVisitor):
     def __init__(self) -> None:
         self.errors: list[str] = []
+
+    @staticmethod
+    def _is_dynamic_arg(node: ast.AST) -> bool:
+        """True если аргумент НЕ является статической строковой константой.
+
+        Любая попытка собрать имя модуля «на лету» (конкатенация через +,
+        f-строка, обращение к переменной, индексация, вызов функции и т.д.)
+        считается динамической и подлежит блокировке в позиции имени модуля.
+        """
+        if isinstance(node, ast.Constant):
+            return False
+        return True
+
     def visit_Import(self, node: ast.Import) -> None:
         for alias in node.names:
             root = alias.name.split(".")[0]
@@ -214,18 +227,26 @@ class _ASTScanner(ast.NodeVisitor):
                 self.errors.append(f"Blocked import: {node.module} (line {node.lineno})")
         self.generic_visit(node)
     def visit_Call(self, node: ast.Call) -> None:
+        # importlib.import_module(...)
         if isinstance(node.func, ast.Attribute) and node.func.attr == "import_module":
             if isinstance(node.func.value, ast.Name) and node.func.value.id == "importlib":
-                if node.args and isinstance(node.args[0], ast.Constant):
+                if not node.args:
+                    self.errors.append(
+                        f"Blocked importlib.import_module without arguments (line {node.lineno})"
+                    )
+                elif self._is_dynamic_arg(node.args[0]):
+                    # Любая нестроковая константа: BinOp ("sub"+"process"),
+                    # JoinedStr (f-строка), Name (переменная), Call (вызов),
+                    # Subscript, BoolOp и т.д. — это попытка обхода сканера.
+                    self.errors.append(
+                        f"Blocked dynamic importlib.import_module call (line {node.lineno})"
+                    )
+                else:
                     root = str(node.args[0].value).split(".")[0]
                     if root in _BLOCKED_IMPORTS:
                         self.errors.append(
                             f"Blocked importlib.import_module: {node.args[0].value!r} (line {node.lineno})"
                         )
-                else:
-                    self.errors.append(
-                        f"Blocked dynamic importlib.import_module call (line {node.lineno})"
-                    )
         if isinstance(node.func, ast.Name) and node.func.id in ("exec", "eval"):
             for arg in node.args:
                 if isinstance(arg, ast.Call):
@@ -242,17 +263,25 @@ class _ASTScanner(ast.NodeVisitor):
                             self.errors.append(
                                 f"Blocked obfuscated {node.func.id}() via __import__ chain (line {node.lineno})"
                             )
+        # __import__(...)
         if isinstance(node.func, ast.Name) and node.func.id == "__import__":
-            if node.args and isinstance(node.args[0], ast.Constant):
+            if not node.args:
+                self.errors.append(
+                    f"Blocked __import__ without arguments (line {node.lineno})"
+                )
+            elif self._is_dynamic_arg(node.args[0]):
+                # BinOp ("sub"+"process"), JoinedStr (f-строка), Name, Call,
+                # Subscript и любые другие выражения, не являющиеся
+                # литералом — динамика.
+                self.errors.append(
+                    f"Blocked dynamic __import__ call (line {node.lineno})"
+                )
+            else:
                 root = str(node.args[0].value).split(".")[0]
                 if root in _BLOCKED_IMPORTS:
                     self.errors.append(
                         f"Blocked __import__: {node.args[0].value} (line {node.lineno})"
                     )
-            else:
-                self.errors.append(
-                    f"Blocked dynamic __import__ call (line {node.lineno})"
-                )
         if isinstance(node.func, ast.Name) and node.func.id == "getattr":
             if len(node.args) >= 2 and isinstance(node.args[1], ast.Constant):
                 attr = str(node.args[1].value)
@@ -261,7 +290,17 @@ class _ASTScanner(ast.NodeVisitor):
                         f"Blocked getattr access to {attr!r} (line {node.lineno})"
                     )
         if isinstance(node.func, ast.Name) and node.func.id in ("eval", "exec", "compile"):
-            if node.args and isinstance(node.args[0], ast.Constant):
+            if not node.args:
+                self.errors.append(
+                    f"Blocked {node.func.id} without arguments (line {node.lineno})"
+                )
+            elif self._is_dynamic_arg(node.args[0]):
+                # Динамический источник (переменная, конкатенация,
+                # f-строка, результат вызова) для eval/exec/compile — запрещаем.
+                self.errors.append(
+                    f"Blocked dynamic {node.func.id} call (line {node.lineno})"
+                )
+            else:
                 src = str(node.args[0].value)
                 low = src.lower()
                 bad_tokens = list(_BLOCKED_IMPORTS) + ["__import__", "__builtins__", "os.system", "os.popen", "os.exec"]
@@ -271,10 +310,6 @@ class _ASTScanner(ast.NodeVisitor):
                             f"Blocked {node.func.id}() containing {blocked!r} (line {node.lineno})"
                         )
                         break
-            else:
-                self.errors.append(
-                    f"Blocked dynamic {node.func.id} call (line {node.lineno})"
-                )
         if isinstance(node.func, ast.Attribute):
             attr_name = node.func.attr
             base = node.func.value
