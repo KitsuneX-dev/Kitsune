@@ -261,7 +261,6 @@ class InfoModule(KitsuneModule):
         media = InputMediaWebPage(
             url=str(banner_url),
             force_large_media=True,
-            invert_media=invert_media,
             optional=True,
         )
         request = functions.messages.SendMediaRequest(
@@ -270,6 +269,7 @@ class InfoModule(KitsuneModule):
             message=caption or "",
             entities=entities,
             reply_markup=markup,
+            invert_media=invert_media,
             noforwards=True,
         )
         result = await self.client(request)
