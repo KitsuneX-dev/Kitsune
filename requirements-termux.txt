@@ -1,5 +1,4 @@
 telethon>=1.36.0
-# pyrogram / TgCrypto-pyrofork удалены — в коде не использовались.
 tgcrypto>=1.2.5
 hydrogram>=0.1.4
 aiohttp>=3.9.3
