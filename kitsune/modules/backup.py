@@ -136,11 +136,11 @@ class BackupModule(KitsuneModule):
         "restoring":      "⏳ Восстанавливаю базу данных...",
         "restored":       "✅ База данных восстановлена. Перезапустите бота.",
         "bad_file":       "❌ Неверный формат. Ожидается .json или .backup",
-        "mods_creating":  "⏳ Собираю файлы модулей...",
-        "mods_done":      "✅ Бэкап модулей отправлен ({count} файлов).",
+        "mods_creating":  "⏳ Собираю файлы модулей и конфиги...",
+        "mods_done":      "✅ Бэкап модулей отправлен ({count} файлов, {cfg} конфигов).",
         "mods_no_mods":   "❌ Нет установленных пользовательских модулей.",
-        "mods_restoring": "⏳ Восстанавливаю модули...",
-        "mods_restored":  "✅ Модули восстановлены: {count} шт. Перезапустите бота.",
+        "mods_restoring": "⏳ Восстанавливаю модули и конфиги...",
+        "mods_restored":  "✅ Модули восстановлены: {count} шт., конфигов: {cfg}. Перезапустите бота.",
         "mods_bad_file":  "❌ Неверный формат. Ожидается .zip или .backup",
         "all_creating":   "⏳ Создаю полный бэкап (БД + все модули)...",
         "all_done":       "✅ Полный бэкап отправлен.",
@@ -170,7 +170,7 @@ class BackupModule(KitsuneModule):
         "mods_caption": (
             "🦊 <b>Kitsune Mods Backup</b>\n"
             "🕐 {ts}\n"
-            "📦 Файлов: {count}\n"
+            "📦 Файлов: {count} | Конфигов: {cfg}\n"
             "📋 Ответь: <code>.restoremods</code>"
         ),
         "all_caption": (
@@ -188,8 +188,8 @@ class BackupModule(KitsuneModule):
         "restore_form_mods": (
             "🦊 <b>Управление бэкапом модулей</b>\n"
             "🕐 {ts}\n"
-            "📦 Файлов: {count}\n\n"
-            "Нажми кнопку, чтобы восстановить модули из этого бэкапа."
+            "📦 Файлов: {count} | Конфигов: {cfg}\n\n"
+            "Нажми кнопку, чтобы восстановить модули и конфиги из этого бэкапа."
         ),
         "restore_form_all": (
             "🦊 <b>Управление полным бэкапом</b>\n"
@@ -199,7 +199,7 @@ class BackupModule(KitsuneModule):
         ),
         "restore_alert":   "⏳ Восстанавливаю...",
         "restore_done_db":   "✅ База данных восстановлена из бэкапа.\n🕐 {ts}\n♻️ Перезапустите бота.",
-        "restore_done_mods": "✅ Модули восстановлены ({count} шт.).\n🕐 {ts}\n♻️ Перезапустите бота.",
+        "restore_done_mods": "✅ Модули восстановлены ({count} шт., конфигов: {cfg}).\n🕐 {ts}\n♻️ Перезапустите бота.",
         "restore_done_all":  "✅ Полное восстановление выполнено ({count} модулей).\n🕐 {ts}\n♻️ Перезапустите бота.",
         "restore_fail":      "❌ Не удалось восстановить: {err}",
         "restore_lost":      "❌ Не нашёл исходный файл бэкапа в чате.",
@@ -210,11 +210,11 @@ class BackupModule(KitsuneModule):
         "restoring":      "⏳ Restoring database...",
         "restored":       "✅ Database restored. Please restart.",
         "bad_file":       "❌ Invalid format. Expected .json or .backup",
-        "mods_creating":  "⏳ Collecting module files...",
-        "mods_done":      "✅ Modules backup sent ({count} files).",
+        "mods_creating":  "⏳ Collecting module files and configs...",
+        "mods_done":      "✅ Modules backup sent ({count} files, {cfg} configs).",
         "mods_no_mods":   "❌ No user modules found.",
-        "mods_restoring": "⏳ Restoring modules...",
-        "mods_restored":  "✅ Modules restored: {count}. Please restart.",
+        "mods_restoring": "⏳ Restoring modules and configs...",
+        "mods_restored":  "✅ Modules restored: {count}, configs: {cfg}. Please restart.",
         "mods_bad_file":  "❌ Invalid format. Expected .zip or .backup",
         "all_creating":   "⏳ Creating full backup (DB + modules)...",
         "all_done":       "✅ Full backup sent.",
@@ -229,15 +229,15 @@ class BackupModule(KitsuneModule):
         "interval_usage": "Usage: <code>.setbackupinterval &lt;hours&gt;</code> or <code>.setbackupinterval off</code>\nAvailable: 2 4 6 8 12 24 48",
         "interval_bad":   "❌ Invalid value. Available: 2 4 6 8 12 24 48 or off",
         "db_caption":     "🦊 <b>Kitsune DB Backup</b>\n🕐 {ts}\n📋 Reply: <code>.restoredb</code>",
-        "mods_caption":   "🦊 <b>Kitsune Mods Backup</b>\n🕐 {ts}\n📦 {count} files\n📋 Reply: <code>.restoremods</code>",
+        "mods_caption":   "🦊 <b>Kitsune Mods Backup</b>\n🕐 {ts}\n📦 {count} files | {cfg} configs\n📋 Reply: <code>.restoremods</code>",
         "all_caption":    "🦊 <b>Kitsune Full Backup</b>\n🕐 {ts}\n📦 {count} files\n📋 Reply: <code>.restoreall</code>",
         "restore_btn":      "🔄 Restore",
         "restore_form_db":  "🦊 <b>DB Backup management</b>\n🕐 {ts}\n\nTap the button to restore the database from this backup.",
-        "restore_form_mods":"🦊 <b>Mods Backup management</b>\n🕐 {ts}\n📦 {count} files\n\nTap the button to restore modules from this backup.",
+        "restore_form_mods":"🦊 <b>Mods Backup management</b>\n🕐 {ts}\n📦 {count} files | {cfg} configs\n\nTap the button to restore modules and configs from this backup.",
         "restore_form_all": "🦊 <b>Full Backup management</b>\n🕐 {ts}\n📦 {count} files\n\nTap the button to restore everything from this backup.",
         "restore_alert":    "⏳ Restoring...",
         "restore_done_db":  "✅ Database restored from backup.\n🕐 {ts}\n♻️ Please restart.",
-        "restore_done_mods":"✅ Modules restored ({count}).\n🕐 {ts}\n♻️ Please restart.",
+        "restore_done_mods":"✅ Modules restored ({count}, configs: {cfg}).\n🕐 {ts}\n♻️ Please restart.",
         "restore_done_all": "✅ Full restore done ({count} modules).\n🕐 {ts}\n♻️ Please restart.",
         "restore_fail":     "❌ Restore failed: {err}",
         "restore_lost":     "❌ Original backup file not found in chat.",
@@ -365,9 +365,29 @@ class BackupModule(KitsuneModule):
             except Exception as e:
                 logger.warning("backup: не удалось прочитать %s: %s", f, e)
         return files
-    def _make_mods_zip(self) -> tuple[bytes, int]:
+
+    def _collect_module_configs(self) -> dict:
+        """Собирает конфиги ВСЕХ модулей (встроенных и кастомных) из DB.
+
+        Каждый модуль хранит настройки под ключом ``kitsune.config.<name>``.
+        Метод возвращает словарь {namespace: {key: value}} для всех таких
+        пространств имён, чтобы их можно было сохранить в configs.json внутри
+        .zip-бэкапа.
+        """
+        configs: dict = {}
+        try:
+            data = self.db._data if hasattr(self.db, "_data") else {}
+            for owner, keys in data.items():
+                if owner.startswith("kitsune.config.") and isinstance(keys, dict) and keys:
+                    configs[owner] = dict(keys)
+        except Exception as exc:
+            logger.warning("backup: не удалось собрать конфиги модулей: %s", exc)
+        return configs
+    def _make_mods_zip(self) -> tuple[bytes, int, int]:
+        """Возвращает (zip_bytes, кол-во .py файлов, кол-во пространств конфигов)."""
         module_files = self._collect_module_files()
         url_map: dict = self.db.get(_DB_LOADER, "user_modules", {})
+        configs: dict = self._collect_module_configs()
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
             for fname, content in module_files:
@@ -376,15 +396,22 @@ class BackupModule(KitsuneModule):
                 "urls.json",
                 json.dumps(url_map, ensure_ascii=False, indent=2),
             )
-        return buf.getvalue(), len(module_files)
-    def _make_full_backup(self) -> tuple[bytes, int]:
-        db_bytes            = self._db_bytes()
-        mods_zip, mod_count = self._make_mods_zip()
+            # configs.json — конфиги ВСЕХ модулей (встроенных + кастомных).
+            # Хранятся под ключами kitsune.config.<module_name>.
+            zf.writestr(
+                "configs.json",
+                json.dumps(configs, ensure_ascii=False, indent=2),
+            )
+        return buf.getvalue(), len(module_files), len(configs)
+    def _make_full_backup(self) -> tuple[bytes, int, int]:
+        """Возвращает (archive_bytes, кол-во модулей, кол-во конфигов)."""
+        db_bytes                      = self._db_bytes()
+        mods_zip, mod_count, cfg_count = self._make_mods_zip()
         archive = io.BytesIO()
         with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as zf:
             zf.writestr("db.json",  db_bytes)
             zf.writestr("mods.zip", mods_zip)
-        return archive.getvalue(), mod_count
+        return archive.getvalue(), mod_count, cfg_count
     async def _search_existing_backup(self) -> int | None:
         found_id: int | None = None
         try:
@@ -731,17 +758,17 @@ class BackupModule(KitsuneModule):
     @command("backupmods", required=OWNER)
     async def backupmods_cmd(self, event) -> None:
         async with ProgressMessage(event, self.strings("mods_creating"), total=3) as prog:
-            mods_zip, count = self._make_mods_zip()
+            mods_zip, count, cfg_count = self._make_mods_zip()
             if count == 0:
                 await prog.done(self.strings("mods_no_mods"))
                 return
             dest    = await self._get_dest(event)
             ts      = self._ts()
             fname   = f"kitsune-mods-{self._fname_ts()}.zip"
-            caption = self.strings("mods_caption").format(ts=ts, count=count)
+            caption = self.strings("mods_caption").format(ts=ts, count=count, cfg=cfg_count)
             await self._send_backup(dest, mods_zip, fname, caption, "mods", ts, count)
-            await prog.done(self.strings("mods_done").format(count=count))
-    async def _do_restore_mods(self, raw: bytes) -> int | None:
+            await prog.done(self.strings("mods_done").format(count=count, cfg=cfg_count))
+    async def _do_restore_mods(self, raw: bytes) -> tuple[int, int] | None:
         mods_zip_bytes = None
         if raw[:2] == b"PK":
             try:
@@ -767,15 +794,16 @@ class BackupModule(KitsuneModule):
             return
         async with ProgressMessage(event, self.strings("mods_restoring"), total=3) as prog:
             raw = await hydro_download(self.client, reply)
-            count = await self._do_restore_mods(raw)
-            if count is None:
+            result = await self._do_restore_mods(raw)
+            if result is None:
                 await prog.done(self.strings("mods_bad_file"))
                 return
-            await prog.done(self.strings("mods_restored").format(count=count))
+            count, cfg_count = result
+            await prog.done(self.strings("mods_restored").format(count=count, cfg=cfg_count))
     @command("backupall", required=OWNER)
     async def backupall_cmd(self, event) -> None:
         async with ProgressMessage(event, self.strings("all_creating"), total=4) as prog:
-            archive_bytes, count = self._make_full_backup()
+            archive_bytes, count, cfg_count = self._make_full_backup()
             dest    = await self._get_dest(event)
             ts      = self._ts()
             fname   = f"kitsune-{self._fname_ts()}.backup"
@@ -814,10 +842,14 @@ class BackupModule(KitsuneModule):
                             merged.setdefault(cb_id, info)
                         self.db.set_sync(_DB_OWNER, "restore_callbacks", merged)
                 await self.db.force_save()
-                count = 0
+                count     = 0
+                cfg_count = 0
                 if "mods.zip" in names:
-                    mods_zip_bytes = zf.open("mods.zip").read()
-                    count = await self._restore_mods_from_zip(mods_zip_bytes)
+                    mods_zip_bytes       = zf.open("mods.zip").read()
+                    count, cfg_count_zip = await self._restore_mods_from_zip(mods_zip_bytes)
+                    # В полном бэкапе конфиги уже восстановлены через db.json выше,
+                    # cfg_count_zip — количество пространств из mods.zip/configs.json
+                    cfg_count = cfg_count_zip
                 return count
         except Exception:
             logger.exception("restoreall: ошибка")
@@ -875,10 +907,11 @@ class BackupModule(KitsuneModule):
                     raise RuntimeError("bad DB format")
                 final = self.strings("restore_done_db").format(ts=ts)
             elif kind == "mods":
-                count = await self._do_restore_mods(raw)
-                if count is None:
+                result = await self._do_restore_mods(raw)
+                if result is None:
                     raise RuntimeError("bad mods format")
-                final = self.strings("restore_done_mods").format(ts=ts, count=count)
+                count, cfg_count = result
+                final = self.strings("restore_done_mods").format(ts=ts, count=count, cfg=cfg_count)
             else:
                 count = await self._do_restore_all(raw)
                 if count is None:
@@ -940,13 +973,17 @@ class BackupModule(KitsuneModule):
         await self.db.set(_DB_OWNER, "last_backup", int(time.time()))
         self._start_auto(h)
         await event.reply(self.strings("interval_set").format(h=h), parse_mode="html")
-    async def _restore_mods_from_zip(self, mods_zip_bytes: bytes) -> int:
+    async def _restore_mods_from_zip(self, mods_zip_bytes: bytes) -> tuple[int, int]:
+        """Возвращает (кол-во восстановленных .py, кол-во восстановленных конфигов)."""
         _USER_MODULES_DIR.mkdir(parents=True, exist_ok=True)
         loader_inst = getattr(self.client, "_kitsune_loader", None)
-        count = 0
+        count     = 0
+        cfg_count = 0
         try:
             with zipfile.ZipFile(io.BytesIO(mods_zip_bytes)) as zf:
                 names = zf.namelist()
+
+                # ── urls.json: карта URL пользовательских модулей ─────────────
                 if "urls.json" in names:
                     try:
                         url_map = json.loads(zf.open("urls.json").read().decode("utf-8"))
@@ -954,6 +991,42 @@ class BackupModule(KitsuneModule):
                             await self.db.set(_DB_LOADER, "user_modules", url_map)
                     except Exception as e:
                         logger.warning("restoremods: urls.json: %s", e)
+
+                # ── configs.json: конфиги встроенных и кастомных модулей ──────
+                if "configs.json" in names:
+                    try:
+                        configs = json.loads(zf.open("configs.json").read().decode("utf-8"))
+                        if isinstance(configs, dict):
+                            for owner, keys in configs.items():
+                                # Принимаем только пространства kitsune.config.*
+                                if not owner.startswith("kitsune.config."):
+                                    continue
+                                if not isinstance(keys, dict):
+                                    continue
+                                for key, val in keys.items():
+                                    self.db.set_sync(owner, key, val)
+                                cfg_count += 1
+                            if cfg_count:
+                                await self.db.force_save()
+                                logger.info(
+                                    "restoremods: конфиги восстановлены (%d пространств)", cfg_count
+                                )
+                                # Перезагружаем конфиги в живые инстансы модулей
+                                try:
+                                    loader = getattr(self.client, "_kitsune_loader", None)
+                                    if loader and hasattr(loader, "_modules"):
+                                        for mod in loader._modules.values():
+                                            if hasattr(mod, "_load_config_from_db"):
+                                                try:
+                                                    mod._load_config_from_db()
+                                                except Exception:
+                                                    pass
+                                except Exception as exc:
+                                    logger.debug("restoremods: hot-reload конфигов не удался: %s", exc)
+                    except Exception as e:
+                        logger.warning("restoremods: configs.json: %s", e)
+
+                # ── .py файлы модулей ─────────────────────────────────────────
                 for name in names:
                     if not name.endswith(".py"):
                         continue
@@ -972,7 +1045,7 @@ class BackupModule(KitsuneModule):
                             logger.warning("restoremods: загрузка %s: %s", fname, e)
         except Exception:
             logger.exception("restoremods: ошибка при разборе mods.zip")
-        return count
+        return count, cfg_count
     def _start_auto(self, interval_h) -> None:
         if self._auto_task and not self._auto_task.done():
             self._auto_task.cancel()
@@ -997,14 +1070,14 @@ class BackupModule(KitsuneModule):
                     self.strings("db_caption").format(ts=ts),
                     "db", ts,
                 )
-                mods_data, count = self._make_mods_zip()
+                mods_data, count, cfg_count = self._make_mods_zip()
                 await self._send_backup(
                     dest, mods_data,
                     f"kitsune-mods-{fts}.zip",
-                    self.strings("mods_caption").format(ts=ts, count=count),
+                    self.strings("mods_caption").format(ts=ts, count=count, cfg=cfg_count),
                     "mods", ts, count,
                 )
-                full_data, count = self._make_full_backup()
+                full_data, count, _cfg = self._make_full_backup()
                 await self._send_backup(
                     dest, full_data,
                     f"kitsune-{fts}.backup",
