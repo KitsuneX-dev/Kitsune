@@ -11,10 +11,6 @@ _BOTFATHER = "BotFather"
 _TOKEN_RE  = re.compile(r"\d+:[A-Za-z0-9_-]{35,}")
 
 async def obtain_token(client: typing.Any, bot_name: str | None = None) -> str | None:
-\
-\
-\
-\
     me = await client.get_me()
     if bot_name is None:
         bot_name = f"kitsune_{me.id}_bot"

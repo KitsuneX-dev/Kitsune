@@ -21,12 +21,8 @@ _DEFAULT_INTERVAL  = 5 * 60
 _DEFAULT_RAM_LIMIT = 85
 _DEFAULT_CPU_LIMIT = 90
 
-                                                                             
+
 async def probe_sqlite(db: typing.Any) -> dict:
-\
-\
-\
-\
     try:
         from ..database.manager import SQLiteBackend
     except Exception:
@@ -58,10 +54,6 @@ async def probe_sqlite(db: typing.Any) -> dict:
     except Exception as exc:
         return {"alive": False, "active": True, "error": f"{type(exc).__name__}: {exc}"}
 async def probe_redis(db: typing.Any) -> dict:
-\
-\
-\
-\
     try:
         from ..database.manager import RedisBackend
     except Exception:
@@ -99,10 +91,6 @@ async def probe_redis(db: typing.Any) -> dict:
             "error": f"{type(exc).__name__}: {exc}",
         }
 async def probe_telegram(client: typing.Any) -> dict:
-\
-\
-\
-\
     if client is None:
         return {"alive": False, "error": "no client"}
     try:
@@ -190,7 +178,6 @@ def collect_system() -> dict:
         pass
     return out
 async def collect_health(client: typing.Any, db: typing.Any) -> dict:
-\
     system = collect_system()
     sqlite_t = asyncio.ensure_future(probe_sqlite(db))
     redis_t = asyncio.ensure_future(probe_redis(db))

@@ -733,7 +733,7 @@ async def _send_startup_banner_via_bot(
         )
         bot_api_id = _to_bot_api_id(group_id)
 
-                                                                       
+
         if os.path.exists(gif_path):
             try:
                 from aiogram.types import FSInputFile
@@ -752,7 +752,7 @@ async def _send_startup_banner_via_bot(
                     anim_exc,
                 )
 
-                                                              
+
         if os.path.exists(png_path):
             try:
                 from aiogram.types import FSInputFile
@@ -771,7 +771,7 @@ async def _send_startup_banner_via_bot(
                     photo_exc,
                 )
 
-                                                            
+
         try:
             await bot.send_message(
                 bot_api_id,

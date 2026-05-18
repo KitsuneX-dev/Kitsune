@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
 
-                                                                             
+
 STATE_CLOSED    = "closed"                          
 STATE_OPEN      = "open"                                    
 STATE_HALF_OPEN = "half_open"                                
@@ -28,26 +28,6 @@ class CircuitBreakerStats:
     total_calls: int = 0
     blocked_calls: int = 0
 class CircuitBreaker:
-\
-\
-\
-\
-\
-\
-\
-\
-\
-\
-\
-\
-\
-\
-\
-\
-\
-\
-\
-\
     def __init__(
         self,
         name: str,
@@ -81,7 +61,6 @@ class CircuitBreaker:
             return False                                
         return True
     async def allow(self) -> bool:
-\
         async with self._lock:
             return self._allow_locked()
     def _allow_locked(self) -> bool:
@@ -228,14 +207,6 @@ def get_breaker(
     )
 @dataclass
 class RetryPolicy:
-\
-\
-\
-\
-\
-\
-\
-\
     base_delay: float = 1.0
     max_delay: float = 60.0
     multiplier: float = 2.0
@@ -260,10 +231,6 @@ async def retry_with_backoff(
     name: str = "anonymous",
     **kwargs: typing.Any,
 ) -> typing.Any:
-\
-\
-\
-\
     pol = policy or RetryPolicy()
     last_exc: BaseException | None = None
     for attempt in range(1, pol.max_attempts + 1):
@@ -296,17 +263,6 @@ async def retry_with_backoff(
     assert last_exc is not None                 
     raise last_exc
 class DegradationFlags:
-\
-\
-\
-\
-\
-\
-\
-\
-\
-\
-\
     def __init__(self) -> None:
         self.hydrogram_failed: bool = False
         self.assets_unavailable: bool = False
@@ -375,7 +331,7 @@ class DegradationFlags:
         )
 flags = DegradationFlags()
 
-                                                                             
+
 __all__ = [
     "STATE_CLOSED",
     "STATE_OPEN",

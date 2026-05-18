@@ -343,12 +343,6 @@ class DatabaseManager:
         return True
     force_set = set_sync
     def clear(self) -> bool:
-\
-\
-\
-\
-\
-\
         for owner, sub in list(self._data.items()):
             for key in list(sub.keys()):
                 self._deleted.add((owner, key))

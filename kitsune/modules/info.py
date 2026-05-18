@@ -5,17 +5,12 @@ import time
 from ..core.loader import KitsuneModule, command, ModuleConfig, ConfigValue
 from ..core.security import OWNER
 
-# Ошибки Telegram, возникающие при попытке отправить webpage-превью:
-# — WebpageCurlFailedError: сервер ТГ не смог скачать картинку (кириллица,
-#                            недоступный хост, 403/404 и т.п.)
-# — WebpageMediaEmptyError: у превью нет пригодного медиа (не картинка и не видео)
-# Обе хотим ловить отдельно, чтобы тихо откатиться на отправку медиа файлом.
+
 try:
     from telethon.errors import WebpageCurlFailedError, WebpageMediaEmptyError
 except Exception:  # pragma: no cover
-    # Старые версии Telethon могут не иметь одного из этих классов;
-    # в этом случае используем «пустые» классы-заглушки — except просто никогда
-    # не сработает, и мы провалимся в общий except Exception ниже.
+
+
     class WebpageCurlFailedError(Exception): pass  # type: ignore
     class WebpageMediaEmptyError(Exception): pass  # type: ignore
 
@@ -234,11 +229,6 @@ class InfoModule(KitsuneModule):
         return result_text, result_entities
     @staticmethod
     def _is_photo_url(url: str) -> bool:
-        """Heuristic: True if URL points to a static photo (jpg/png/webp/bmp).
-
-        Видео (mp4/webm/mov/mkv/avi) и анимации (gif) считаются НЕ фото —
-        для них функция quote_media не должна применяться.
-        """
         if not url:
             return False
         try:
@@ -252,18 +242,16 @@ class InfoModule(KitsuneModule):
             return False
         if path.endswith(photo_exts):
             return True
-        # Если расширение неизвестно — не считаем фото (безопасное поведение,
-        # видео/гифки случайно не сломаем).
+
+
         return False
 
-    # Безопасный лимит подписи к медиа в Telegram (UTF-16 code units): 1024.
-    # Используем чуть меньший порог, чтобы учесть служебные символы/энтити.
+
     _CAPTION_LIMIT = 1024
     _MESSAGE_LIMIT = 4096
 
     @staticmethod
     def _utf16_len(text: str) -> int:
-        """Длина строки в UTF-16 code units (так Telegram считает лимит)."""
         if not text:
             return 0
         return sum(2 if ord(c) > 0xFFFF else 1 for c in text)
@@ -321,15 +309,9 @@ class InfoModule(KitsuneModule):
         return self.client._get_response_message(request, result, input_peer)
 
     async def _send_long_text_protected(self, peer, text, entities, markup):
-        """Отправить длинный текст (без медиа) с защитой от пересылки.
-
-        Используется, когда баннер — видео/GIF, а текст не помещается
-        в подпись (caption, 1024 симв.). В таком случае сначала отправляем
-        медиа без подписи, а текст — отдельным сообщением.
-        """
         from telethon.tl import functions
         input_peer = await self.client.get_input_entity(peer)
-        # SendMessage позволяет до 4096 символов
+
         request = functions.messages.SendMessageRequest(
             peer=input_peer,
             message=text or "",
@@ -342,7 +324,6 @@ class InfoModule(KitsuneModule):
         return self.client._get_response_message(request, result, input_peer)
 
     async def _send_banner_no_caption(self, peer, banner):
-        """Отправить только баннер (видео/GIF) без подписи и без markup."""
         from telethon.tl import functions
         input_peer = await self.client.get_input_entity(peer)
         file_handle, media, _image = await self.client._file_to_media(
@@ -398,15 +379,14 @@ class InfoModule(KitsuneModule):
                 is_photo = self._is_photo_url(banner)
                 use_quote = bool(self.config["quote_media"]) and is_photo
                 text_len = self._utf16_len(parsed_text)
-                # Обнаруживаем признаки blockquote / других блочных entity в исходном HTML.
-                # collapsed/expandable blockquote в подписи к видео/GIF некоторые
-                # клиенты отображают обрезанно — принудительно отправляем текст отдельно.
+
+
                 has_blockquote = bool(re.search(r"<\s*blockquote\b", text, re.IGNORECASE))
                 fits_caption = (text_len <= self._CAPTION_LIMIT) and not has_blockquote
                 try:
                     if use_quote:
-                        # Фото + quote_media: web-preview, лимит 4096.
-                        # Если вдруг текст всё-таки длиннее 4096 — режем безопасно.
+
+
                         if text_len > self._MESSAGE_LIMIT:
                             logger.warning(
                                 "info: текст (%d UTF-16) превышает лимит сообщения %d, будет обрезан",
@@ -424,20 +404,17 @@ class InfoModule(KitsuneModule):
                             await event.message.delete()
                             return
                         except (WebpageCurlFailedError, WebpageMediaEmptyError) as e:
-                            # ТГ не смог скачать/распарсить превью — тихо фолбэк на обычную
-                            # отправку медиа файлом. Не падаем, не спамим traceback в лог.
+
+
                             logger.warning(
                                 "info: Telegram не смог загрузить превью (%s), отправляю как обычное медиа",
                                 type(e).__name__,
                             )
-                            # Проваливаемся в ветку обычной отправки ниже (фактически
-                            # переводим в «как будто use_quote=False»).
+
+
                             use_quote = False
 
-                    # Иначе — обычная отправка медиа.
-                    # Видео/GIF: подпись жёстко ограничена 1024. При наличии
-                    # blockquote в тексте отправка в caption плохо рендерится в некоторых
-                    # клиентах — тогда принудительно разделяем на медиа + отдельный текст.
+
                     if fits_caption:
                         try:
                             await self._send_banner_protected(
@@ -450,17 +427,14 @@ class InfoModule(KitsuneModule):
                             await event.message.delete()
                             return
                         except (WebpageCurlFailedError, WebpageMediaEmptyError) as e:
-                            # На _send_banner_protected это почти никогда не летит (файл
-                            # отправляется бинарно), но если прилетело — также фолбэк.
+
+
                             logger.warning(
                                 "info: отправка медиа с caption не удалась (%s), отправляю раздельно",
                                 type(e).__name__,
                             )
-                            # падаем в ветку раздельной отправки ниже
 
-                    # Отправляем медиа без подписи + текст отдельным сообщением
-                    # (лимит 4096), чтобы ничего не обрезалось и blockquote
-                    # отображался корректно во всех клиентах.
+
                     logger.info(
                         "info: text_len=%d, has_blockquote=%s — раздельная отправка",
                         text_len, has_blockquote,
@@ -488,17 +462,17 @@ class InfoModule(KitsuneModule):
                     await event.message.delete()
                     return
                 except (WebpageCurlFailedError, WebpageMediaEmptyError) as e:
-                    # Самый верхний фолбэк — если все попытки отправить медиа провалились,
-                    # по крайней мере покажем текст без баннера, а не вывалимся в traceback.
+
+
                     logger.warning(
                         "info: все попытки отправить баннер провалились (%s), показываю текст без медиа",
                         type(e).__name__,
                     )
-                    # проваливаемся в ветку «без баннера» ниже
+
                 except Exception:
                     logger.exception("info: не удалось отправить баннер с подписью")
-            # Без баннера — просто редактируем исходное сообщение.
-            # Если текст длиннее лимита редактирования — отправим отдельным сообщением.
+
+
             text_len = self._utf16_len(parsed_text)
             if text_len <= self._MESSAGE_LIMIT:
                 await event.message.edit(parsed_text, formatting_entities=entities, buttons=markup)

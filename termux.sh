@@ -143,19 +143,15 @@ step "Hydrogram"
 pip_install "hydrogram" && \
     ok "Hydrogram установлен" || warn "Hydrogram не установился — продолжаю без него"
 
-# tgcrypto: сначала prebuilt wheel (быстро).
-# В Termux Python.h уже входит в пакет python — отдельный *-dev не нужен.
-# Если wheel недоступен — собираем из исходников с CFLAGS/LDFLAGS,
-# которые уже выставлены выше в блоке "Переменные окружения для сборки".
 if pip install --prefer-binary --no-cache-dir -q "tgcrypto>=1.2.5" 2>/dev/null; then
     ok "tgcrypto установлен (prebuilt wheel)"
 else
     info "Prebuilt wheel не найден — собираю tgcrypto из исходников..."
     _BUILD_OK=false
-    # Пробуем с уже выставленными CFLAGS/LDFLAGS
+
     if pip install --no-cache-dir -q "tgcrypto>=1.2.5" 2>/dev/null; then
         _BUILD_OK=true
-    # Fallback: отключаем изоляцию сборки
+
     elif pip install --no-build-isolation --no-cache-dir -q "tgcrypto>=1.2.5" 2>/dev/null; then
         _BUILD_OK=true
     fi

@@ -148,30 +148,6 @@ def command(
     aliases: list[str] | None = None,
     incoming: bool = False,
 ) -> typing.Callable:
-\
-\
-\
-\
-\
-\
-\
-\
-\
-\
-\
-\
-\
-\
-\
-\
-\
-\
-\
-\
-\
-\
-\
-\
     if required is not None and not isinstance(required, (int, str)):
         raise TypeError(
             f"@command(required=...) must be int (bitmask) or str (role name), "
@@ -204,12 +180,6 @@ class _ASTScanner(ast.NodeVisitor):
 
     @staticmethod
     def _is_dynamic_arg(node: ast.AST) -> bool:
-        """True если аргумент НЕ является статической строковой константой.
-
-        Любая попытка собрать имя модуля «на лету» (конкатенация через +,
-        f-строка, обращение к переменной, индексация, вызов функции и т.д.)
-        считается динамической и подлежит блокировке в позиции имени модуля.
-        """
         if isinstance(node, ast.Constant):
             return False
         return True
@@ -227,7 +197,7 @@ class _ASTScanner(ast.NodeVisitor):
                 self.errors.append(f"Blocked import: {node.module} (line {node.lineno})")
         self.generic_visit(node)
     def visit_Call(self, node: ast.Call) -> None:
-        # importlib.import_module(...)
+
         if isinstance(node.func, ast.Attribute) and node.func.attr == "import_module":
             if isinstance(node.func.value, ast.Name) and node.func.value.id == "importlib":
                 if not node.args:
@@ -235,9 +205,8 @@ class _ASTScanner(ast.NodeVisitor):
                         f"Blocked importlib.import_module without arguments (line {node.lineno})"
                     )
                 elif self._is_dynamic_arg(node.args[0]):
-                    # Любая нестроковая константа: BinOp ("sub"+"process"),
-                    # JoinedStr (f-строка), Name (переменная), Call (вызов),
-                    # Subscript, BoolOp и т.д. — это попытка обхода сканера.
+
+
                     self.errors.append(
                         f"Blocked dynamic importlib.import_module call (line {node.lineno})"
                     )
@@ -263,16 +232,15 @@ class _ASTScanner(ast.NodeVisitor):
                             self.errors.append(
                                 f"Blocked obfuscated {node.func.id}() via __import__ chain (line {node.lineno})"
                             )
-        # __import__(...)
+
         if isinstance(node.func, ast.Name) and node.func.id == "__import__":
             if not node.args:
                 self.errors.append(
                     f"Blocked __import__ without arguments (line {node.lineno})"
                 )
             elif self._is_dynamic_arg(node.args[0]):
-                # BinOp ("sub"+"process"), JoinedStr (f-строка), Name, Call,
-                # Subscript и любые другие выражения, не являющиеся
-                # литералом — динамика.
+
+
                 self.errors.append(
                     f"Blocked dynamic __import__ call (line {node.lineno})"
                 )
@@ -295,8 +263,8 @@ class _ASTScanner(ast.NodeVisitor):
                     f"Blocked {node.func.id} without arguments (line {node.lineno})"
                 )
             elif self._is_dynamic_arg(node.args[0]):
-                # Динамический источник (переменная, конкатенация,
-                # f-строка, результат вызова) для eval/exec/compile — запрещаем.
+
+
                 self.errors.append(
                     f"Blocked dynamic {node.func.id} call (line {node.lineno})"
                 )

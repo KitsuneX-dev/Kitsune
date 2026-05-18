@@ -8,13 +8,13 @@ logger = logging.getLogger(__name__)
 
 _DB_KEY = "kitsune.notifier"
 
-                                                                          
+
 _BOTFATHER_LOCK: asyncio.Lock = asyncio.Lock()
 
-                                                          
+
 _TOKEN_RE = re.compile(r"(\d{8,}:[A-Za-z0-9_-]{35,})")
 
-                                                                       
+
 _CHOOSE_BOT_HINTS = (
     "choose a bot",
     "select a bot",
@@ -83,15 +83,6 @@ class BotSetup:
         except Exception:
             logger.warning("BotSetup: could not write token to config.toml")
     async def find_existing_bot(self, tg_id: int) -> tuple[str | None, str | None]:
-\
-\
-\
-\
-\
-\
-\
-\
-\
         try:
             async with _BOTFATHER_LOCK:
                 async with self._client.conversation("@BotFather", timeout=40) as conv:
@@ -138,11 +129,6 @@ class BotSetup:
             logger.debug("BotSetup: find_existing_bot failed — %s", exc)
         return None, None
     async def _bot_already_has_avatar(self, uname: str) -> bool:
-\
-\
-\
-\
-\
         try:
             from ...assets import _DB_NS as _ASSETS_NS                
         except Exception:
@@ -168,12 +154,6 @@ class BotSetup:
             logger.debug("BotSetup: _bot_already_has_avatar(%s) failed — %s", uname, exc)
         return False
     async def _set_bot_avatar(self, uname: str) -> None:
-\
-\
-\
-\
-\
-\
         try:
             from ...assets import BOT_AVATAR, _DB_NS                
         except Exception as imp_exc:
@@ -256,11 +236,6 @@ class BotSetup:
             logger.error("BotSetup: create_bot failed — %s", exc)
         return None, None
     async def get_token_for_bot(self, username: str) -> str | None:
-\
-\
-\
-\
-\
         username = username.lstrip("@")
         try:
             async with _BOTFATHER_LOCK:
@@ -290,10 +265,6 @@ class BotSetup:
             logger.debug("BotSetup: list_kitsune_bots failed — %s", exc)
         return results
     async def _bot_inline_already_enabled(self, username: str) -> bool:
-\
-\
-\
-\
         try:
             async with self._client.conversation("@BotFather", timeout=20) as conv:
                 await conv.send_message(f"@{username}")
@@ -347,18 +318,6 @@ class BotSetup:
         username: str,
         buttons: list[str],
     ) -> str | None:
-\
-\
-\
-\
-\
-\
-\
-\
-\
-\
-\
-\
         username = username.lstrip("@")
         try:
             btn = _pick_bot_button(buttons, username)

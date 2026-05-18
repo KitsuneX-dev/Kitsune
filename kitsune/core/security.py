@@ -57,12 +57,6 @@ class SecurityManager:
         self._cache: dict[tuple[int, int], tuple[int, float]] = {}
         self._lock = asyncio.Lock()
     async def init(self) -> None:
-\
-\
-\
-\
-\
-\
         cached_me = getattr(self._client, "tg_me", None)
         cached_id = getattr(self._client, "tg_id", None)
         if cached_me is not None:

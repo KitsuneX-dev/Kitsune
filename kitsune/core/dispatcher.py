@@ -235,15 +235,6 @@ class CommandDispatcher:
         *,
         module: typing.Any = None,
     ) -> None:
-\
-\
-\
-\
-\
-\
-\
-\
-\
         if module is None:
             module = getattr(handler, "__self__", None)
         self._commands[name.lower()] = (handler, required, module)
@@ -258,12 +249,6 @@ class CommandDispatcher:
     def unregister_command(self, name: str) -> None:
         self._commands.pop(name.lower(), None)
     def _resolve_role_db_owner(self, module: typing.Any) -> str:
-\
-\
-\
-\
-\
-\
         if module is None:
             return ""
         custom = getattr(module, "role_db_owner", None)
@@ -272,9 +257,6 @@ class CommandDispatcher:
         name = getattr(module, "name", None) or type(module).__name__
         return str(name)
     def _get_role_users(self, module: typing.Any, role_name: str) -> list[int]:
-\
-\
-\
         owner = self._resolve_role_db_owner(module)
         if not owner or not role_name:
             return []
@@ -289,11 +271,6 @@ class CommandDispatcher:
                 continue
         return users
     def _check_role(self, module: typing.Any, role_name: str, sender_id: int) -> bool:
-\
-\
-\
-\
-\
         if not sender_id:
             return False
         own_id = getattr(self._client, "tg_id", None)

@@ -144,7 +144,7 @@ if $IS_TERMUX; then
     ok "Termux-пакеты готовы"
 elif $IS_UBUNTU; then
     PYVER=$($PYTHON -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
-    # python${PYVER}-dev нужен для сборки C-расширений (tgcrypto, etc.) — Python.h
+
     apt_install git curl build-essential libssl-dev libffi-dev \
         libjpeg-dev zlib1g-dev libpq-dev \
         "python${PYVER}-venv" python3-venv \
@@ -298,16 +298,13 @@ else
     ok "pyaes уже установлен — пропускаю"
 fi
 rm -rf "$_PYAES_TMP"
-# tgcrypto: сначала пробуем prebuilt wheel (быстро, без компилятора).
-# Если wheel для текущей платформы/версии Python отсутствует — пробуем
-# собрать из исходников. Для этого нужен python3.X-dev (Python.h), который
-# уже был установлен выше. При неудаче — мягкое предупреждение, не фатально.
+
 if "$PIP" install --prefer-binary --no-cache-dir --no-warn-script-location \
        --disable-pip-version-check --quiet "tgcrypto>=1.2.5" 2>/dev/null; then
     ok "tgcrypto установлен (prebuilt wheel)"
 else
     info "Prebuilt wheel не найден — собираю tgcrypto из исходников..."
-    # Передаём явный путь к заголовкам Python на случай нестандартного окружения
+
     _PY_INC=$("$PYTHON_VENV" -c "import sysconfig; print(sysconfig.get_path('include'))" 2>/dev/null || true)
     _BUILD_OK=false
     if [[ -n "$_PY_INC" && -f "$_PY_INC/Python.h" ]]; then

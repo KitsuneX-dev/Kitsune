@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 _LARGE_FILE_THRESHOLD = 10 * 1024 * 1024
 
-                                                   
+
 _HYDRO_FAIL_THRESHOLD = 3                                                      
 _HYDRO_REVIVE_TTL_S   = 300.0                                  
 
@@ -52,10 +52,6 @@ def _hydro_record_success() -> None:
     except Exception:
         pass
 def _hydro(client: typing.Any) -> typing.Any | None:
-\
-\
-\
-\
     if _is_hydro_dead():
         return None
     return getattr(client, "hydrogram", None)

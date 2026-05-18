@@ -126,10 +126,6 @@ def command(
     aliases: list[str] | None = None,
     incoming: bool = False,
 ) -> typing.Callable:
-\
-\
-\
-\
     if required is not None and not isinstance(required, (int, str)):
         raise TypeError(
             f"@command(required=...) must be int (bitmask) or str (role name), "

@@ -1023,8 +1023,6 @@ class SetupServer:
             logger.exception("setup: /api/2fa (hydrogram) error")
             return self._err(str(exc))
     async def _finalize_hydrogram(self) -> None:
-\
-\
         if self._hydro_client is not None:
             try:
                 await self._hydro_client.disconnect()

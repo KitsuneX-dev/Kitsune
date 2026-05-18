@@ -5,8 +5,7 @@ import time
 from ..core.loader import KitsuneModule, command, ModuleConfig, ConfigValue
 from ..core.security import OWNER
 
-# Аналогично info.py — ловим ошибки загрузки webpage/медиа Telegram'ом
-# (кириллица в URL, недоступный хост, etc.) и показываем текст без медиа.
+
 try:
     from telethon.errors import WebpageCurlFailedError, WebpageMediaEmptyError
 except Exception:  # pragma: no cover
@@ -191,10 +190,8 @@ class PingModule(KitsuneModule):
         if media_url:
             try:
                 parsed_text, entities = self._parse_html_with_tg_emoji(text)
-                # Подпись к видео/GIF в Telegram ограничена 1024 UTF-16 code units.
-                # Если текст больше или содержит blockquote (в caption отображается
-                # с багами в некоторых клиентах) — отправляем медиа без подписи
-                # и текст отдельным сообщением (лимит 4096).
+
+
                 text_len = sum(2 if ord(c) > 0xFFFF else 1 for c in parsed_text)
                 has_blockquote = bool(re.search(r"<\s*blockquote\b", text, re.IGNORECASE))
                 _CAPTION_LIMIT = 1024
@@ -208,7 +205,7 @@ class PingModule(KitsuneModule):
                             formatting_entities=entities,
                         )
                     else:
-                        # Медиа без подписи + текст отдельным сообщением
+
                         logger.info(
                             "ping: text_len=%d has_blockquote=%s — раздельная отправка",
                             text_len, has_blockquote,
@@ -225,8 +222,8 @@ class PingModule(KitsuneModule):
                         pass
                     return
                 except (WebpageCurlFailedError, WebpageMediaEmptyError) as e:
-                    # ТГ не смог скачать медиа по ссылке — вежливый фолбэк:
-                    # отправляем только текст без traceback'а в логе.
+
+
                     logger.warning(
                         "ping: Telegram не смог загрузить медиа по ссылке (%s), отправляю только текст",
                         type(e).__name__,

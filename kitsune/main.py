@@ -174,11 +174,6 @@ def _release_hydro_lock() -> None:
 _HYDRO_MIN_SESSION_BYTES = 4096
 
 def _purge_bad_hydro_session(session_file: Path, reason: str) -> None:
-\
-\
-\
-\
-\
     try:
         for suffix in ("", "-journal", ".wal", ".shm"):
             p = Path(str(session_file) + suffix)
@@ -196,11 +191,6 @@ async def _hydrogram_web_reauth(
     get_config_fn,
     web_port: int,
 ) -> bool:
-\
-\
-\
-\
-\
     try:
         from .web.setup import SetupServer
     except Exception:
@@ -862,10 +852,6 @@ async def _startup(args: argparse.Namespace) -> None:
             logger.exception("main: session encrypt failed")
         logger.info("main: goodbye 🦊")
 async def _safe_force_reconnect(client: Any) -> bool:
-\
-\
-\
-\
     sender = getattr(client, "_sender", None)
     if sender is not None:
         for attr in ("_send_loop_handle", "_recv_loop_handle"):
