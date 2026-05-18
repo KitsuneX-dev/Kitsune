@@ -144,10 +144,14 @@ if $IS_TERMUX; then
     ok "Termux-пакеты готовы"
 elif $IS_UBUNTU; then
     PYVER=$($PYTHON -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+    # python${PYVER}-dev нужен для сборки C-расширений (tgcrypto, etc.) — Python.h
     apt_install git curl build-essential libssl-dev libffi-dev \
         libjpeg-dev zlib1g-dev libpq-dev \
         "python${PYVER}-venv" python3-venv \
-        && ok "Системные пакеты — готово" || true
+        "python${PYVER}-dev" \
+        && ok "Системные пакеты — готово" \
+        || { apt_install python3-dev && ok "Системные пакеты — готово (с python3-dev fallback)"; } \
+        || true
 fi
 
 if $IS_UBUNTU; then
@@ -294,11 +298,34 @@ else
     ok "pyaes уже установлен — пропускаю"
 fi
 rm -rf "$_PYAES_TMP"
-"$PIP" install --prefer-binary --no-cache-dir --no-warn-script-location \
-    --disable-pip-version-check --quiet "tgcrypto>=1.2.5" \
-    || "$PIP" install --no-build-isolation --no-cache-dir --no-warn-script-location \
-    --disable-pip-version-check --quiet "tgcrypto>=1.2.5" \
-    || warn "tgcrypto не установился — Hydrogram будет работать без C-ускорения"
+# tgcrypto: сначала пробуем prebuilt wheel (быстро, без компилятора).
+# Если wheel для текущей платформы/версии Python отсутствует — пробуем
+# собрать из исходников. Для этого нужен python3.X-dev (Python.h), который
+# уже был установлен выше. При неудаче — мягкое предупреждение, не фатально.
+if "$PIP" install --prefer-binary --no-cache-dir --no-warn-script-location \
+       --disable-pip-version-check --quiet "tgcrypto>=1.2.5" 2>/dev/null; then
+    ok "tgcrypto установлен (prebuilt wheel)"
+else
+    info "Prebuilt wheel не найден — собираю tgcrypto из исходников..."
+    # Передаём явный путь к заголовкам Python на случай нестандартного окружения
+    _PY_INC=$("$PYTHON_VENV" -c "import sysconfig; print(sysconfig.get_path('include'))" 2>/dev/null || true)
+    _BUILD_OK=false
+    if [[ -n "$_PY_INC" && -f "$_PY_INC/Python.h" ]]; then
+        CFLAGS="-I$_PY_INC" "$PIP" install --no-cache-dir --no-warn-script-location \
+            --disable-pip-version-check --quiet "tgcrypto>=1.2.5" 2>/dev/null \
+            && _BUILD_OK=true
+    fi
+    if ! $_BUILD_OK; then
+        "$PIP" install --no-build-isolation --no-cache-dir --no-warn-script-location \
+            --disable-pip-version-check --quiet "tgcrypto>=1.2.5" 2>/dev/null \
+            && _BUILD_OK=true
+    fi
+    if $_BUILD_OK; then
+        ok "tgcrypto установлен (собран из исходников)"
+    else
+        warn "tgcrypto не установился — Hydrogram будет работать без C-ускорения"
+    fi
+fi
 
 "$PIP" install --no-cache-dir -r requirements.txt \
     --no-warn-script-location --disable-pip-version-check --quiet \
