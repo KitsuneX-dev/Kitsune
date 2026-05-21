@@ -1,5 +1,7 @@
 from __future__ import annotations
+import asyncio
 import logging
+import random
 import re
 import time
 from ..core.loader import KitsuneModule, command, ModuleConfig, ConfigValue
@@ -8,26 +10,32 @@ from ..core.security import OWNER
 
 try:
     from telethon.errors import WebpageCurlFailedError, WebpageMediaEmptyError
-except Exception:  # pragma: no cover
-    class WebpageCurlFailedError(Exception): pass  # type: ignore
-    class WebpageMediaEmptyError(Exception): pass  # type: ignore
+except Exception:
+    class WebpageCurlFailedError(Exception): pass
+    class WebpageMediaEmptyError(Exception): pass
+
+try:
+    from telethon.tl.functions import PingRequest
+except Exception:
+    PingRequest = None
+
+try:
+    from telethon.tl.functions.updates import GetStateRequest
+except Exception:
+    GetStateRequest = None
 
 logger = logging.getLogger(__name__)
 
 _DEFAULT_PONG = (
-    "━━━━━━━━━━━━━━\n"
-    " \n"
-    "🛰 Задержка: <code>{ms:.0f} мс</code>\n"
-    "⏱ Аптайм: <code>{uptime}</code>\n"
-    "💠 Версия: <code>{version}</code>\n"
-    "✅ Статус: <code>Stable Release</code>\n"
-    " \n"
-    "━━━━━━━━━━━━━━"
+    "⛩ <b>𝙆𝙞𝙩𝙨𝙪𝙣𝙚 𝙋𝙞𝙣𝙜</b>\n"
+    " ▫️ \n"
+    "<blockquote> 🏮 <b>Отклик:</b> <code>{ms:.0f} мс</code>\n"
+    " 🌀 <b>Аптайм:</b> <code>{uptime}</code></blockquote>"
 )
 
 _EMOJI_TAG  = re.compile(r'<emoji\s+id=["\']?(\d+)["\']?>(.*?)</emoji>', re.DOTALL)
-
 _EMOJI_BRACE = re.compile(r'\{emoji:(\d+):([^}]*)\}')
+
 
 def _resolve_custom_emoji(text: str) -> str:
     def _to_tg(eid: str, fallback: str) -> str:
@@ -35,21 +43,53 @@ def _resolve_custom_emoji(text: str) -> str:
     text = _EMOJI_TAG.sub(lambda m: _to_tg(m.group(1), m.group(2)), text)
     text = _EMOJI_BRACE.sub(lambda m: _to_tg(m.group(1), m.group(2)), text)
     return text
+
+
 def _fmt_uptime(seconds: float) -> str:
     seconds = int(seconds)
     days, rem = divmod(seconds, 86400)
     hours, rem = divmod(rem, 3600)
     minutes, _ = divmod(rem, 60)
     parts = []
-    if days:    parts.append(f"{days}д")
-    if hours:   parts.append(f"{hours}ч")
+    if days:
+        parts.append(f"{days}д")
+    if hours:
+        parts.append(f"{hours}ч")
     parts.append(f"{minutes}м")
     return " ".join(parts)
+
+
+async def _measure_latency(client) -> float:
+    samples = []
+    if PingRequest is not None:
+        for _ in range(3):
+            try:
+                ping_id = random.randint(1, 2**62)
+                t0 = time.perf_counter()
+                await asyncio.wait_for(client(PingRequest(ping_id=ping_id)), timeout=5.0)
+                samples.append((time.perf_counter() - t0) * 1000.0)
+            except Exception:
+                break
+    if not samples and GetStateRequest is not None:
+        for _ in range(3):
+            try:
+                t0 = time.perf_counter()
+                await asyncio.wait_for(client(GetStateRequest()), timeout=5.0)
+                samples.append((time.perf_counter() - t0) * 1000.0)
+            except Exception:
+                break
+    if not samples:
+        return float("nan")
+    samples.sort()
+    return samples[len(samples) // 2]
+
+
 class PingModule(KitsuneModule):
     name        = "ping"
     description = "Пинг и базовая информация"
     author      = "Yushi"
-    version     = "1.4.0"
+    version     = "1.5.0"
+
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.config = ModuleConfig(
@@ -74,6 +114,7 @@ class PingModule(KitsuneModule):
                 ),
             ),
         )
+
     strings_ru = {
         "me": (
             "👤 <b>Профиль</b>\n\n"
@@ -90,16 +131,20 @@ class PingModule(KitsuneModule):
             "👤 ID отправителя: <code>{sid}</code>"
         ),
     }
+
     _start_time: float = time.time()
+
     async def on_load(self) -> None:
         PingModule._start_time = time.time()
         await self.db.set("kitsune.ping", "start_time", PingModule._start_time)
+
     def _get_platform(self) -> str:
         import platform as pf, os
         if os.environ.get("TERMUX_VERSION") or os.path.isdir("/data/data/com.termux"):
             return "📱 Termux"
         s = pf.system()
         return {"Linux": "🐧 Linux", "Windows": "🪟 Windows", "Darwin": "🍎 macOS"}.get(s, s)
+
     def _get_cpu_ram(self) -> tuple[str, str]:
         try:
             import psutil
@@ -109,6 +154,7 @@ class PingModule(KitsuneModule):
             return cpu, ram
         except Exception:
             return "—", "—"
+
     @staticmethod
     def _parse_html_with_tg_emoji(html_text: str):
         from telethon.extensions import html as tl_html
@@ -157,12 +203,14 @@ class PingModule(KitsuneModule):
             result_entities += list(ents_tail or [])
         result_entities.sort(key=lambda e: e.offset)
         return result_text, result_entities
+
     @command("ping", required=OWNER)
     async def ping_cmd(self, event) -> None:
         from ..version import __version_str__
-        start = time.perf_counter()
         msg = await event.reply("⏳", parse_mode="html")
-        ms = round((time.perf_counter() - start) * 1000)
+        latency_ms = await _measure_latency(self.client)
+        if latency_ms != latency_ms:
+            latency_ms = 0.0
         stored_start = self.db.get("kitsune.ping", "start_time", None)
         uptime_sec   = time.time() - (float(stored_start) if stored_start else self._start_time)
         uptime_str   = _fmt_uptime(uptime_sec)
@@ -173,7 +221,7 @@ class PingModule(KitsuneModule):
             cpu, ram = self._get_cpu_ram()
             try:
                 text = custom.format(
-                    ms=ms,
+                    ms=latency_ms,
                     uptime=uptime_str,
                     version=__version_str__,
                     prefix=prefix,
@@ -184,14 +232,16 @@ class PingModule(KitsuneModule):
             except KeyError:
                 text = custom
         else:
-            text = _DEFAULT_PONG.format(ms=ms, uptime=uptime_str, version=__version_str__)
+            text = _DEFAULT_PONG.format(
+                ms=latency_ms,
+                uptime=uptime_str,
+                version=__version_str__,
+            )
         text = _resolve_custom_emoji(text)
         media_url = self.config["media_url"] if self.config else None
         if media_url:
             try:
                 parsed_text, entities = self._parse_html_with_tg_emoji(text)
-
-
                 text_len = sum(2 if ord(c) > 0xFFFF else 1 for c in parsed_text)
                 has_blockquote = bool(re.search(r"<\s*blockquote\b", text, re.IGNORECASE))
                 _CAPTION_LIMIT = 1024
@@ -205,7 +255,6 @@ class PingModule(KitsuneModule):
                             formatting_entities=entities,
                         )
                     else:
-
                         logger.info(
                             "ping: text_len=%d has_blockquote=%s — раздельная отправка",
                             text_len, has_blockquote,
@@ -222,8 +271,6 @@ class PingModule(KitsuneModule):
                         pass
                     return
                 except (WebpageCurlFailedError, WebpageMediaEmptyError) as e:
-
-
                     logger.warning(
                         "ping: Telegram не смог загрузить медиа по ссылке (%s), отправляю только текст",
                         type(e).__name__,
@@ -231,6 +278,7 @@ class PingModule(KitsuneModule):
             except Exception:
                 logger.exception("ping: не удалось отправить медиа, отправляю текст")
         await msg.edit(text, parse_mode="html")
+
     @command("setpingmedia", required=OWNER)
     async def setpingmedia_cmd(self, event) -> None:
         args = self.get_args(event).strip()
@@ -246,11 +294,13 @@ class PingModule(KitsuneModule):
         self.config["media_url"] = args
         await self.db.set("kitsune.config.ping", "media_url", args)
         await event.reply("✅ Медиа для .ping установлено.", parse_mode="html")
+
     @command("resetpingmedia", required=OWNER)
     async def resetpingmedia_cmd(self, event) -> None:
         self.config["media_url"] = None
         await self.db.delete("kitsune.config.ping", "media_url")
         await event.reply("✅ Медиа для .ping удалено.", parse_mode="html")
+
     @command("me", required=OWNER)
     async def me_cmd(self, event) -> None:
         me = await self.client.get_me()
@@ -266,6 +316,7 @@ class PingModule(KitsuneModule):
             ),
             parse_mode="html",
         )
+
     @command("id", required=OWNER)
     async def id_cmd(self, event) -> None:
         reply = await event.message.get_reply_message()

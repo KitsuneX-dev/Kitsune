@@ -371,10 +371,10 @@ class InlineManager:
                             results=[
                                 InlineQueryResultArticle(
                                     id=str(uuid.uuid4()),
-                                    title=f"✅ Применить: {value_preview[:50]}",
+                                    title=f"Применить: {value_preview[:50]}",
                                     description="Нажми чтобы сохранить значение",
                                     input_message_content=InputTextMessageContent(
-                                        message_text="✅",
+                                        message_text="\u2063",
                                         parse_mode="HTML",
                                         disable_web_page_preview=True,
                                     ),
