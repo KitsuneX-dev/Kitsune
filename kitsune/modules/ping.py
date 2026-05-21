@@ -28,7 +28,6 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_PONG = (
     "⛩ <b>𝙆𝙞𝙩𝙨𝙪𝙣𝙚 𝙋𝙞𝙣𝙜</b>\n"
-    " ▫️ \n"
     "<blockquote> 🏮 <b>Отклик:</b> <code>{ms:.0f} мс</code>\n"
     " 🌀 <b>Аптайм:</b> <code>{uptime}</code></blockquote>"
 )
@@ -211,6 +210,7 @@ class PingModule(KitsuneModule):
         latency_ms = await _measure_latency(self.client)
         if latency_ms != latency_ms:
             latency_ms = 0.0
+        latency_int = int(round(latency_ms))
         stored_start = self.db.get("kitsune.ping", "start_time", None)
         uptime_sec   = time.time() - (float(stored_start) if stored_start else self._start_time)
         uptime_str   = _fmt_uptime(uptime_sec)
@@ -221,7 +221,7 @@ class PingModule(KitsuneModule):
             cpu, ram = self._get_cpu_ram()
             try:
                 text = custom.format(
-                    ms=latency_ms,
+                    ms=latency_int,
                     uptime=uptime_str,
                     version=__version_str__,
                     prefix=prefix,
@@ -256,7 +256,7 @@ class PingModule(KitsuneModule):
                         )
                     else:
                         logger.info(
-                            "ping: text_len=%d has_blockquote=%s — раздельная отправка",
+                            "ping: text_len=%d has_blockquote=%s",
                             text_len, has_blockquote,
                         )
                         await self.client.send_file(event.peer_id, media_url)
@@ -272,11 +272,11 @@ class PingModule(KitsuneModule):
                     return
                 except (WebpageCurlFailedError, WebpageMediaEmptyError) as e:
                     logger.warning(
-                        "ping: Telegram не смог загрузить медиа по ссылке (%s), отправляю только текст",
+                        "ping: Telegram media load failed (%s), sending text only",
                         type(e).__name__,
                     )
             except Exception:
-                logger.exception("ping: не удалось отправить медиа, отправляю текст")
+                logger.exception("ping: media send failed, fallback to text")
         await msg.edit(text, parse_mode="html")
 
     @command("setpingmedia", required=OWNER)

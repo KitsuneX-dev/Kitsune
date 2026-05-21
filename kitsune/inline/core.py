@@ -29,6 +29,7 @@ except ImportError:
 from .types import InlineCall
 
 _UNIT_TTL = 60 * 60 * 24
+_INPUT_MARKER = "\u2063\u2060\u2063"
 
 class InlineManager:
     def __init__(self, client: typing.Any, db: typing.Any, token: str) -> None:
@@ -41,6 +42,7 @@ class InlineManager:
         self._callbacks:    dict[str, tuple] = {}
         self._units:        dict[str, dict]  = {}
         self._bot_username: str | None       = None
+        self._bot_id:       int | None       = None
         self._started       = False
     async def start(self) -> None:
         if not AIOGRAM_AVAILABLE:
@@ -66,10 +68,11 @@ class InlineManager:
         self._started = True
         asyncio.ensure_future(self._dp.start_polling(self._bot, handle_signals=False))
         asyncio.ensure_future(self._cleaner())
-        await asyncio.sleep(3)  
+        await asyncio.sleep(3)
         try:
             me = await self._bot.get_me()
             self._bot_username = me.username
+            self._bot_id = me.id
         except Exception:
             pass
         logger.info("InlineManager: started")
@@ -153,21 +156,26 @@ class InlineManager:
                 media_type = "video"
         unit_id = str(uuid.uuid4())[:16]
         future: asyncio.Future = asyncio.get_event_loop().create_future()
+        origin_chat_id = getattr(message, "chat_id", None) or getattr(message, "peer_id", None)
         self._units[unit_id] = {
             "text":    text,
             "buttons": reply_markup or [],
             "ttl":     time.time() + _UNIT_TTL,
             "future":  future,
             "inline_message_id": "",
+            "chat_id": origin_chat_id,
             **({media_type: media_url} if media_url and media_type else {}),
         }
         sent = await self._invoke_unit(unit_id, message)
         if sent is not None and unit_id in self._units:
             self._units[unit_id]["telethon_msg"] = sent
+            sent_chat = getattr(sent, "chat_id", None) or getattr(sent, "peer_id", None)
+            if sent_chat is not None:
+                self._units[unit_id]["chat_id"] = sent_chat
         try:
             await asyncio.wait_for(asyncio.shield(future), timeout=30)
         except asyncio.TimeoutError:
-            logger.warning("form: timeout waiting for inline_message_id for unit %s (PC fallback active)", unit_id)
+            logger.warning("form: timeout waiting for inline_message_id for unit %s", unit_id)
         if "future" in self._units.get(unit_id, {}):
             del self._units[unit_id]["future"]
         return sent
@@ -184,9 +192,17 @@ class InlineManager:
         effective_iid = inline_message_id or getattr(call_or_msg, "inline_message_id", None)
         if effective_iid:
             unit_key = f"iid:{effective_iid}"
+            existing = self._units.get(unit_key, {})
+            chat_id = existing.get("chat_id")
+            if chat_id is None:
+                _cb_msg = getattr(call_or_msg, "message", None)
+                chat_id = (
+                    getattr(_cb_msg, "chat", None) and getattr(_cb_msg.chat, "id", None)
+                ) or getattr(call_or_msg, "chat_id", None) or None
             self._units[unit_key] = {
                 "buttons": reply_markup or [],
                 "ttl": time.time() + _UNIT_TTL,
+                "chat_id": chat_id,
             }
         async def _try_text_then_caption(*, _iid=None, _chat=None, _msg=None):
             try:
@@ -230,7 +246,6 @@ class InlineManager:
                             )
                         return
                     except Exception as _exc_cap:
-                        _cap_err = str(_exc_cap).lower()
                         try:
                             if _iid is not None:
                                 await self._bot.edit_message_reply_markup(
@@ -305,6 +320,7 @@ class InlineManager:
             try:
                 me = await self._bot.get_me()
                 self._bot_username = me.username
+                self._bot_id = me.id
             except Exception:
                 return None
         reply_to = getattr(message, "reply_to_msg_id", None)
@@ -374,7 +390,7 @@ class InlineManager:
                                     title=f"Применить: {value_preview[:50]}",
                                     description="Нажми чтобы сохранить значение",
                                     input_message_content=InputTextMessageContent(
-                                        message_text="\u2063",
+                                        message_text=_INPUT_MARKER,
                                         parse_mode="HTML",
                                         disable_web_page_preview=True,
                                     ),
@@ -398,7 +414,7 @@ class InlineManager:
                                     title=input_hint,
                                     description="Введи значение после пробела и нажми на результат",
                                     input_message_content=InputTextMessageContent(
-                                        message_text="🔄 <b>Передаю значение...</b>",
+                                        message_text=_INPUT_MARKER,
                                         parse_mode="HTML",
                                         disable_web_page_preview=True,
                                     ),
@@ -463,6 +479,37 @@ class InlineManager:
                 )
         except Exception:
             logger.exception("InlineManager._on_inline_query failed")
+    async def _wipe_input_message(self, chat_id, sender_id=None) -> None:
+        if chat_id is None:
+            return
+        client = self._client
+        if client is None:
+            return
+        bot_id = self._bot_id
+        deadline = time.time() + 6.0
+        delay = 0.4
+        while time.time() < deadline:
+            try:
+                async for m in client.iter_messages(chat_id, limit=8):
+                    try:
+                        text = (getattr(m, "raw_text", None) or getattr(m, "message", "") or "")
+                        via_bot = getattr(m, "via_bot_id", None)
+                        out = bool(getattr(m, "out", False))
+                        if _INPUT_MARKER in text and (
+                            (bot_id is not None and via_bot == bot_id) or out
+                        ):
+                            try:
+                                await client.delete_messages(chat_id, [m.id])
+                            except Exception:
+                                logger.debug("wipe_input_message: delete failed", exc_info=True)
+                            return
+                    except Exception:
+                        continue
+            except Exception:
+                logger.debug("wipe_input_message: iter_messages failed", exc_info=True)
+            await asyncio.sleep(delay)
+            delay = min(delay * 1.5, 1.2)
+        logger.debug("wipe_input_message: marker message not found in %s", chat_id)
     async def _on_chosen_inline(self, result: "ChosenInlineResult") -> None:
         q = result.query.strip()
         if not q:
@@ -500,7 +547,13 @@ class InlineManager:
                         original_iid = unit_id[4:]
                     else:
                         original_iid = unit.get("inline_message_id", "")
-                    logger.debug("_on_chosen_inline: input sq=%r val=%r iid=%r", sq, value, original_iid)
+                    chat_id_for_wipe = unit.get("chat_id")
+                    if chat_id_for_wipe is None and original_iid:
+                        alt = self._units.get(f"iid:{original_iid}")
+                        if alt:
+                            chat_id_for_wipe = alt.get("chat_id")
+                    logger.debug("_on_chosen_inline: input sq=%r val=%r iid=%r chat=%r",
+                                 sq, value, original_iid, chat_id_for_wipe)
                     wrapped = InlineCall(
                         id="chosen",
                         chat_id=0,
@@ -510,6 +563,13 @@ class InlineManager:
                         _edit=None,
                     )
                     wrapped.inline_message_id = original_iid
+                    sender_id = None
+                    try:
+                        sender_id = result.from_user.id
+                    except Exception:
+                        pass
+                    if chat_id_for_wipe is not None:
+                        asyncio.ensure_future(self._wipe_input_message(chat_id_for_wipe, sender_id))
                     try:
                         await handler(wrapped, value, *args, **kwargs)
                     except Exception:
