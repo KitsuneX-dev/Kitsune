@@ -1,6 +1,8 @@
 from __future__ import annotations
 import ast
+import copy
 import logging
+import re
 import typing
 from ..core.loader import KitsuneModule, command, ModuleConfig
 from ..core.security import OWNER
@@ -13,7 +15,9 @@ NUM_ROWS = 5
 
 _DB_PREFIX = "kitsune.config"
 
-_MAX_DISPLAY_LEN = 1800
+_MAX_DISPLAY_LEN = 3500
+
+_INLINE_QUERY_SAFE_LEN = 200
 
 def _esc(s: str) -> str:
     return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
@@ -39,7 +43,7 @@ def _fmt_value(value, for_pre: bool = False) -> str:
     str_val = str(value)
     if "\n" in str_val or len(str_val) > 100 or "<" in str_val:
         if len(str_val) > _MAX_DISPLAY_LEN:
-            str_val = str_val[:_MAX_DISPLAY_LEN] + "... [урезано, значение слишком длинное]"
+            str_val = str_val[:_MAX_DISPLAY_LEN] + "... [урезано для отображения, полное значение сохранено]"
         escaped = _esc_pre(str_val)
         return f"<pre>{escaped}</pre>"
     return f"<code>{_esc(str_val)}</code>"
@@ -58,6 +62,62 @@ def _fmt_value_short(value) -> str:
 
 def _chunks(lst: list, n: int) -> list:
     return [lst[i:i + n] for i in range(0, len(lst), n)]
+
+def _extract_html_with_entities(raw_value: str, full_raw: str, entities: list) -> str:
+    if not raw_value or not entities:
+        return raw_value
+    try:
+        from telethon.extensions import html as tl_html
+        from telethon.tl.types import MessageEntityCustomEmoji
+    except Exception:
+        return raw_value
+    val_start = full_raw.find(raw_value)
+    if val_start < 0:
+        return raw_value
+    val_end = val_start + len(raw_value)
+    relevant = sorted(
+        [e for e in entities if e.offset >= val_start and (e.offset + e.length) <= val_end],
+        key=lambda x: x.offset,
+    )
+    if not relevant:
+        return raw_value
+    custom_emojis = [e for e in relevant if isinstance(e, MessageEntityCustomEmoji)]
+    other_entities = [e for e in relevant if not isinstance(e, MessageEntityCustomEmoji)]
+    if not custom_emojis:
+        shifted = []
+        for e in other_entities:
+            ec = copy.copy(e)
+            ec.offset = e.offset - val_start
+            shifted.append(ec)
+        return tl_html.unparse(raw_value, shifted)
+    result_html = ""
+    cursor = 0
+    for ce in sorted(custom_emojis, key=lambda x: x.offset):
+        ce_off = ce.offset - val_start
+        if ce_off > cursor:
+            before = raw_value[cursor:ce_off]
+            before_ents = []
+            for oe in other_entities:
+                oe_off = oe.offset - val_start
+                if oe_off >= cursor and (oe_off + oe.length) <= ce_off:
+                    ec = copy.copy(oe)
+                    ec.offset = oe_off - cursor
+                    before_ents.append(ec)
+            result_html += tl_html.unparse(before, before_ents)
+        inner = raw_value[ce_off:ce_off + ce.length]
+        result_html += f'<tg-emoji emoji-id="{ce.document_id}">{inner}</tg-emoji>'
+        cursor = ce_off + ce.length
+    if cursor < len(raw_value):
+        tail = raw_value[cursor:]
+        tail_ents = []
+        for oe in other_entities:
+            oe_off = oe.offset - val_start
+            if oe_off >= cursor:
+                ec = copy.copy(oe)
+                ec.offset = oe_off - cursor
+                tail_ents.append(ec)
+        result_html += tl_html.unparse(tail, tail_ents)
+    return result_html
 
 def _get_configurable(client) -> dict:
     from ..core.loader import ModuleConfig
@@ -89,7 +149,7 @@ class ConfigModule(KitsuneModule):
     name        = "Config"
     description = "Интерактивная настройка параметров модулей"
     author      = "@Mikasu32"
-    version     = "1.3.1"
+    version     = "1.4.0"
     strings_ru = {
         "choose_core":    "⚙️ <b>Выбери категорию</b>",
         "builtin":        "🛰 Встроенные",
@@ -104,7 +164,12 @@ class ConfigModule(KitsuneModule):
             "<i>ℹ️ {}</i>\n\n"
             "<b>Стандартное:</b> {}\n\n"
             "<b>Текущее:</b> {}\n\n"
-            "{}"
+            "{}{}"
+        ),
+        "long_value_hint": (
+            "\n<i>💡 Для длинных значений или текста с премиум-эмодзи используй:</i>\n"
+            "<code>{prefix}fcfg {mod} {key} &lt;значение&gt;</code>\n"
+            "<i>Кнопка «Ввести значение» ограничена ~200 символами из-за лимитов Telegram.</i>"
         ),
         "typehint":       "🕵️ <b>Должно быть {}</b>",
         "enter_value_btn":   "✍️ Ввести значение",
@@ -129,6 +194,11 @@ class ConfigModule(KitsuneModule):
     }
     def _inline(self):
         return getattr(self.client, "_kitsune_inline", None)
+    def _prefix(self) -> str:
+        dispatcher = getattr(self.client, "_kitsune_dispatcher", None)
+        if dispatcher and getattr(dispatcher, "_prefix", None):
+            return dispatcher._prefix
+        return self.db.get("kitsune.core", "prefix", ".")
     def _mods(self, builtin: bool | None = None) -> dict:
         loader = getattr(self.client, "_kitsune_loader", None)
         if not loader:
@@ -158,6 +228,14 @@ class ConfigModule(KitsuneModule):
         for k in mod.config.keys():
             lines += f"▫️ <code>{_esc(k)}</code>: <b>{_fmt_value_short(mod.config[k])}</b>\n"
         return lines or "—"
+    def _long_value_hint(self, mod_name: str, key: str, default_val) -> str:
+        if not isinstance(default_val, (str, type(None))):
+            return ""
+        return self.strings("long_value_hint").format(
+            prefix=_esc(self._prefix()),
+            mod=_esc(mod_name),
+            key=_esc(key),
+        )
     async def _save_config(self, mod_name: str, mod) -> None:
         for k in mod.config.keys():
             await self.db.set(f"{_DB_PREFIX}.{mod_name.lower()}", k, mod.config[k])
@@ -243,8 +321,9 @@ class ConfigModule(KitsuneModule):
             )
         else:
             typehint = ""
+        hint = self._long_value_hint(mod_name, key, default_val)
         text = self.strings("configuring_option").format(
-            _esc(key), _esc(mod_name), doc, default, current, typehint
+            _esc(key), _esc(mod_name), doc, default, current, typehint, hint
         )
         kb = [
             [{
@@ -315,8 +394,9 @@ class ConfigModule(KitsuneModule):
             if isinstance(default_val2, list)
             else ""
         )
+        hint = self._long_value_hint(mod_name, key, default_val2)
         text = self.strings("configuring_option").format(
-            _esc(key), _esc(mod_name), doc, default, current, typehint
+            _esc(key), _esc(mod_name), doc, default, current, typehint, hint
         )
         kb = [
             [{
@@ -458,64 +538,10 @@ class ConfigModule(KitsuneModule):
         default_val = mod.config.get_default(key)
         new_val = raw_val
         if isinstance(default_val, (str, type(None))):
-            try:
-                from telethon.extensions import html as tl_html
-                from telethon.tl.types import MessageEntityCustomEmoji
-                import copy
-                msg = event.message
-                full_raw = msg.raw_text or ""
-                entities = list(msg.entities or [])
-                val_start_raw = full_raw.find(raw_val)
-                if val_start_raw >= 0 and entities:
-                    val_end_raw = val_start_raw + len(raw_val)
-                    relevant = sorted(
-                        [
-                            e for e in entities
-                            if e.offset >= val_start_raw and (e.offset + e.length) <= val_end_raw
-                        ],
-                        key=lambda x: x.offset,
-                    )
-                    if relevant:
-                        custom_emojis = [e for e in relevant if isinstance(e, MessageEntityCustomEmoji)]
-                        other_entities = [e for e in relevant if not isinstance(e, MessageEntityCustomEmoji)]
-                        if not custom_emojis:
-                            shifted = []
-                            for e in other_entities:
-                                ec = copy.copy(e)
-                                ec.offset = e.offset - val_start_raw
-                                shifted.append(ec)
-                            new_val = tl_html.unparse(raw_val, shifted)
-                        else:
-                            result_html = ""
-                            cursor = 0  
-                            for ce in sorted(custom_emojis, key=lambda x: x.offset):
-                                ce_off = ce.offset - val_start_raw  
-                                if ce_off > cursor:
-                                    before = raw_val[cursor:ce_off]
-                                    before_ents = []
-                                    for oe in other_entities:
-                                        oe_off = oe.offset - val_start_raw
-                                        if oe_off >= cursor and (oe_off + oe.length) <= ce_off:
-                                            ec = copy.copy(oe)
-                                            ec.offset = oe_off - cursor
-                                            before_ents.append(ec)
-                                    result_html += tl_html.unparse(before, before_ents)
-                                inner = raw_val[ce_off:ce_off + ce.length]
-                                result_html += f'<tg-emoji emoji-id="{ce.document_id}">{inner}</tg-emoji>'
-                                cursor = ce_off + ce.length
-                            if cursor < len(raw_val):
-                                tail = raw_val[cursor:]
-                                tail_ents = []
-                                for oe in other_entities:
-                                    oe_off = oe.offset - val_start_raw
-                                    if oe_off >= cursor:
-                                        ec = copy.copy(oe)
-                                        ec.offset = oe_off - cursor
-                                        tail_ents.append(ec)
-                                result_html += tl_html.unparse(tail, tail_ents)
-                            new_val = result_html
-            except Exception:
-                pass  
+            msg = event.message
+            full_raw = msg.raw_text or ""
+            entities = list(msg.entities or [])
+            new_val = _extract_html_with_entities(raw_val, full_raw, entities)
         if isinstance(default_val, bool):
             new_val = raw_val.lower() in ("1", "true", "yes", "да")
         elif isinstance(default_val, int):
@@ -529,8 +555,7 @@ class ConfigModule(KitsuneModule):
             except ValueError:
                 pass
         if isinstance(new_val, str):
-            import re as _re
-            new_val = _re.sub(r'<br\s*/?>', '\n', new_val)
+            new_val = re.sub(r"<br\s*/?>", "\n", new_val)
         mod.config[key] = new_val
         await self._save_config(mod_name, mod)
         try:

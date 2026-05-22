@@ -1,4 +1,5 @@
 from __future__ import annotations
+import copy
 import logging
 import re
 import time
@@ -22,10 +23,76 @@ def _esc(s: str) -> str:
     return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
+def _safe_format(template: str, mapping: dict) -> str:
+    if not template:
+        return template
+    result = template
+    for key, value in mapping.items():
+        result = result.replace("{" + key + "}", str(value))
+    return result
+
+
+def _extract_html_with_entities(raw_value: str, full_raw: str, entities: list) -> str:
+    if not raw_value or not entities:
+        return raw_value
+    try:
+        from telethon.extensions import html as tl_html
+        from telethon.tl.types import MessageEntityCustomEmoji
+    except Exception:
+        return raw_value
+    val_start = full_raw.find(raw_value)
+    if val_start < 0:
+        return raw_value
+    val_end = val_start + len(raw_value)
+    relevant = sorted(
+        [e for e in entities if e.offset >= val_start and (e.offset + e.length) <= val_end],
+        key=lambda x: x.offset,
+    )
+    if not relevant:
+        return raw_value
+    custom_emojis = [e for e in relevant if isinstance(e, MessageEntityCustomEmoji)]
+    other_entities = [e for e in relevant if not isinstance(e, MessageEntityCustomEmoji)]
+    if not custom_emojis:
+        shifted = []
+        for e in other_entities:
+            ec = copy.copy(e)
+            ec.offset = e.offset - val_start
+            shifted.append(ec)
+        return tl_html.unparse(raw_value, shifted)
+    result_html = ""
+    cursor = 0
+    for ce in sorted(custom_emojis, key=lambda x: x.offset):
+        ce_off = ce.offset - val_start
+        if ce_off > cursor:
+            before = raw_value[cursor:ce_off]
+            before_ents = []
+            for oe in other_entities:
+                oe_off = oe.offset - val_start
+                if oe_off >= cursor and (oe_off + oe.length) <= ce_off:
+                    ec = copy.copy(oe)
+                    ec.offset = oe_off - cursor
+                    before_ents.append(ec)
+            result_html += tl_html.unparse(before, before_ents)
+        inner = raw_value[ce_off:ce_off + ce.length]
+        result_html += f'<tg-emoji emoji-id="{ce.document_id}">{inner}</tg-emoji>'
+        cursor = ce_off + ce.length
+    if cursor < len(raw_value):
+        tail = raw_value[cursor:]
+        tail_ents = []
+        for oe in other_entities:
+            oe_off = oe.offset - val_start
+            if oe_off >= cursor:
+                ec = copy.copy(oe)
+                ec.offset = oe_off - cursor
+                tail_ents.append(ec)
+        result_html += tl_html.unparse(tail, tail_ents)
+    return result_html
+
+
 class InfoModule(KitsuneModule):
     name        = "KitsuneInfo"
     description = "Информация о UserBot с кастомизацией"
-    version     = "1.3.1"
+    version     = "1.4.0"
     author      = "@Mikasu32"
     _builtin    = True
 
@@ -50,25 +117,24 @@ class InfoModule(KitsuneModule):
             ConfigValue(
                 "banner_url",
                 default="https://cdn.jsdelivr.net/gh/KitsuneX-dev/Kitsune@main/banner.gif",
-                doc="Ссылка на баннер (видео/гифка). Используй прямую ссылку. Для GitHub: используй команду .cdn чтобы конвертировать ссылку в CDN.",
+                doc="Ссылка на баннер (видео/гифка/фото). Используй прямую ссылку. Для GitHub: используй команду .cdn чтобы конвертировать ссылку в CDN.",
             ),
             ConfigValue(
                 "quote_media",
                 default=True,
                 doc=(
-                    "Цитирование (web-preview) для фото-баннера. "
-                    "True — фото отображается как превью-цитата над текстом (по умолчанию). "
-                    "False — фото отправляется как обычное медиа с подписью. "
-                    "На видео и GIF параметр НЕ влияет — они всегда отправляются как медиа."
+                    "Цитирование (web-preview) для баннера. "
+                    "True — баннер отображается как превью-цитата над/под текстом, лимит текста 4096 (по умолчанию). "
+                    "False — баннер отправляется как обычное медиа с подписью, лимит 1024 символа."
                 ),
             ),
             ConfigValue(
                 "invert_media",
                 default=True,
                 doc=(
-                    "Положение фото относительно текста (только при quote_media = True). "
-                    "True — фото сверху, текст снизу (по умолчанию). "
-                    "False — текст сверху, фото снизу."
+                    "Положение баннера относительно текста (только при quote_media = True). "
+                    "True — баннер сверху, текст снизу (по умолчанию). "
+                    "False — текст сверху, баннер снизу."
                 ),
             ),
         )
@@ -166,12 +232,18 @@ class InfoModule(KitsuneModule):
         ram      = self._get_ram_usage()
         if self.config["custom_message"]:
             tpl = self.config["custom_message"]
-            return tpl.format(
-                me=me_link, version=version, build=build,
-                prefix=f"«<code>{_esc(prefix)}</code>»",
-                platform=platform, upd=upd, uptime=uptime,
-                cpu_usage=cpu, ram_usage=ram, branch=branch,
-            )
+            return _safe_format(tpl, {
+                "me": me_link,
+                "version": version,
+                "build": build,
+                "prefix": f"«<code>{_esc(prefix)}</code>»",
+                "platform": platform,
+                "upd": upd,
+                "uptime": uptime,
+                "cpu_usage": cpu,
+                "ram_usage": ram,
+                "branch": branch,
+            })
         return (
             f"🦊 <b>Kitsune</b>\n\n"
             f"<b>😎 {self.strings('owner')}:</b> {me_link}\n\n"
@@ -259,6 +331,13 @@ class InfoModule(KitsuneModule):
         return False
 
     @staticmethod
+    def _is_http_url(url: str) -> bool:
+        if not url:
+            return False
+        s = str(url).strip().lower()
+        return s.startswith("http://") or s.startswith("https://")
+
+    @staticmethod
     def _utf16_len(text: str) -> int:
         if not text:
             return 0
@@ -335,11 +414,11 @@ class InfoModule(KitsuneModule):
                     ])
                 ])
             if banner:
-                is_photo = self._is_photo_url(banner)
-                use_quote = bool(self.config["quote_media"]) and is_photo
+                is_http = self._is_http_url(banner)
+                use_quote = bool(self.config["quote_media"]) and is_http
                 text_len = self._utf16_len(parsed_text)
                 try:
-                    if use_quote:
+                    if use_quote and text_len <= self._MESSAGE_LIMIT:
                         try:
                             await self._send_webpage_quote(
                                 event.peer_id,
@@ -469,16 +548,30 @@ class InfoModule(KitsuneModule):
     async def setinfo_cmd(self, event) -> None:
         args = self.get_args(event)
         if not args:
-            await event.reply(self.strings("setinfo_no_args"), parse_mode="html")
+            await event.message.edit(self.strings("setinfo_no_args"), parse_mode="html")
             return
-        self.config["custom_message"] = args
-        await self.db.set(_DB_CONFIG, "custom_message", args)
-        await event.reply(self.strings("setinfo_success"), parse_mode="html")
+        msg = event.message
+        full_raw = msg.raw_text or ""
+        entities = list(msg.entities or [])
+        value_html = _extract_html_with_entities(args, full_raw, entities)
+        if isinstance(value_html, str):
+            value_html = re.sub(r"<br\s*/?>", "\n", value_html)
+        self.config["custom_message"] = value_html
+        await self.db.set(_DB_CONFIG, "custom_message", value_html)
+        try:
+            await self.db.force_save()
+        except Exception:
+            pass
+        await event.message.edit(self.strings("setinfo_success"), parse_mode="html")
 
     @command("resetinfo", required=OWNER)
     async def resetinfo_cmd(self, event) -> None:
         self.config["custom_message"] = None
         await self.db.delete(_DB_CONFIG, "custom_message")
+        try:
+            await self.db.force_save()
+        except Exception:
+            pass
         await event.reply("✅ Info-сообщение сброшено.", parse_mode="html")
 
     @command("fmt", required=OWNER)
