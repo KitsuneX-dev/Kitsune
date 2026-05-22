@@ -118,3 +118,11 @@ def main() -> None:
         asyncio.run(startup(args, _load_raw_config, _save_config, _HAVE_UVLOOP))
     except KeyboardInterrupt:
         pass
+    finally:
+        # После того как shutdown() завершён и asyncio.run() вернулся,
+        # принудительно завершаем процесс. Без этого Python зависает,
+        # ожидая завершения не-daemon потоков (внутренние потоки aiohttp,
+        # executor'ы и т.п.) — именно поэтому повторные Ctrl+C не помогали.
+        # Вся важная очистка (шифрование сессии, остановка БД) уже
+        # выполнена внутри lifecycle.shutdown(), поэтому os._exit безопасен.
+        os._exit(0)
