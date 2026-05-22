@@ -1,11 +1,35 @@
 from __future__ import annotations
 import asyncio
 import logging
+import re
 import typing
 import uuid
 import time
 
 logger = logging.getLogger(__name__)
+
+_TG_EMOJI_VALID = re.compile(
+    r'<tg-emoji\s+emoji-id\s*=\s*["\']?(\d+)["\']?\s*>(.*?)</tg-emoji>',
+    re.DOTALL | re.IGNORECASE,
+)
+_TG_EMOJI_ANY_OPEN = re.compile(r'<tg-emoji\b[^>]*>', re.IGNORECASE)
+_TG_EMOJI_ANY_CLOSE = re.compile(r'</tg-emoji\s*>', re.IGNORECASE)
+
+def _normalize_tg_emoji(text: str) -> str:
+    if not text or "tg-emoji" not in text.lower():
+        return text
+    def _fix(m: re.Match) -> str:
+        emoji_id = m.group(1)
+        inner = m.group(2)
+        return f'<tg-emoji emoji-id="{emoji_id}">{inner}</tg-emoji>'
+    return _TG_EMOJI_VALID.sub(_fix, text)
+
+def _strip_tg_emoji(text: str) -> str:
+    if not text or "tg-emoji" not in text.lower():
+        return text
+    text = _TG_EMOJI_ANY_OPEN.sub("", text)
+    text = _TG_EMOJI_ANY_CLOSE.sub("", text)
+    return text
 
 try:
     from aiogram import Bot, Dispatcher, Router
@@ -154,6 +178,7 @@ class InlineManager:
                 media_type = "gif" if ext in (".gif", ".mp4") else "video"
             except Exception:
                 media_type = "video"
+        text = _normalize_tg_emoji(text)
         unit_id = str(uuid.uuid4())[:16]
         future: asyncio.Future = asyncio.get_event_loop().create_future()
         origin_chat_id = getattr(message, "chat_id", None) or getattr(message, "peer_id", None)
@@ -188,6 +213,7 @@ class InlineManager:
     ) -> None:
         if not AIOGRAM_AVAILABLE or not self._bot:
             return
+        text = _normalize_tg_emoji(text)
         markup = self.generate_markup(reply_markup or [])
         effective_iid = inline_message_id or getattr(call_or_msg, "inline_message_id", None)
         if effective_iid:
@@ -204,48 +230,92 @@ class InlineManager:
                 "ttl": time.time() + _UNIT_TTL,
                 "chat_id": chat_id,
             }
+        async def _send_edit_text(_text, _parse_mode, *, _iid=None, _chat=None, _msg=None):
+            if _iid is not None:
+                await self._bot.edit_message_text(
+                    inline_message_id=_iid,
+                    text=_text,
+                    reply_markup=markup,
+                    parse_mode=_parse_mode,
+                )
+            else:
+                await self._bot.edit_message_text(
+                    chat_id=_chat,
+                    message_id=_msg,
+                    text=_text,
+                    reply_markup=markup,
+                    parse_mode=_parse_mode,
+                )
+        async def _send_edit_caption(_text, _parse_mode, *, _iid=None, _chat=None, _msg=None):
+            if _iid is not None:
+                await self._bot.edit_message_caption(
+                    inline_message_id=_iid,
+                    caption=_text,
+                    reply_markup=markup,
+                    parse_mode=_parse_mode,
+                )
+            else:
+                await self._bot.edit_message_caption(
+                    chat_id=_chat,
+                    message_id=_msg,
+                    caption=_text,
+                    reply_markup=markup,
+                    parse_mode=_parse_mode,
+                )
         async def _try_text_then_caption(*, _iid=None, _chat=None, _msg=None):
+            current_text = text
             try:
-                if _iid is not None:
-                    await self._bot.edit_message_text(
-                        inline_message_id=_iid,
-                        text=text,
-                        reply_markup=markup,
-                        parse_mode="HTML",
-                    )
-                else:
-                    await self._bot.edit_message_text(
-                        chat_id=_chat,
-                        message_id=_msg,
-                        text=text,
-                        reply_markup=markup,
-                        parse_mode="HTML",
-                    )
+                await _send_edit_text(current_text, "HTML", _iid=_iid, _chat=_chat, _msg=_msg)
+                return
             except Exception as _exc_text:
                 _msg_err = str(_exc_text).lower()
+                if (
+                    "can't parse entities" in _msg_err
+                    or "empty attribute name" in _msg_err
+                    or "unsupported start tag" in _msg_err
+                    or "unmatched end tag" in _msg_err
+                    or "unclosed start tag" in _msg_err
+                ):
+                    sanitized = _strip_tg_emoji(current_text)
+                    try:
+                        await _send_edit_text(sanitized, "HTML", _iid=_iid, _chat=_chat, _msg=_msg)
+                        return
+                    except Exception:
+                        try:
+                            await _send_edit_text(sanitized, None, _iid=_iid, _chat=_chat, _msg=_msg)
+                            return
+                        except Exception as _exc_plain:
+                            logger.debug(
+                                "InlineManager.edit: plain-text fallback failed: %s", _exc_plain,
+                            )
+                            return
                 if (
                     "no text in the message" in _msg_err
                     or "there is no text" in _msg_err
                     or "message can't be edited" in _msg_err
                 ):
                     try:
-                        if _iid is not None:
-                            await self._bot.edit_message_caption(
-                                inline_message_id=_iid,
-                                caption=text,
-                                reply_markup=markup,
-                                parse_mode="HTML",
-                            )
-                        else:
-                            await self._bot.edit_message_caption(
-                                chat_id=_chat,
-                                message_id=_msg,
-                                caption=text,
-                                reply_markup=markup,
-                                parse_mode="HTML",
-                            )
+                        await _send_edit_caption(current_text, "HTML", _iid=_iid, _chat=_chat, _msg=_msg)
                         return
                     except Exception as _exc_cap:
+                        _cap_err = str(_exc_cap).lower()
+                        if (
+                            "can't parse entities" in _cap_err
+                            or "empty attribute name" in _cap_err
+                            or "unsupported start tag" in _cap_err
+                            or "unmatched end tag" in _cap_err
+                            or "unclosed start tag" in _cap_err
+                        ):
+                            sanitized = _strip_tg_emoji(current_text)
+                            try:
+                                await _send_edit_caption(sanitized, "HTML", _iid=_iid, _chat=_chat, _msg=_msg)
+                                return
+                            except Exception:
+                                try:
+                                    await _send_edit_caption(sanitized, None, _iid=_iid, _chat=_chat, _msg=_msg)
+                                    return
+                                except Exception:
+                                    pass
                         try:
                             if _iid is not None:
                                 await self._bot.edit_message_reply_markup(

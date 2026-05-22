@@ -13,15 +13,18 @@ NUM_ROWS = 5
 
 _DB_PREFIX = "kitsune.config"
 
-# Maximum length of value to display in config screen before truncating
 _MAX_DISPLAY_LEN = 1800
 
 def _esc(s: str) -> str:
     return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 def _esc_pre(s: str) -> str:
-    """Escape for use inside <pre> tag - only need to escape </pre>"""
-    return str(s).replace("</pre>", "<\/pre>")
+    return (
+        str(s)
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
 
 def _fmt_value(value, for_pre: bool = False) -> str:
     if value is None or value == "":
@@ -33,21 +36,15 @@ def _fmt_value(value, for_pre: bool = False) -> str:
             return "<code>[]</code>"
         items = "\n    ".join(f"<code>{_esc(str(i))}</code>" for i in value)
         return f"<code>[</code>\n    {items}\n<code>]</code>"
-
     str_val = str(value)
-    # For multi-line strings or strings with HTML-like content, use <pre>
     if "\n" in str_val or len(str_val) > 100 or "<" in str_val:
-        # Truncate if too long
         if len(str_val) > _MAX_DISPLAY_LEN:
             str_val = str_val[:_MAX_DISPLAY_LEN] + "... [урезано, значение слишком длинное]"
-        # Use <pre> for proper multi-line display
         escaped = _esc_pre(str_val)
         return f"<pre>{escaped}</pre>"
-
     return f"<code>{_esc(str_val)}</code>"
 
 def _fmt_value_short(value) -> str:
-    """Format value for compact display (e.g., in mod list)"""
     if value is None or value == "":
         return "None"
     if isinstance(value, bool):

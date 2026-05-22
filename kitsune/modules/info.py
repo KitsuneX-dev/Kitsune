@@ -576,7 +576,7 @@ class InfoModule(KitsuneModule):
         for utf16_off, utf16_len, doc_id in replacements:
             py_start, py_end = utf16_slice(result, utf16_off, utf16_len)
             emoji_char = result[py_start:py_end]
-            tag = f'<tg-emoji emoji-id={doc_id}>{emoji_char}</tg-emoji>'
+            tag = f'<tg-emoji emoji-id="{doc_id}">{emoji_char}</tg-emoji>'
             result = result[:py_start] + tag + result[py_end:]
         await event.message.edit(
             f"<code>{_esc(result)}</code>",
