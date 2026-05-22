@@ -37,12 +37,12 @@ def test_decrypt_wrong_data():
     c = _crypto()
     with pytest.raises(Exception):
         c.decrypt(b"not a valid backup")
-def test_xor_backward_compat(monkeypatch, tmp_path):
+def test_chacha_backend(monkeypatch, tmp_path):
     import kitsune.crypto as crypto
     monkeypatch.setattr(crypto, "KEY_PATH", tmp_path / "test.key")
-    data = b"old xor backup data"
+    data = b"chacha backup data"
     key = crypto._load_or_create_key()
-    enc = crypto.MAGIC + b"XOR1:" + crypto._xor_encrypt(data, key)
+    enc = crypto.MAGIC + b"CHACHA1:" + crypto._chacha_encrypt(data, key)
     assert crypto.decrypt(enc) == data
 def test_key_created_on_disk(tmp_path, monkeypatch):
     import kitsune.crypto as crypto

@@ -2,7 +2,7 @@ from __future__ import annotations
 import contextlib
 import os
 
-__version__ = (1, 3, 0)
+__version__ = (1, 4, 0)
 
 __version_str__ = ".".join(map(str, __version__))
 

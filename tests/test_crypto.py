@@ -136,25 +136,25 @@ def test_decrypt_truncated_data_raises():
     truncated = enc[:len(c.MAGIC) + 4]
     with pytest.raises(Exception):
         c.decrypt(truncated)
-def test_xor_backward_compat():
+def test_chacha_backend():
     c = _crypto()
-    data = b"old xor backup data"
+    data = b"chacha backup data"
     key = c._load_or_create_key()
-    enc = c.MAGIC + b"XOR1:" + c._xor_encrypt(data, key)
+    enc = c.MAGIC + b"CHACHA1:" + c._chacha_encrypt(data, key)
     assert c.decrypt(enc) == data
-def test_xor_hmac_authentication():
+def test_chacha_tag_authentication():
     c = _crypto()
     key = c._load_or_create_key()
-    enc = c.MAGIC + b"XOR1:" + c._xor_encrypt(b"data", key)
+    enc = c.MAGIC + b"CHACHA1:" + c._chacha_encrypt(b"data", key)
     bad = bytearray(enc)
     bad[-1] ^= 0x01
-    with pytest.raises(ValueError, match="HMAC mismatch"):
+    with pytest.raises(Exception):
         c.decrypt(bytes(bad))
-def test_xor_internal_helpers_roundtrip():
+def test_chacha_internal_helpers_roundtrip():
     c = _crypto()
     key = base64.urlsafe_b64encode(os.urandom(32))
-    enc = c._xor_encrypt(b"abc", key)
-    assert c._xor_decrypt(enc, key) == b"abc"
+    enc = c._chacha_encrypt(b"abc", key)
+    assert c._chacha_decrypt(enc, key) == b"abc"
 def test_key_created_on_disk(tmp_path, monkeypatch):
     import kitsune.crypto as crypto
     key_path = tmp_path / "new.key"
