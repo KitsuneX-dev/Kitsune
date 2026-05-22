@@ -6,6 +6,8 @@ import logging
 import os
 import signal
 import sqlite3
+import threading
+import time as _time
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +16,8 @@ logger = logging.getLogger(__name__)
 DATA_DIR = Path.home() / ".kitsune"
 
 _BG_TASKS: set[asyncio.Task] = set()
+_WATCHDOG_STOP = threading.Event()
+_WATCHDOG_THREAD: threading.Thread | None = None
 
 
 def spawn(coro) -> asyncio.Task:
@@ -37,65 +41,112 @@ def print_banner(me: Any) -> None:
 
 
 async def setup_kitsune_folder(client: Any, db: Any) -> None:
-    await asyncio.sleep(8)
+    try:
+        await asyncio.sleep(8)
+    except asyncio.CancelledError:
+        return
     try:
         from ..utils import ensure_kitsune_folder
         await ensure_kitsune_folder(client, db)
+    except asyncio.CancelledError:
+        raise
     except Exception:
         pass
 
 
-def install_signal_handlers(stop_event: asyncio.Event) -> None:
+def install_signal_handlers(stop_event: asyncio.Event, loop: asyncio.AbstractEventLoop) -> None:
+    _state = {"count": 0}
+
     def _shutdown(*_: object) -> None:
-        logger.info("main: received shutdown signal")
-        stop_event.set()
+        _state["count"] += 1
+        if _state["count"] == 1:
+            logger.info("main: received shutdown signal")
+            loop.call_soon_threadsafe(stop_event.set)
+        elif _state["count"] >= 2:
+            logger.warning("main: second shutdown signal — forcing exit")
+            os._exit(130)
+
     for sig in (signal.SIGINT, signal.SIGTERM):
-        with contextlib.suppress(OSError):
-            asyncio.get_event_loop().add_signal_handler(sig, _shutdown)
+        with contextlib.suppress(NotImplementedError, OSError, RuntimeError):
+            loop.add_signal_handler(sig, _shutdown)
 
 
-def start_watchdog(stop_event: asyncio.Event) -> None:
-    import threading
-    import time as _time
+def start_watchdog(stop_event: asyncio.Event, loop: asyncio.AbstractEventLoop) -> None:
+    global _WATCHDOG_THREAD
+    _WATCHDOG_STOP.clear()
     _wdog_last_tick = [_time.monotonic()]
-    _wdog_loop = asyncio.get_event_loop()
 
-    async def _wdog_tick() -> None:
+    def _tick_cb() -> None:
         _wdog_last_tick[0] = _time.monotonic()
 
     def _watchdog_thread() -> None:
-        while not stop_event.is_set():
-            _time.sleep(10)
+        while not _WATCHDOG_STOP.is_set() and not stop_event.is_set():
+            if _WATCHDOG_STOP.wait(timeout=10.0):
+                return
+            if stop_event.is_set() or _WATCHDOG_STOP.is_set():
+                return
+            if loop.is_closed() or not loop.is_running():
+                return
             try:
-                fut = asyncio.run_coroutine_threadsafe(_wdog_tick(), _wdog_loop)
-                fut.result(timeout=5)
+                loop.call_soon_threadsafe(_tick_cb)
+            except RuntimeError:
+                return
             except Exception:
                 pass
-            _time.sleep(5)
+            if _WATCHDOG_STOP.wait(timeout=5.0):
+                return
+            if stop_event.is_set() or _WATCHDOG_STOP.is_set():
+                return
             if _time.monotonic() - _wdog_last_tick[0] > 45:
                 logger.critical(
                     "main: event loop FROZEN >45s — принудительный перезапуск процесса"
                 )
-                os.kill(os.getpid(), signal.SIGTERM)
+                try:
+                    os.kill(os.getpid(), signal.SIGTERM)
+                except Exception:
+                    os._exit(1)
+                return
 
-    _wt = threading.Thread(target=_watchdog_thread, name="kitsune-watchdog", daemon=True)
-    _wt.start()
+    _WATCHDOG_THREAD = threading.Thread(
+        target=_watchdog_thread, name="kitsune-watchdog", daemon=True
+    )
+    _WATCHDOG_THREAD.start()
     logger.info("main: watchdog started (threshold=45s)")
+
+
+def stop_watchdog() -> None:
+    _WATCHDOG_STOP.set()
+    th = _WATCHDOG_THREAD
+    if th is not None and th.is_alive():
+        with contextlib.suppress(Exception):
+            th.join(timeout=2.0)
+
+
+async def _cancel_background_tasks() -> None:
+    tasks = [t for t in list(_BG_TASKS) if not t.done()]
+    for t in tasks:
+        t.cancel()
+    if not tasks:
+        return
+    with contextlib.suppress(Exception):
+        await asyncio.wait_for(
+            asyncio.gather(*tasks, return_exceptions=True),
+            timeout=5.0,
+        )
 
 
 async def shutdown(client: Any, db: Any) -> None:
     logger.info("main: shutting down…")
+    stop_watchdog()
     from ..session_enc import encrypt_session_file
     from .connection import _release_hydro_lock
 
     if getattr(client, "hydrogram", None):
         with contextlib.suppress(Exception):
-            await client.hydrogram.stop()
-        _release_hydro_lock()
-    try:
-        await db.shutdown()
-    except Exception:
-        logger.exception("main: db shutdown failed")
+            await asyncio.wait_for(client.hydrogram.stop(), timeout=10.0)
+        with contextlib.suppress(Exception):
+            _release_hydro_lock()
+
     try:
         for _t in list(asyncio.all_tasks()):
             _coro = getattr(_t, "get_coro", lambda: None)()
@@ -106,13 +157,22 @@ async def shutdown(client: Any, db: Any) -> None:
                     await asyncio.wait_for(asyncio.shield(_t), timeout=2.0)
     except Exception:
         logger.debug("main: cancel update-loop failed", exc_info=True)
+
+    await _cancel_background_tasks()
+
+    try:
+        await asyncio.wait_for(db.shutdown(), timeout=10.0)
+    except asyncio.TimeoutError:
+        logger.warning("main: db shutdown timed out")
+    except Exception:
+        logger.exception("main: db shutdown failed")
+
     try:
         sess = getattr(client, "session", None)
         sess_file = getattr(sess, "filename", None)
         if sess_file and sess_file != ":memory:":
-            import sqlite3 as _sq3
             with contextlib.suppress(Exception):
-                _con = _sq3.connect(sess_file)
+                _con = sqlite3.connect(sess_file)
                 try:
                     _cc = _con.cursor()
                     _cc.execute(
@@ -137,8 +197,11 @@ async def shutdown(client: Any, db: Any) -> None:
                     _con.close()
     except Exception:
         logger.debug("main: pre-disconnect schema heal skipped", exc_info=True)
+
     try:
         await asyncio.wait_for(client.disconnect(), timeout=10.0)
+    except asyncio.TimeoutError:
+        logger.warning("main: client disconnect timed out")
     except sqlite3.OperationalError as _se:
         if "no such table" in str(_se).lower():
             logger.info(
@@ -149,10 +212,25 @@ async def shutdown(client: Any, db: Any) -> None:
             logger.exception("main: client disconnect failed")
     except Exception:
         logger.exception("main: client disconnect failed")
+
     try:
         encrypt_session_file()
     except Exception:
         logger.exception("main: session encrypt failed")
+
+    remaining = [
+        t for t in asyncio.all_tasks()
+        if t is not asyncio.current_task() and not t.done()
+    ]
+    if remaining:
+        for t in remaining:
+            t.cancel()
+        with contextlib.suppress(Exception):
+            await asyncio.wait_for(
+                asyncio.gather(*remaining, return_exceptions=True),
+                timeout=3.0,
+            )
+
     logger.info("main: goodbye 🦊")
 
 
@@ -163,7 +241,7 @@ async def startup(
     have_uvloop: bool,
 ) -> None:
     from .. import log
-    from ..tl_cache import KitsuneTelegramClient  
+    from ..tl_cache import KitsuneTelegramClient
     from ..database import DatabaseManager
     from .security import SecurityManager
     from .dispatcher import CommandDispatcher
@@ -288,9 +366,10 @@ async def startup(
     print_banner(me)
     spawn(keepalive(client))
 
+    loop = asyncio.get_running_loop()
     stop_event = asyncio.Event()
-    install_signal_handlers(stop_event)
-    start_watchdog(stop_event)
+    install_signal_handlers(stop_event, loop)
+    start_watchdog(stop_event, loop)
 
     try:
         with contextlib.suppress(Exception):
@@ -306,4 +385,5 @@ async def startup(
     try:
         await stop_event.wait()
     finally:
-        await shutdown(client, db)
+        with contextlib.suppress(Exception):
+            await shutdown(client, db)
