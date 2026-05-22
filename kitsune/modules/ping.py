@@ -213,74 +213,26 @@ class PingModule(KitsuneModule):
         return result_text, result_entities
 
     async def _send_media_with_caption(self, peer, media_url, caption, entities):
-        from telethon.tl import functions
-        input_peer = await self.client.get_input_entity(peer)
-        file_handle, media, _image = await self.client._file_to_media(
+        return await self.client.send_file(
+            peer,
             media_url,
-            force_document=False,
-            mime_type=None,
-            file_size=None,
-            progress_callback=None,
-            attributes=None,
-            allow_cache=True,
-            thumb=None,
-            voice_note=False,
-            video_note=False,
-            supports_streaming=False,
-            ttl=None,
-            nosound_video=None,
+            caption=caption or "",
+            formatting_entities=entities,
         )
-        if not media:
-            raise TypeError("ping media: invalid")
-        request = functions.messages.SendMediaRequest(
-            peer=input_peer,
-            media=media,
-            message=caption or "",
-            entities=entities,
-        )
-        result = await self.client(request)
-        return self.client._get_response_message(request, result, input_peer)
 
     async def _send_media_no_caption(self, peer, media_url):
-        from telethon.tl import functions
-        input_peer = await self.client.get_input_entity(peer)
-        file_handle, media, _image = await self.client._file_to_media(
+        return await self.client.send_file(
+            peer,
             media_url,
-            force_document=False,
-            mime_type=None,
-            file_size=None,
-            progress_callback=None,
-            attributes=None,
-            allow_cache=True,
-            thumb=None,
-            voice_note=False,
-            video_note=False,
-            supports_streaming=False,
-            ttl=None,
-            nosound_video=None,
         )
-        if not media:
-            raise TypeError("ping media: invalid")
-        request = functions.messages.SendMediaRequest(
-            peer=input_peer,
-            media=media,
-            message="",
-            entities=[],
-        )
-        result = await self.client(request)
-        return self.client._get_response_message(request, result, input_peer)
 
     async def _send_message_only(self, peer, text, entities):
-        from telethon.tl import functions
-        input_peer = await self.client.get_input_entity(peer)
-        request = functions.messages.SendMessageRequest(
-            peer=input_peer,
+        return await self.client.send_message(
+            peer,
             message=text or "",
-            entities=entities,
+            formatting_entities=entities,
             no_webpage=True,
         )
-        result = await self.client(request)
-        return self.client._get_response_message(request, result, input_peer)
 
     @command("ping", required=OWNER)
     async def ping_cmd(self, event) -> None:

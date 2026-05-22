@@ -286,80 +286,31 @@ class InfoModule(KitsuneModule):
         return self.client._get_response_message(request, result, input_peer)
 
     async def _send_banner_protected(self, peer, banner, caption, entities, markup):
-        from telethon.tl import functions
-        input_peer = await self.client.get_input_entity(peer)
-        file_handle, media, _image = await self.client._file_to_media(
+        return await self.client.send_file(
+            peer,
             banner,
-            force_document=False,
-            mime_type=None,
-            file_size=None,
-            progress_callback=None,
-            attributes=None,
-            allow_cache=True,
-            thumb=None,
-            voice_note=False,
-            video_note=False,
-            supports_streaming=False,
-            ttl=None,
-            nosound_video=None,
-        )
-        if not media:
-            raise TypeError("banner: invalid media")
-        request = functions.messages.SendMediaRequest(
-            peer=input_peer,
-            media=media,
-            message=caption or "",
-            entities=entities,
-            reply_markup=markup,
+            caption=caption or "",
+            formatting_entities=entities,
+            buttons=markup,
             noforwards=True,
         )
-        result = await self.client(request)
-        return self.client._get_response_message(request, result, input_peer)
 
     async def _send_long_text_protected(self, peer, text, entities, markup):
-        from telethon.tl import functions
-        input_peer = await self.client.get_input_entity(peer)
-        request = functions.messages.SendMessageRequest(
-            peer=input_peer,
+        return await self.client.send_message(
+            peer,
             message=text or "",
-            entities=entities,
-            reply_markup=markup,
+            formatting_entities=entities,
+            buttons=markup,
             no_webpage=True,
             noforwards=True,
         )
-        result = await self.client(request)
-        return self.client._get_response_message(request, result, input_peer)
 
     async def _send_banner_no_caption(self, peer, banner):
-        from telethon.tl import functions
-        input_peer = await self.client.get_input_entity(peer)
-        file_handle, media, _image = await self.client._file_to_media(
+        return await self.client.send_file(
+            peer,
             banner,
-            force_document=False,
-            mime_type=None,
-            file_size=None,
-            progress_callback=None,
-            attributes=None,
-            allow_cache=True,
-            thumb=None,
-            voice_note=False,
-            video_note=False,
-            supports_streaming=False,
-            ttl=None,
-            nosound_video=None,
-        )
-        if not media:
-            raise TypeError("banner: invalid media")
-        request = functions.messages.SendMediaRequest(
-            peer=input_peer,
-            media=media,
-            message="",
-            entities=[],
-            reply_markup=None,
             noforwards=True,
         )
-        result = await self.client(request)
-        return self.client._get_response_message(request, result, input_peer)
 
     @command("info", required=OWNER)
     async def info_cmd(self, event) -> None:
