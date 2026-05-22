@@ -32,7 +32,7 @@ _DEFAULT_PONG = (
     " 🌀 <b>Аптайм:</b> <code>{uptime}</code></blockquote>"
 )
 
-_EMOJI_TAG  = re.compile(r'<emoji\s+id=["\']?(\d+)["\']?>(.*?)</emoji>', re.DOTALL)
+_EMOJI_TAG   = re.compile(r'<emoji\s+id=["\']?(\d+)["\']?>(.*?)</emoji>', re.DOTALL)
 _EMOJI_BRACE = re.compile(r'\{emoji:(\d+):([^}]*)\}')
 
 
@@ -46,7 +46,7 @@ def _resolve_custom_emoji(text: str) -> str:
 
 def _fmt_uptime(seconds: float) -> str:
     seconds = int(seconds)
-    days, rem = divmod(seconds, 86400)
+    days, rem  = divmod(seconds, 86400)
     hours, rem = divmod(rem, 3600)
     minutes, _ = divmod(rem, 60)
     parts = []
@@ -88,6 +88,9 @@ class PingModule(KitsuneModule):
     description = "Пинг и базовая информация"
     author      = "Yushi"
     version     = "1.5.0"
+
+    _CAPTION_LIMIT = 1024
+    _MESSAGE_LIMIT = 4096
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -155,6 +158,12 @@ class PingModule(KitsuneModule):
             return "—", "—"
 
     @staticmethod
+    def _utf16_len(text: str) -> int:
+        if not text:
+            return 0
+        return sum(2 if ord(c) > 0xFFFF else 1 for c in text)
+
+    @staticmethod
     def _parse_html_with_tg_emoji(html_text: str):
         from telethon.extensions import html as tl_html
         from telethon.tl.types import MessageEntityCustomEmoji
@@ -177,8 +186,8 @@ class PingModule(KitsuneModule):
                 result_text     += plain_before
                 result_entities += list(ents_before or [])
                 cursor          += len(plain_before)
-            emoji_id    = m.group(1)
-            inner_html  = m.group(2)
+            emoji_id   = m.group(1)
+            inner_html = m.group(2)
             inner_plain, inner_ents = tl_html.parse(inner_html)
             for e in (inner_ents or []):
                 e.offset += cursor
@@ -202,6 +211,76 @@ class PingModule(KitsuneModule):
             result_entities += list(ents_tail or [])
         result_entities.sort(key=lambda e: e.offset)
         return result_text, result_entities
+
+    async def _send_media_with_caption(self, peer, media_url, caption, entities):
+        from telethon.tl import functions
+        input_peer = await self.client.get_input_entity(peer)
+        file_handle, media, _image = await self.client._file_to_media(
+            media_url,
+            force_document=False,
+            mime_type=None,
+            file_size=None,
+            progress_callback=None,
+            attributes=None,
+            allow_cache=True,
+            thumb=None,
+            voice_note=False,
+            video_note=False,
+            supports_streaming=False,
+            ttl=None,
+            nosound_video=None,
+        )
+        if not media:
+            raise TypeError("ping media: invalid")
+        request = functions.messages.SendMediaRequest(
+            peer=input_peer,
+            media=media,
+            message=caption or "",
+            entities=entities,
+        )
+        result = await self.client(request)
+        return self.client._get_response_message(request, result, input_peer)
+
+    async def _send_media_no_caption(self, peer, media_url):
+        from telethon.tl import functions
+        input_peer = await self.client.get_input_entity(peer)
+        file_handle, media, _image = await self.client._file_to_media(
+            media_url,
+            force_document=False,
+            mime_type=None,
+            file_size=None,
+            progress_callback=None,
+            attributes=None,
+            allow_cache=True,
+            thumb=None,
+            voice_note=False,
+            video_note=False,
+            supports_streaming=False,
+            ttl=None,
+            nosound_video=None,
+        )
+        if not media:
+            raise TypeError("ping media: invalid")
+        request = functions.messages.SendMediaRequest(
+            peer=input_peer,
+            media=media,
+            message="",
+            entities=[],
+        )
+        result = await self.client(request)
+        return self.client._get_response_message(request, result, input_peer)
+
+    async def _send_message_only(self, peer, text, entities):
+        from telethon.tl import functions
+        input_peer = await self.client.get_input_entity(peer)
+        request = functions.messages.SendMessageRequest(
+            peer=input_peer,
+            message=text or "",
+            entities=entities,
+            no_webpage=True,
+        )
+        result = await self.client(request)
+        return self.client._get_response_message(request, result, input_peer)
 
     @command("ping", required=OWNER)
     async def ping_cmd(self, event) -> None:
@@ -242,28 +321,39 @@ class PingModule(KitsuneModule):
         if media_url:
             try:
                 parsed_text, entities = self._parse_html_with_tg_emoji(text)
-                text_len = sum(2 if ord(c) > 0xFFFF else 1 for c in parsed_text)
-                has_blockquote = bool(re.search(r"<\s*blockquote\b", text, re.IGNORECASE))
-                _CAPTION_LIMIT = 1024
-                fits_caption = (text_len <= _CAPTION_LIMIT) and not has_blockquote
+                text_len = self._utf16_len(parsed_text)
                 try:
-                    if fits_caption:
-                        await self.client.send_file(
+                    if text_len <= self._CAPTION_LIMIT:
+                        await self._send_media_with_caption(
                             event.peer_id,
                             media_url,
-                            caption=parsed_text,
-                            formatting_entities=entities,
+                            parsed_text,
+                            entities,
                         )
                     else:
                         logger.info(
-                            "ping: text_len=%d has_blockquote=%s",
-                            text_len, has_blockquote,
+                            "ping: text_len=%d exceeds caption limit, splitting",
+                            text_len,
                         )
-                        await self.client.send_file(event.peer_id, media_url)
-                        await self.client.send_message(
+                        try:
+                            await self._send_media_no_caption(event.peer_id, media_url)
+                        except (WebpageCurlFailedError, WebpageMediaEmptyError) as e:
+                            logger.warning(
+                                "ping: media send failed (%s), continuing with text only",
+                                type(e).__name__,
+                            )
+                        safe_text = parsed_text
+                        safe_entities = entities
+                        if text_len > self._MESSAGE_LIMIT:
+                            safe_text = parsed_text[: self._MESSAGE_LIMIT]
+                            safe_entities = [
+                                e for e in entities
+                                if e.offset + e.length <= self._MESSAGE_LIMIT
+                            ]
+                        await self._send_message_only(
                             event.peer_id,
-                            parsed_text,
-                            formatting_entities=entities,
+                            safe_text,
+                            safe_entities,
                         )
                     try:
                         await msg.delete()

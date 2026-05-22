@@ -8,26 +8,27 @@ from ..core.security import OWNER
 
 try:
     from telethon.errors import WebpageCurlFailedError, WebpageMediaEmptyError
-except Exception:  # pragma: no cover
-
-
-    class WebpageCurlFailedError(Exception): pass  # type: ignore
-    class WebpageMediaEmptyError(Exception): pass  # type: ignore
+except Exception:
+    class WebpageCurlFailedError(Exception): pass
+    class WebpageMediaEmptyError(Exception): pass
 
 logger = logging.getLogger(__name__)
 
 _DB_OWNER = "kitsune.info"
-
 _DB_CONFIG = "kitsune.config.kitsuneinfo"
+
 
 def _esc(s: str) -> str:
     return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
 class InfoModule(KitsuneModule):
     name        = "KitsuneInfo"
     description = "Информация о UserBot с кастомизацией"
     version     = "1.3.0"
     author      = "@Mikasu32"
     _builtin    = True
+
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.config = ModuleConfig(
@@ -71,6 +72,7 @@ class InfoModule(KitsuneModule):
                 ),
             ),
         )
+
     strings_ru = {
         "owner":           "Владелец",
         "version":         "Версия",
@@ -83,6 +85,10 @@ class InfoModule(KitsuneModule):
         "setinfo_no_args": "❌ Укажи текст: <code>.setinfo текст</code>",
         "setinfo_success": "✅ Info-сообщение обновлено.",
     }
+
+    _CAPTION_LIMIT = 1024
+    _MESSAGE_LIMIT = 4096
+
     def _fmt_uptime(self) -> str:
         stored = self.db.get("kitsune.ping", "start_time", None)
         secs   = int(time.time() - (float(stored) if stored else time.time()))
@@ -94,6 +100,7 @@ class InfoModule(KitsuneModule):
         if hours:  parts.append(f"{hours}ч")
         parts.append(f"{minutes}м")
         return " ".join(parts)
+
     def _get_platform(self) -> str:
         import platform as pf
         import os
@@ -101,24 +108,28 @@ class InfoModule(KitsuneModule):
             return "📱 Termux — Android"
         s = pf.system()
         return {"Linux": "🐧 Linux", "Windows": "🪟 Windows", "Darwin": "🍎 macOS"}.get(s, f"❓ {s}")
+
     def _get_cpu_usage(self) -> str:
         try:
             import psutil
             return f"{psutil.cpu_percent(interval=None):.1f}%"
         except Exception:
             return "—"
+
     def _get_ram_usage(self) -> str:
         try:
             import psutil
             return f"{psutil.virtual_memory().used // 1024 // 1024} MB"
         except Exception:
             return "—"
+
     def _get_version(self) -> str:
         try:
             from ..version import __version_str__
             return __version_str__
         except Exception:
             return "?.?.?"
+
     def _get_git_info(self) -> tuple:
         try:
             import git
@@ -138,6 +149,7 @@ class InfoModule(KitsuneModule):
             return build, branch, upd
         except Exception:
             return "", "unknown", ""
+
     def _render_info(self, me, git_info: tuple | None = None) -> str:
         if hasattr(me, "first_name"):
             name = " ".join(filter(None, [me.first_name, getattr(me, "last_name", None)]))
@@ -171,6 +183,7 @@ class InfoModule(KitsuneModule):
             f"<b>⚡️ CPU | RAM:</b> {cpu} | {ram}\n"
             f"<b>💼 {self.strings('platform')}:</b> {platform}"
         )
+
     def _get_mark(self) -> dict | None:
         btn = self.config["custom_button"]
         if not btn:
@@ -178,13 +191,13 @@ class InfoModule(KitsuneModule):
         if isinstance(btn, (list, tuple)) and len(btn) == 2:
             return {"text": btn[0], "url": btn[1]}
         return None
+
     @staticmethod
     def _parse_html_with_tg_emoji(html_text: str):
-        import re
         from telethon.extensions import html as tl_html
         from telethon.tl.types import MessageEntityCustomEmoji
         tg_pattern = re.compile(
-            r'<tg-emoji\s+emoji-id=["\'](\d+)["\'\']>(.*?)</tg-emoji>',
+            r'<tg-emoji\s+emoji-id=["\'](\d+)["\']>(.*?)</tg-emoji>',
             re.DOTALL,
         )
         if not tg_pattern.search(html_text):
@@ -227,6 +240,7 @@ class InfoModule(KitsuneModule):
             result_entities += list(ents_tail or [])
         result_entities.sort(key=lambda e: e.offset)
         return result_text, result_entities
+
     @staticmethod
     def _is_photo_url(url: str) -> bool:
         if not url:
@@ -242,13 +256,7 @@ class InfoModule(KitsuneModule):
             return False
         if path.endswith(photo_exts):
             return True
-
-
         return False
-
-
-    _CAPTION_LIMIT = 1024
-    _MESSAGE_LIMIT = 4096
 
     @staticmethod
     def _utf16_len(text: str) -> int:
@@ -278,7 +286,7 @@ class InfoModule(KitsuneModule):
         return self.client._get_response_message(request, result, input_peer)
 
     async def _send_banner_protected(self, peer, banner, caption, entities, markup):
-        from telethon.tl import functions, types
+        from telethon.tl import functions
         input_peer = await self.client.get_input_entity(peer)
         file_handle, media, _image = await self.client._file_to_media(
             banner,
@@ -311,7 +319,6 @@ class InfoModule(KitsuneModule):
     async def _send_long_text_protected(self, peer, text, entities, markup):
         from telethon.tl import functions
         input_peer = await self.client.get_input_entity(peer)
-
         request = functions.messages.SendMessageRequest(
             peer=input_peer,
             message=text or "",
@@ -353,6 +360,7 @@ class InfoModule(KitsuneModule):
         )
         result = await self.client(request)
         return self.client._get_response_message(request, result, input_peer)
+
     @command("info", required=OWNER)
     async def info_cmd(self, event) -> None:
         import asyncio as _asyncio
@@ -379,19 +387,8 @@ class InfoModule(KitsuneModule):
                 is_photo = self._is_photo_url(banner)
                 use_quote = bool(self.config["quote_media"]) and is_photo
                 text_len = self._utf16_len(parsed_text)
-
-
-                has_blockquote = bool(re.search(r"<\s*blockquote\b", text, re.IGNORECASE))
-                fits_caption = (text_len <= self._CAPTION_LIMIT) and not has_blockquote
                 try:
                     if use_quote:
-
-
-                        if text_len > self._MESSAGE_LIMIT:
-                            logger.warning(
-                                "info: текст (%d UTF-16) превышает лимит сообщения %d, будет обрезан",
-                                text_len, self._MESSAGE_LIMIT,
-                            )
                         try:
                             await self._send_webpage_quote(
                                 event.peer_id,
@@ -404,18 +401,11 @@ class InfoModule(KitsuneModule):
                             await event.message.delete()
                             return
                         except (WebpageCurlFailedError, WebpageMediaEmptyError) as e:
-
-
                             logger.warning(
-                                "info: Telegram не смог загрузить превью (%s), отправляю как обычное медиа",
+                                "info: webpage preview failed (%s), fallback to media with caption",
                                 type(e).__name__,
                             )
-
-
-                            use_quote = False
-
-
-                    if fits_caption:
+                    if text_len <= self._CAPTION_LIMIT:
                         try:
                             await self._send_banner_protected(
                                 event.peer_id,
@@ -427,63 +417,58 @@ class InfoModule(KitsuneModule):
                             await event.message.delete()
                             return
                         except (WebpageCurlFailedError, WebpageMediaEmptyError) as e:
-
-
                             logger.warning(
-                                "info: отправка медиа с caption не удалась (%s), отправляю раздельно",
+                                "info: media with caption failed (%s), fallback to separate send",
                                 type(e).__name__,
                             )
-
-
                     logger.info(
-                        "info: text_len=%d, has_blockquote=%s — раздельная отправка",
-                        text_len, has_blockquote,
+                        "info: text_len=%d exceeds caption limit, splitting into media + message",
+                        text_len,
                     )
                     try:
                         await self._send_banner_no_caption(event.peer_id, banner)
                     except (WebpageCurlFailedError, WebpageMediaEmptyError) as e:
                         logger.warning(
-                            "info: не удалось отправить баннер (%s), пропускаю медиа",
+                            "info: banner send failed (%s), skipping media",
                             type(e).__name__,
                         )
                     except Exception:
-                        logger.exception("info: не удалось отправить баннер без подписи")
-                    if text_len > self._MESSAGE_LIMIT:
-                        logger.warning(
-                            "info: текст (%d UTF-16) превышает %d, будет обрезан",
-                            text_len, self._MESSAGE_LIMIT,
-                        )
+                        logger.exception("info: banner without caption failed")
+                    safe_text = parsed_text
+                    safe_entities = entities
+                    if self._utf16_len(parsed_text) > self._MESSAGE_LIMIT:
+                        safe_text = parsed_text[: self._MESSAGE_LIMIT]
+                        safe_entities = [
+                            e for e in entities
+                            if e.offset + e.length <= self._MESSAGE_LIMIT
+                        ]
                     await self._send_long_text_protected(
                         event.peer_id,
-                        parsed_text,
-                        entities,
+                        safe_text,
+                        safe_entities,
                         markup,
                     )
                     await event.message.delete()
                     return
                 except (WebpageCurlFailedError, WebpageMediaEmptyError) as e:
-
-
                     logger.warning(
-                        "info: все попытки отправить баннер провалились (%s), показываю текст без медиа",
+                        "info: all banner attempts failed (%s), showing text only",
                         type(e).__name__,
                     )
-
                 except Exception:
-                    logger.exception("info: не удалось отправить баннер с подписью")
-
-
+                    logger.exception("info: banner with caption failed")
             text_len = self._utf16_len(parsed_text)
             if text_len <= self._MESSAGE_LIMIT:
                 await event.message.edit(parsed_text, formatting_entities=entities, buttons=markup)
             else:
-                logger.warning(
-                    "info: текст без баннера превышает лимит сообщения %d (UTF-16 %d), будет обрезан",
-                    self._MESSAGE_LIMIT, text_len,
-                )
+                trimmed = parsed_text[: self._MESSAGE_LIMIT]
+                trimmed_entities = [
+                    e for e in entities
+                    if e.offset + e.length <= self._MESSAGE_LIMIT
+                ]
                 await event.message.edit(
-                    parsed_text[: self._MESSAGE_LIMIT],
-                    formatting_entities=entities,
+                    trimmed,
+                    formatting_entities=trimmed_entities,
                     buttons=markup,
                 )
             return
@@ -498,6 +483,7 @@ class InfoModule(KitsuneModule):
             )
         else:
             await event.edit(text, parse_mode="html")
+
     @command("cdn", required=OWNER)
     async def cdn_cmd(self, event) -> None:
         args = self.get_args(event).strip()
@@ -527,6 +513,7 @@ class InfoModule(KitsuneModule):
             f"✅ CDN ссылка:\n<code>{cdn_url}</code>",
             parse_mode="html",
         )
+
     @command("setinfo", required=OWNER)
     async def setinfo_cmd(self, event) -> None:
         args = self.get_args(event)
@@ -536,11 +523,13 @@ class InfoModule(KitsuneModule):
         self.config["custom_message"] = args
         await self.db.set(_DB_CONFIG, "custom_message", args)
         await event.reply(self.strings("setinfo_success"), parse_mode="html")
+
     @command("resetinfo", required=OWNER)
     async def resetinfo_cmd(self, event) -> None:
         self.config["custom_message"] = None
         await self.db.delete(_DB_CONFIG, "custom_message")
         await event.reply("✅ Info-сообщение сброшено.", parse_mode="html")
+
     @command("fmt", required=OWNER)
     async def fmt_cmd(self, event) -> None:
         args = self.get_args(event).strip()
@@ -583,6 +572,7 @@ class InfoModule(KitsuneModule):
         await event.message.edit(
             f"✅ Скопируй и вставь в fcfg kitsuneinfo custom_message:\n\n{result}",
         )
+
     async def emoji_cmd(self, event) -> None:
         from telethon.tl.types import MessageEntityCustomEmoji
         args = self.get_args(event).strip()
