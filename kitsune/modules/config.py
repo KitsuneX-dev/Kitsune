@@ -13,9 +13,17 @@ NUM_ROWS = 5
 
 _DB_PREFIX = "kitsune.config"
 
+# Maximum length of value to display in config screen before truncating
+_MAX_DISPLAY_LEN = 1800
+
 def _esc(s: str) -> str:
     return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-def _fmt_value(value) -> str:
+
+def _esc_pre(s: str) -> str:
+    """Escape for use inside <pre> tag - only need to escape </pre>"""
+    return str(s).replace("</pre>", "<\/pre>")
+
+def _fmt_value(value, for_pre: bool = False) -> str:
     if value is None or value == "":
         return "<code>None</code>"
     if isinstance(value, bool):
@@ -25,9 +33,35 @@ def _fmt_value(value) -> str:
             return "<code>[]</code>"
         items = "\n    ".join(f"<code>{_esc(str(i))}</code>" for i in value)
         return f"<code>[</code>\n    {items}\n<code>]</code>"
-    return f"<code>{_esc(str(value))}</code>"
+
+    str_val = str(value)
+    # For multi-line strings or strings with HTML-like content, use <pre>
+    if "\n" in str_val or len(str_val) > 100 or "<" in str_val:
+        # Truncate if too long
+        if len(str_val) > _MAX_DISPLAY_LEN:
+            str_val = str_val[:_MAX_DISPLAY_LEN] + "... [урезано, значение слишком длинное]"
+        # Use <pre> for proper multi-line display
+        escaped = _esc_pre(str_val)
+        return f"<pre>{escaped}</pre>"
+
+    return f"<code>{_esc(str_val)}</code>"
+
+def _fmt_value_short(value) -> str:
+    """Format value for compact display (e.g., in mod list)"""
+    if value is None or value == "":
+        return "None"
+    if isinstance(value, bool):
+        return "True" if value else "False"
+    if isinstance(value, list):
+        return f"[{len(value)} items]"
+    str_val = str(value)
+    if len(str_val) > 60:
+        return str_val[:57] + "..."
+    return str_val
+
 def _chunks(lst: list, n: int) -> list:
     return [lst[i:i + n] for i in range(0, len(lst), n)]
+
 def _get_configurable(client) -> dict:
     from ..core.loader import ModuleConfig
     loader = getattr(client, "_kitsune_loader", None)
@@ -38,24 +72,27 @@ def _get_configurable(client) -> dict:
         for name, mod in loader.modules.items()
         if isinstance(getattr(mod, "config", None), ModuleConfig)
     }
+
 def _mod_text(mod_name: str, mod) -> str:
     lines = ""
     for k in mod.config.keys():
-        lines += f"▫️ <code>{_esc(k)}</code>: <b>{_fmt_value(mod.config[k])}</b>\n"
+        lines += f"▫️ <code>{_esc(k)}</code>: <b>{_fmt_value_short(mod.config[k])}</b>\n"
     return (
         f"⚙️ <b>{_esc(mod.name)}</b> — <code>{_esc(mod_name)}</code>\n\n"
         f"{lines or '—'}"
     )
+
 def _list_text(configurable: dict) -> str:
     if not configurable:
         return "⚙️ <b>Нет модулей с настройками.</b>"
     names = ", ".join(f"<code>{_esc(n)}</code>" for n in sorted(configurable.keys()))
     return f"⚙️ <b>Выбери модуль для настройки:</b>\n\n{names}"
+
 class ConfigModule(KitsuneModule):
     name        = "Config"
     description = "Интерактивная настройка параметров модулей"
     author      = "@Mikasu32"
-    version     = "1.3.0"
+    version     = "1.3.1"
     strings_ru = {
         "choose_core":    "⚙️ <b>Выбери категорию</b>",
         "builtin":        "🛰 Встроенные",
@@ -122,7 +159,7 @@ class ConfigModule(KitsuneModule):
     def _rows_text(self, mod) -> str:
         lines = ""
         for k in mod.config.keys():
-            lines += f"▫️ <code>{_esc(k)}</code>: <b>{_fmt_value(mod.config[k])}</b>\n"
+            lines += f"▫️ <code>{_esc(k)}</code>: <b>{_fmt_value_short(mod.config[k])}</b>\n"
         return lines or "—"
     async def _save_config(self, mod_name: str, mod) -> None:
         for k in mod.config.keys():

@@ -25,7 +25,7 @@ def _esc(s: str) -> str:
 class InfoModule(KitsuneModule):
     name        = "KitsuneInfo"
     description = "Информация о UserBot с кастомизацией"
-    version     = "1.3.0"
+    version     = "1.3.1"
     author      = "@Mikasu32"
     _builtin    = True
 
