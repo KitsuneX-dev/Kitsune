@@ -9,6 +9,11 @@ from .._json import dumps as json_dumps, loads as json_loads, is_serializable
 
 logger = logging.getLogger(__name__)
 
+try:
+    _IS_ANDROID = "android" in Path("/proc/version").read_text().lower()
+except Exception:
+    _IS_ANDROID = False
+
 JSONValue = typing.Union[
     None, bool, int, float, str,
     typing.List[typing.Any],
@@ -23,11 +28,7 @@ class SQLiteBackend:
     def _get_conn(self) -> sqlite3.Connection:
         if self._conn is None:
             conn = sqlite3.connect(str(self._path), timeout=10, check_same_thread=False)
-            try:
-                _android = "android" in Path("/proc/version").read_text().lower()
-            except Exception:
-                _android = False
-            if _android:
+            if _IS_ANDROID:
                 conn.execute("PRAGMA journal_mode=DELETE")
                 conn.execute("PRAGMA synchronous=NORMAL")
                 conn.execute("PRAGMA mmap_size=0")
