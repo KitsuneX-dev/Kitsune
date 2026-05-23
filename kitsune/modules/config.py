@@ -149,7 +149,7 @@ class ConfigModule(KitsuneModule):
     name        = "Config"
     description = "Интерактивная настройка параметров модулей"
     author      = "@Mikasu32"
-    version     = "1.4.0"
+    version     = "1.4.1"
     strings_ru = {
         "choose_core":    "⚙️ <b>Выбери категорию</b>",
         "builtin":        "🛰 Встроенные",

@@ -21,6 +21,8 @@ def _msg(sender_id=None, chat_id=None):
     return SimpleNamespace(sender_id=sender_id, chat_id=chat_id)
 def _client(me_id=1000):
     c = MagicMock()
+    c.tg_me = None
+    c.tg_id = None
     c.get_me = AsyncMock(return_value=SimpleNamespace(id=me_id))
     c.get_permissions = AsyncMock()
     return c

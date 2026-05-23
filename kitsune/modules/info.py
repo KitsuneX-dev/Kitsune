@@ -92,7 +92,7 @@ def _extract_html_with_entities(raw_value: str, full_raw: str, entities: list) -
 class InfoModule(KitsuneModule):
     name        = "KitsuneInfo"
     description = "Информация о UserBot с кастомизацией"
-    version     = "1.4.0"
+    version     = "1.4.1"
     author      = "@Mikasu32"
     _builtin    = True
 

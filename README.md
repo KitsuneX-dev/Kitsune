@@ -5,7 +5,7 @@
 <br/>
 
 [![Python](https://img.shields.io/badge/Python-3.13-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
-[![Version](https://img.shields.io/badge/Версия-1.3.0-blueviolet?style=flat-square)](https://github.com/KitsuneX-dev/Kitsune/releases/tag/v1.3.0)
+[![Version](https://img.shields.io/badge/Версия-1.4.1-blueviolet?style=flat-square)](https://github.com/KitsuneX-dev/Kitsune/releases/tag/v1.4.1)
 [![License](https://img.shields.io/badge/License-AGPLv3-blue?style=flat-square)](LICENSE)
 [![Telegram](https://img.shields.io/badge/Автор-@Mikasu32-2CA5E0?style=flat-square&logo=telegram)](https://t.me/Mikasu32)
 
