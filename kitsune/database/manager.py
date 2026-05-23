@@ -23,13 +23,25 @@ class SQLiteBackend:
     def _get_conn(self) -> sqlite3.Connection:
         if self._conn is None:
             conn = sqlite3.connect(str(self._path), timeout=10, check_same_thread=False)
-            conn.execute("PRAGMA journal_mode=WAL")
-            conn.execute("PRAGMA synchronous=NORMAL")
-            conn.execute("PRAGMA cache_size=-8000")
-            conn.execute("PRAGMA temp_store=MEMORY")
-            conn.execute("PRAGMA mmap_size=67108864")
-            conn.execute("PRAGMA wal_autocheckpoint=10000")
-            conn.execute("PRAGMA busy_timeout=5000")
+            try:
+                _android = "android" in Path("/proc/version").read_text().lower()
+            except Exception:
+                _android = False
+            if _android:
+                conn.execute("PRAGMA journal_mode=DELETE")
+                conn.execute("PRAGMA synchronous=NORMAL")
+                conn.execute("PRAGMA mmap_size=0")
+                conn.execute("PRAGMA cache_size=-4000")
+                conn.execute("PRAGMA temp_store=MEMORY")
+                conn.execute("PRAGMA busy_timeout=5000")
+            else:
+                conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute("PRAGMA synchronous=NORMAL")
+                conn.execute("PRAGMA cache_size=-8000")
+                conn.execute("PRAGMA mmap_size=67108864")
+                conn.execute("PRAGMA temp_store=MEMORY")
+                conn.execute("PRAGMA wal_autocheckpoint=10000")
+                conn.execute("PRAGMA busy_timeout=5000")
             conn.execute(
                 "CREATE TABLE IF NOT EXISTS kitsune_db "
                 "(owner TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, "
