@@ -15,6 +15,14 @@ _TG_EMOJI_VALID = re.compile(
 _TG_EMOJI_ANY_OPEN = re.compile(r'<tg-emoji\b[^>]*>', re.IGNORECASE)
 _TG_EMOJI_ANY_CLOSE = re.compile(r'</tg-emoji\s*>', re.IGNORECASE)
 
+_TG_ALLOWED_TAGS = {
+    "b", "strong", "i", "em", "u", "ins", "s", "strike", "del",
+    "span", "tg-spoiler", "a", "code", "pre", "blockquote", "tg-emoji",
+    "br",
+}
+_TG_VOID_TAGS = {"br"}
+_HTML_TAG_RE = re.compile(r'<(/?)([a-zA-Z][a-zA-Z0-9-]*)\b([^>]*)>')
+
 def _normalize_tg_emoji(text: str) -> str:
     if not text or "tg-emoji" not in text.lower():
         return text
@@ -30,6 +38,69 @@ def _strip_tg_emoji(text: str) -> str:
     text = _TG_EMOJI_ANY_OPEN.sub("", text)
     text = _TG_EMOJI_ANY_CLOSE.sub("", text)
     return text
+
+def _sanitize_tg_html(text: str) -> str:
+    if not text or "<" not in text:
+        return text
+    text = _normalize_tg_emoji(text)
+    parts: list[str] = []
+    stack: list[tuple[str, str]] = []
+    pos = 0
+    for m in _HTML_TAG_RE.finditer(text):
+        parts.append(text[pos:m.start()])
+        pos = m.end()
+        is_close = m.group(1) == "/"
+        tag = m.group(2).lower()
+        attrs = m.group(3) or ""
+        if tag not in _TG_ALLOWED_TAGS:
+            continue
+        if tag in _TG_VOID_TAGS:
+            if not is_close:
+                parts.append(f"<{tag}>")
+            continue
+        if not is_close:
+            parts.append(f"<{tag}{attrs}>")
+            stack.append((tag, attrs))
+            continue
+        if not stack:
+            continue
+        if stack[-1][0] == tag:
+            stack.pop()
+            parts.append(f"</{tag}>")
+            continue
+        idx = None
+        for i in range(len(stack) - 1, -1, -1):
+            if stack[i][0] == tag:
+                idx = i
+                break
+        if idx is None:
+            continue
+        reopen: list[tuple[str, str]] = []
+        while len(stack) > idx + 1:
+            top_tag, top_attrs = stack.pop()
+            parts.append(f"</{top_tag}>")
+            reopen.append((top_tag, top_attrs))
+        stack.pop()
+        parts.append(f"</{tag}>")
+        for r_tag, r_attrs in reversed(reopen):
+            parts.append(f"<{r_tag}{r_attrs}>")
+            stack.append((r_tag, r_attrs))
+    parts.append(text[pos:])
+    while stack:
+        top_tag, _ = stack.pop()
+        parts.append(f"</{top_tag}>")
+    result = "".join(parts)
+    prev = None
+    empty_pair = re.compile(r'<([a-zA-Z][a-zA-Z0-9-]*)\b[^>]*>\s*</\1>')
+    while prev != result:
+        prev = result
+        result = empty_pair.sub("", result)
+    return result
+
+def _strip_all_html(text: str) -> str:
+    if not text or "<" not in text:
+        return text
+    return _HTML_TAG_RE.sub("", text)
 
 try:
     from aiogram import Bot, Dispatcher, Router
@@ -178,7 +249,7 @@ class InlineManager:
                 media_type = "gif" if ext in (".gif", ".mp4") else "video"
             except Exception:
                 media_type = "video"
-        text = _normalize_tg_emoji(text)
+        text = _sanitize_tg_html(text)
         unit_id = str(uuid.uuid4())[:16]
         future: asyncio.Future = asyncio.get_event_loop().create_future()
         origin_chat_id = getattr(message, "chat_id", None) or getattr(message, "peer_id", None)
@@ -213,7 +284,7 @@ class InlineManager:
     ) -> None:
         if not AIOGRAM_AVAILABLE or not self._bot:
             return
-        text = _normalize_tg_emoji(text)
+        text = _sanitize_tg_html(text)
         markup = self.generate_markup(reply_markup or [])
         effective_iid = inline_message_id or getattr(call_or_msg, "inline_message_id", None)
         if effective_iid:
@@ -498,7 +569,10 @@ class InlineManager:
             await query.answer([], cache_time=0)
             return
         markup = self.generate_markup(unit.get("buttons", []))
-        try:
+        raw_text = unit.get("text", "") or ""
+        safe_text = _sanitize_tg_html(raw_text)
+        unit["text"] = safe_text
+        async def _send(_payload_text: str, _parse_mode: str | None):
             if "gif" in unit:
                 await query.answer(
                     results=[
@@ -507,22 +581,23 @@ class InlineManager:
                             gif_url=unit["gif"],
                             thumbnail_url="https://img.icons8.com/cotton/452/moon-satellite.png",
                             title="Kitsune",
-                            caption=unit["text"],
-                            parse_mode="HTML",
+                            caption=_payload_text,
+                            parse_mode=_parse_mode,
                             reply_markup=markup,
                         )
                     ],
                     cache_time=0,
                 )
-            elif "video" in unit:
+                return
+            if "video" in unit:
                 await query.answer(
                     results=[
                         InlineQueryResultVideo(
                             id=str(uuid.uuid4()),
                             title="Kitsune",
                             description="Kitsune UserBot",
-                            caption=unit["text"],
-                            parse_mode="HTML",
+                            caption=_payload_text,
+                            parse_mode=_parse_mode,
                             video_url=unit["video"],
                             thumbnail_url="https://img.icons8.com/cotton/452/moon-satellite.png",
                             mime_type="video/mp4",
@@ -531,24 +606,50 @@ class InlineManager:
                     ],
                     cache_time=0,
                 )
-            else:
-                await query.answer(
-                    results=[
-                        InlineQueryResultArticle(
-                            id=str(uuid.uuid4()),
-                            title="Kitsune",
-                            input_message_content=InputTextMessageContent(
-                                message_text=unit["text"],
-                                parse_mode="HTML",
-                                disable_web_page_preview=True,
-                            ),
-                            reply_markup=markup,
-                        )
-                    ],
-                    cache_time=0,
-                )
-        except Exception:
+                return
+            await query.answer(
+                results=[
+                    InlineQueryResultArticle(
+                        id=str(uuid.uuid4()),
+                        title="Kitsune",
+                        input_message_content=InputTextMessageContent(
+                            message_text=_payload_text,
+                            parse_mode=_parse_mode,
+                            disable_web_page_preview=True,
+                        ),
+                        reply_markup=markup,
+                    )
+                ],
+                cache_time=0,
+            )
+        try:
+            await _send(safe_text, "HTML")
+        except Exception as exc_html:
+            err = str(exc_html).lower()
+            if (
+                "can't parse entities" in err
+                or "unmatched end tag" in err
+                or "unclosed start tag" in err
+                or "unsupported start tag" in err
+                or "empty attribute name" in err
+                or "can't parse inline query result" in err
+            ):
+                stripped = _strip_all_html(raw_text)
+                try:
+                    await _send(stripped, None)
+                    return
+                except Exception:
+                    logger.exception("InlineManager._on_inline_query: plain-text fallback failed")
+                    try:
+                        await query.answer([], cache_time=0)
+                    except Exception:
+                        pass
+                    return
             logger.exception("InlineManager._on_inline_query failed")
+            try:
+                await query.answer([], cache_time=0)
+            except Exception:
+                pass
     async def _wipe_input_message(self, chat_id, sender_id=None) -> None:
         if chat_id is None:
             return
