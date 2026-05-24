@@ -1,9 +1,12 @@
 from __future__ import annotations
 import asyncio
+import inspect
 import io
 from ..hydro_media import send_file as _hydro_send_file
 import logging
 from pathlib import Path
+from telethon.extensions import html as tl_html
+from telethon.tl.types import MessageEntityBlockquote
 from ..core.loader import KitsuneModule, command, ModuleConfig, ConfigValue
 from ..core.security import OWNER
 
@@ -55,6 +58,79 @@ class LoaderModule(KitsuneModule):
     }
     def _loader(self):
         return getattr(self.client, "_kitsune_loader", None)
+    def _dispatcher(self):
+        return getattr(self.client, "_kitsune_dispatcher", None)
+    def _prefix(self) -> str:
+        d = self._dispatcher()
+        return d._prefix if d else "."
+    def _help_icon(self) -> str:
+        loader = self._loader()
+        if loader:
+            help_mod = loader.modules.get("help")
+            if help_mod and getattr(help_mod, "config", None):
+                try:
+                    return help_mod.config["desc_icon"]
+                except Exception:
+                    pass
+        return "🦊"
+    def _help_command_emoji(self) -> str:
+        loader = self._loader()
+        if loader:
+            help_mod = loader.modules.get("help")
+            if help_mod and getattr(help_mod, "config", None):
+                try:
+                    return help_mod.config["command_emoji"]
+                except Exception:
+                    pass
+        return "▫️"
+    @staticmethod
+    async def _edit_collapsed(message, html_text: str) -> None:
+        text, entities = tl_html.parse(html_text)
+        for e in entities:
+            if isinstance(e, MessageEntityBlockquote):
+                e.collapsed = True
+        await message.edit(text, formatting_entities=entities)
+    def _build_mod_help_body(self, mod: KitsuneModule) -> str:
+        prefix  = self._prefix()
+        icon    = self._help_icon()
+        cmd_emoji = self._help_command_emoji()
+        display = mod.name or mod.__class__.__name__
+        version = getattr(mod, "version", "")
+        ver_str = f" <i>v{version}</i>" if version else ""
+        header = f"{icon} <b>{display}</b>{ver_str}:"
+        if mod.description:
+            header += f"\n<i>ℹ️ {mod.description}</i>"
+        cmd_lines = []
+        for attr in sorted(dir(mod)):
+            m = getattr(mod, attr, None)
+            if not (callable(m) and getattr(m, "_is_command", False)):
+                continue
+            cmd_name = m._command_name
+            doc = (inspect.getdoc(m) or "").strip()
+            if "—" in doc:
+                doc = doc.split("—", 1)[-1].strip()
+            elif doc.lower().startswith(f"{prefix}{cmd_name}") or doc.lower().startswith(f".{cmd_name}"):
+                doc = ""
+            cmd_lines.append(
+                f"{cmd_emoji} <code>{prefix}{cmd_name}</code>"
+                + (f" — {doc}" if doc else "")
+            )
+        body = header
+        if cmd_lines:
+            body += "\n<blockquote expandable>\n" + "\n".join(cmd_lines) + "\n</blockquote>"
+        return body
+    async def _show_installed_help(self, event, mod: KitsuneModule) -> None:
+        try:
+            body = self._build_mod_help_body(mod)
+            await self._edit_collapsed(event.message, body)
+        except Exception:
+            logger.exception("loader: failed to render installed help, fallback to plain text")
+            try:
+                await event.message.edit(
+                    self.strings("installed").format(name=mod.name), parse_mode="html"
+                )
+            except Exception:
+                pass
     def _get_user_modules(self) -> dict:
         return self.db.get(_DB_OWNER, "user_modules", {})
     async def _save_user_modules(self, mods: dict) -> None:
@@ -120,9 +196,7 @@ class LoaderModule(KitsuneModule):
             user_mods = self._get_user_modules()
             user_mods[mod.name] = url
             await self._save_user_modules(user_mods)
-            await event.message.edit(
-                self.strings("installed").format(name=mod.name), parse_mode="html"
-            )
+            await self._show_installed_help(event, mod)
         except Exception as exc:
             logger.exception("dlmod: failed to install %s", url)
             await event.message.edit(
@@ -160,9 +234,7 @@ class LoaderModule(KitsuneModule):
                 pass
         try:
             mod = await loader.load_from_file(path, progress_cb=progress_cb)
-            await event.message.edit(
-                self.strings("installed").format(name=mod.name), parse_mode="html"
-            )
+            await self._show_installed_help(event, mod)
         except Exception as exc:
             logger.exception("loadmod: failed")
             await event.message.edit(

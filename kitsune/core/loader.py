@@ -9,6 +9,7 @@ import logging
 import os
 import sys
 import typing
+import shutil
 from pathlib import Path
 from types import ModuleType
 
@@ -94,6 +95,10 @@ class KitsuneModule:
     icon: str = "📦"
     category: str = "other"
     requires: typing.ClassVar[list[str]] = []
+
+    pip_requires: typing.ClassVar[list[str]] = []
+
+    system_requires: typing.ClassVar[list[str]] = []
     def __init__(self, client: typing.Any, db: typing.Any) -> None:
         self.client = client
         self.db = db
@@ -206,7 +211,6 @@ class _ASTScanner(ast.NodeVisitor):
                     )
                 elif self._is_dynamic_arg(node.args[0]):
 
-
                     self.errors.append(
                         f"Blocked dynamic importlib.import_module call (line {node.lineno})"
                     )
@@ -240,7 +244,6 @@ class _ASTScanner(ast.NodeVisitor):
                 )
             elif self._is_dynamic_arg(node.args[0]):
 
-
                 self.errors.append(
                     f"Blocked dynamic __import__ call (line {node.lineno})"
                 )
@@ -263,7 +266,6 @@ class _ASTScanner(ast.NodeVisitor):
                     f"Blocked {node.func.id} without arguments (line {node.lineno})"
                 )
             elif self._is_dynamic_arg(node.args[0]):
-
 
                 self.errors.append(
                     f"Blocked dynamic {node.func.id} call (line {node.lineno})"
@@ -338,6 +340,14 @@ def _extract_missing_package(exc: ImportError) -> str | None:
     return None
 _IMPORT_TO_PIP: dict[str, str] = {
     "PIL": "Pillow",
+    "matplotlib": "matplotlib",
+    "numpy": "numpy",
+    "spotipy": "spotipy",
+    "mutagen": "mutagen",
+    "pydub": "pydub",
+    "qrcode": "qrcode",
+    "aiofiles": "aiofiles",
+    "fake_useragent": "fake-useragent",
     "cv2": "opencv-python",
     "yaml": "PyYAML",
     "bs4": "beautifulsoup4",
@@ -353,6 +363,32 @@ _IMPORT_TO_PIP: dict[str, str] = {
     "google": "google-generativeai",
 }
 
+async def _run_cmd(args: list[str]) -> tuple[bool, str]:
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *args,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate()
+        return proc.returncode == 0, stderr.decode(errors="replace")
+    except FileNotFoundError:
+        return False, "command not found"
+    except Exception as exc:
+        return False, str(exc)
+
+def _is_permission_error(stderr: str) -> bool:
+    _permission_markers = (
+        "permission denied",
+        "could not open lock file",
+        "are you root",
+        "operation not permitted",
+        "eacces",
+        "eperm",
+    )
+    low = stderr.lower()
+    return any(m in low for m in _permission_markers)
+
 async def _pip_install(package: str) -> bool:
     pip_name = _IMPORT_TO_PIP.get(package, package)
     import os as _os
@@ -363,22 +399,133 @@ async def _pip_install(package: str) -> bool:
         args.append("--upgrade")
     if is_termux:
         args += ["--prefer-binary", "--no-build-isolation"]
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            *args,
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        _, stderr = await proc.communicate()
-        if proc.returncode == 0:
-            logger.info("Loader: installed %r successfully", pip_name)
+
+    ok, stderr = await _run_cmd(args)
+    if ok:
+        logger.info("Loader: pip installed %r successfully", pip_name)
+        importlib.invalidate_caches()
+        return True
+
+    if _is_permission_error(stderr):
+        logger.info("Loader: pip install %r failed with permission error, retrying with sudo", pip_name)
+        ok, stderr = await _run_cmd(["sudo"] + args)
+        if ok:
+            logger.info("Loader: pip installed %r successfully (sudo)", pip_name)
             importlib.invalidate_caches()
             return True
-        logger.warning("Loader: pip install %r failed: %s", pip_name, stderr.decode(errors="replace")[:300])
+        logger.warning("Loader: pip install %r failed even with sudo: %s", pip_name, stderr[:300])
+    else:
+        logger.warning("Loader: pip install %r failed: %s", pip_name, stderr[:300])
+
+    return False
+
+_SYSTEM_UTIL_TO_PKG: dict[str, dict[str, str]] = {
+    "ffmpeg":    {"apt": "ffmpeg",       "termux": "ffmpeg"},
+    "ffprobe":   {"apt": "ffmpeg",       "termux": "ffmpeg"},
+    "convert":   {"apt": "imagemagick",  "termux": "imagemagick"},
+    "wget":      {"apt": "wget",         "termux": "wget"},
+    "curl":      {"apt": "curl",         "termux": "curl"},
+    "yt-dlp":    {"apt": "yt-dlp",       "termux": "yt-dlp"},
+    "gallery-dl":{"apt": "gallery-dl",   "termux": "gallery-dl"},
+}
+
+def _is_termux() -> bool:
+    import os as _os
+    return "com.termux" in _os.environ.get("PREFIX", "") or _os.path.isdir("/data/data/com.termux")
+
+async def _system_install(utility: str) -> bool:
+    pkg_map = _SYSTEM_UTIL_TO_PKG.get(utility)
+    if not pkg_map:
+        logger.warning("Loader: no system package known for utility %r", utility)
         return False
-    except Exception as exc:
-        logger.warning("Loader: pip install %r exception: %s", pip_name, exc)
+
+    if _is_termux():
+
+        cmd = ["termux-pkg", "install", "-y", pkg_map["termux"]]
+        ok, stderr = await _run_cmd(cmd)
+        if ok:
+            logger.info("Loader: system package for %r installed (termux)", utility)
+            return True
+        logger.warning("Loader: termux-pkg install %r failed: %s", utility, stderr[:200])
         return False
+
+    cmd = ["apt-get", "install", "-y", "--no-install-recommends", pkg_map["apt"]]
+    ok, stderr = await _run_cmd(cmd)
+    if ok:
+        logger.info("Loader: system package for %r installed successfully", utility)
+        return True
+
+    if _is_permission_error(stderr):
+        logger.info(
+            "Loader: apt-get for %r failed with permission error, retrying with sudo", utility
+        )
+        ok, stderr = await _run_cmd(["sudo"] + cmd)
+        if ok:
+            logger.info("Loader: system package for %r installed successfully (sudo)", utility)
+            return True
+        logger.warning(
+            "Loader: apt-get install %r failed even with sudo: %s", utility, stderr[:200]
+        )
+    else:
+        logger.warning("Loader: apt-get install %r failed: %s", utility, stderr[:200])
+
+    return False
+
+async def _ensure_pip_deps(
+    deps: list[str],
+    progress_cb=None,
+    already_installed: set[str] | None = None,
+) -> tuple[list[str], list[str]]:
+    ok: list[str] = []
+    failed: list[str] = []
+    if already_installed is None:
+        already_installed = set()
+    for dep in deps:
+        if dep in already_installed:
+            ok.append(dep)
+            continue
+        pip_name = _IMPORT_TO_PIP.get(dep, dep)
+        if progress_cb:
+            try:
+                await progress_cb(
+                    f"📦 Устанавливаю зависимость <code>{pip_name}</code>..."
+                )
+            except Exception:
+                pass
+        if await _pip_install(dep):
+            ok.append(dep)
+            already_installed.add(dep)
+        else:
+            failed.append(pip_name)
+    return ok, failed
+
+async def _ensure_system_deps(
+    utils: list[str],
+    progress_cb=None,
+) -> tuple[list[str], list[str]]:
+    ok: list[str] = []
+    failed: list[str] = []
+    for util in utils:
+        if shutil.which(util) is not None:
+            ok.append(util)
+            continue
+        if progress_cb:
+            try:
+                await progress_cb(
+                    f"🔧 Устанавливаю системную утилиту <code>{util}</code>..."
+                )
+            except Exception:
+                pass
+        if await _system_install(util):
+            if shutil.which(util) is not None:
+                ok.append(util)
+            else:
+                logger.warning("Loader: %r installed but still not found in PATH", util)
+                failed.append(util)
+        else:
+            failed.append(util)
+    return ok, failed
+
 _INIT_SIGNATURE_CACHE: dict[type, int] = {}
 
 def _module_param_count(mod_class: type) -> int:
@@ -533,41 +680,143 @@ class Loader:
             py_module.__path__ = [str(path.parent)]
             py_module.__package__ = module_name
         sys.modules[module_name] = py_module
-        try:
-            spec.loader.exec_module(py_module)
-        except ImportError as exc:
-            missing_pkg = _extract_missing_package(exc)
-            if missing_pkg and not is_builtin:
-                logger.info("Loader: missing package %r — attempting auto-install", missing_pkg)
+
+        if not is_builtin:
+
+            _pre_pip: list[str] = []
+            _pre_sys: list[str] = []
+            try:
+                _pre_tree = __import__("ast").parse(source)
+                for _node in __import__("ast").walk(_pre_tree):
+                    if isinstance(_node, __import__("ast").ClassDef):
+                        for _stmt in _node.body:
+                            if (
+                                isinstance(_stmt, __import__("ast").Assign)
+                                and len(_stmt.targets) == 1
+                                and isinstance(_stmt.targets[0], __import__("ast").Name)
+                            ):
+                                _tname = _stmt.targets[0].id
+                                if _tname == "pip_requires" and isinstance(_stmt.value, __import__("ast").List):
+                                    _pre_pip = [
+                                        elt.s for elt in _stmt.value.elts
+                                        if isinstance(elt, __import__("ast").Constant)
+                                    ]
+                                elif _tname == "system_requires" and isinstance(_stmt.value, __import__("ast").List):
+                                    _pre_sys = [
+                                        elt.s for elt in _stmt.value.elts
+                                        if isinstance(elt, __import__("ast").Constant)
+                                    ]
+            except Exception:
+                pass
+
+            _all_pre_deps = _pre_pip
+            _all_pre_sys = _pre_sys
+
+            if _all_pre_deps or _all_pre_sys:
                 if progress_cb:
                     try:
-                        await progress_cb(f"📦 Устанавливаю зависимость <code>{missing_pkg}</code>...")
+                        _dep_names = ", ".join(
+                            f"<code>{_IMPORT_TO_PIP.get(d, d)}</code>"
+                            for d in _all_pre_deps
+                        )
+                        _sys_names = ", ".join(f"<code>{s}</code>" for s in _all_pre_sys)
+                        _parts = []
+                        if _dep_names:
+                            _parts.append(_dep_names)
+                        if _sys_names:
+                            _parts.append(_sys_names)
+                        await progress_cb(
+                            f"🦊 Kitsune настраивает нужные компоненты… {', '.join(_parts)}..."
+                        )
+                    except Exception:
+                        pass
+
+                if _all_pre_deps:
+                    _, _pip_failed = await _ensure_pip_deps(_all_pre_deps, progress_cb=None)
+                    if _pip_failed:
+                        logger.warning(
+                            "Loader: pre-install failed for pip deps: %s", _pip_failed
+                        )
+                if _all_pre_sys:
+                    _, _sys_failed = await _ensure_system_deps(_all_pre_sys, progress_cb=progress_cb)
+                    if _sys_failed:
+                        logger.warning(
+                            "Loader: pre-install failed for system deps: %s", _sys_failed
+                        )
+
+        _MAX_RETRIES = 15
+        _installed_this_session: set[str] = set()
+        for _attempt in range(_MAX_RETRIES + 1):
+            try:
+                spec.loader.exec_module(py_module)
+                break
+            except ImportError as exc:
+                if is_builtin or _attempt >= _MAX_RETRIES:
+                    sys.modules.pop(module_name, None)
+                    if _attempt >= _MAX_RETRIES:
+                        raise ModuleLoadError(
+                            f"🦊 Kitsune: попытки автоустановки зависимостей исчерпаны… {exc}"
+                        ) from exc
+                    raise ModuleLoadError(f"Execution failed: {exc}") from exc
+                missing_pkg = _extract_missing_package(exc)
+                if not missing_pkg:
+                    sys.modules.pop(module_name, None)
+                    raise ModuleLoadError(f"Execution failed: {exc}") from exc
+                if missing_pkg in _installed_this_session:
+
+                    sys.modules.pop(module_name, None)
+                    raise ModuleLoadError(
+                        f"🦊 Kitsune: пакет {missing_pkg!r} установлен, загрузка модуля не удалась… {exc}"
+                    ) from exc
+                logger.info(
+                    "Loader: missing package %r (attempt %d) — attempting auto-install",
+                    missing_pkg, _attempt + 1,
+                )
+                if progress_cb:
+                    try:
+                        await progress_cb(
+                            f"📦 Устанавливаю зависимость "
+                            f"<code>{_IMPORT_TO_PIP.get(missing_pkg, missing_pkg)}</code>"
+                            f" ({_attempt + 1})..."
+                        )
                     except Exception:
                         pass
                 installed = await _pip_install(missing_pkg)
                 if installed:
+                    _installed_this_session.add(missing_pkg)
                     if progress_cb:
                         try:
-                            await progress_cb(f"✅ Зависимость <code>{missing_pkg}</code> установлена. Загружаю модуль...")
+                            await progress_cb(
+                                f"✅ <code>{_IMPORT_TO_PIP.get(missing_pkg, missing_pkg)}</code>"
+                                f" установлена. Продолжаю загрузку..."
+                            )
                         except Exception:
                             pass
-                    _stale = [k for k in list(sys.modules) if k == missing_pkg or k.startswith(missing_pkg + ".")]
+
+                    _stale = [
+                        k for k in list(sys.modules)
+                        if k == missing_pkg or k.startswith(missing_pkg + ".")
+                    ]
                     for _k in _stale:
                         sys.modules.pop(_k, None)
-                    try:
-                        spec.loader.exec_module(py_module)
-                    except Exception as exc2:
-                        sys.modules.pop(module_name, None)
-                        raise ModuleLoadError(f"Execution failed after install: {exc2}") from exc2
+                    importlib.invalidate_caches()
+
+                    sys.modules.pop(module_name, None)
+                    py_module = importlib.util.module_from_spec(spec)
+                    py_module.__loader__ = spec.loader
+                    if is_pkg:
+                        py_module.__path__ = [str(path.parent)]
+                        py_module.__package__ = module_name
+                    sys.modules[module_name] = py_module
+
                 else:
                     sys.modules.pop(module_name, None)
-                    raise ModuleLoadError(f"Failed to install dependency {missing_pkg!r}: {exc}") from exc
-            else:
+                    raise ModuleLoadError(
+                        f"Не удалось установить зависимость {missing_pkg!r}: {exc}"
+                    ) from exc
+            except Exception as exc:
                 sys.modules.pop(module_name, None)
                 raise ModuleLoadError(f"Execution failed: {exc}") from exc
-        except Exception as exc:
-            sys.modules.pop(module_name, None)
-            raise ModuleLoadError(f"Execution failed: {exc}") from exc
         mod_class = self._find_module_class(py_module)
         if mod_class is None:
             sys.modules.pop(module_name, None)
