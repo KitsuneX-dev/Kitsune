@@ -95,6 +95,14 @@ async def run_web_setup(
     save_config_fn,
     get_config_fn,
 ) -> Any:
+    from ..qr_login import ask_login_method, run_console_qr_login
+    use_qr = ask_login_method()
+    if use_qr:
+        session_path = Path.home() / ".kitsune" / "kitsune"
+        session_path.parent.mkdir(parents=True, exist_ok=True)
+        return await run_console_qr_login(
+            cfg, save_config_fn, get_config_fn, session_path,
+        )
     from ..web.setup import SetupServer
     web_port = int(cfg.get("web_port", 8080))
     setup = SetupServer(save_config_fn=save_config_fn, get_config_fn=get_config_fn)
