@@ -7,20 +7,13 @@ import importlib.util
 import inspect
 import logging
 import os
-import shlex
 import sys
 import typing
 import shutil
-from collections import OrderedDict
 from pathlib import Path
 from types import ModuleType
 
 logger = logging.getLogger(__name__)
-
-_AST_CACHE_MAX_SIZE: int = 128
-_PIP_INSTALL_TIMEOUT: float = 300.0
-_PIP_STDERR_TAIL: int = 200
-_LAST_PIP_STDERR: dict[str, str] = {}
 
 _BLOCKED_IMPORTS: frozenset[str] = frozenset({
     "subprocess", "pty", "ctypes", "multiprocessing",
@@ -43,71 +36,7 @@ _BLOCKED_ATTRS: frozenset[str] = frozenset({
     "system", "popen", "Popen", "call", "run",
 })
 
-_BUILTIN_MODULES_DIR_CACHED: Path | None = None
-
-def _get_builtin_modules_dir() -> Path:
-    global _BUILTIN_MODULES_DIR_CACHED
-    if _BUILTIN_MODULES_DIR_CACHED is not None:
-        return _BUILTIN_MODULES_DIR_CACHED
-    candidates: list[Path] = []
-    meipass = getattr(sys, "_MEIPASS", None)
-    if meipass:
-        candidates.append(Path(meipass) / "kitsune" / "modules")
-        candidates.append(Path(meipass) / "modules")
-    try:
-        candidates.append(Path(__file__).resolve().parent.parent / "modules")
-    except (NameError, OSError):
-        pass
-    try:
-        import kitsune as _kitsune_pkg
-        pkg_file = getattr(_kitsune_pkg, "__file__", None)
-        if pkg_file:
-            candidates.append(Path(pkg_file).resolve().parent / "modules")
-    except Exception:
-        pass
-    executable_dir = Path(sys.executable).resolve().parent
-    candidates.append(executable_dir / "kitsune" / "modules")
-    candidates.append(executable_dir / "modules")
-    chosen: Path | None = None
-    for cand in candidates:
-        try:
-            if cand.exists() and cand.is_dir():
-                chosen = cand
-                break
-        except OSError:
-            continue
-    if chosen is None:
-        chosen = candidates[0] if candidates else Path.cwd() / "modules"
-    _BUILTIN_MODULES_DIR_CACHED = chosen
-    return chosen
-
-class _BuiltinModulesDirProxy:
-    def __fspath__(self) -> str:
-        return str(_get_builtin_modules_dir())
-    def __str__(self) -> str:
-        return str(_get_builtin_modules_dir())
-    def __repr__(self) -> str:
-        return repr(_get_builtin_modules_dir())
-    def __truediv__(self, other: typing.Any) -> Path:
-        return _get_builtin_modules_dir() / other
-    def exists(self) -> bool:
-        return _get_builtin_modules_dir().exists()
-    def glob(self, pattern: str):
-        return _get_builtin_modules_dir().glob(pattern)
-    def iterdir(self):
-        return _get_builtin_modules_dir().iterdir()
-    def is_dir(self) -> bool:
-        return _get_builtin_modules_dir().is_dir()
-    def resolve(self) -> Path:
-        return _get_builtin_modules_dir().resolve()
-    @property
-    def name(self) -> str:
-        return _get_builtin_modules_dir().name
-    @property
-    def parent(self) -> Path:
-        return _get_builtin_modules_dir().parent
-
-_BUILTIN_MODULES_DIR = _BuiltinModulesDirProxy()
+_BUILTIN_MODULES_DIR = Path(__file__).parent.parent / "modules"
 
 class ModuleLoadError(Exception):
     pass
@@ -380,27 +309,6 @@ class _ASTScanner(ast.NodeVisitor):
             self.errors.append(
                 f"Blocked __builtins__ subscript access (line {node.lineno})"
             )
-        if isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Name):
-            ns_func = node.value.func.id
-            if ns_func in ("globals", "locals", "vars"):
-                slice_node = node.slice
-                if isinstance(slice_node, ast.Index):
-                    slice_node = slice_node.value
-                if isinstance(slice_node, ast.Constant):
-                    key = str(slice_node.value)
-                    if (
-                        key in _BLOCKED_IMPORTS
-                        or key in _BLOCKED_ATTRS
-                        or key in _DANGEROUS_OS_ATTRS
-                        or key in ("os", "sys", "builtins", "__builtins__", "__import__")
-                    ):
-                        self.errors.append(
-                            f"Blocked {ns_func}()[{key!r}] subscript access (line {node.lineno})"
-                        )
-                else:
-                    self.errors.append(
-                        f"Blocked dynamic {ns_func}()[...] subscript access (line {node.lineno})"
-                    )
         self.generic_visit(node)
 def _scan_ast(source: str, filename: str = "<module>") -> None:
     try:
@@ -413,22 +321,13 @@ def _scan_ast(source: str, filename: str = "<module>") -> None:
         raise ASTSecurityError(
             "Security scan failed:\n" + "\n".join(f"  • {e}" for e in scanner.errors)
         )
-_ast_cache: OrderedDict[str, ast.AST] = OrderedDict()
+_ast_cache: dict[str, ast.AST] = {}
 
 def _scan_ast_with_cache(source: str, filename: str = "<module>") -> None:
     key = hashlib.sha256(source.encode()).hexdigest()
-    cached = _ast_cache.get(key)
-    if cached is not None:
-        _ast_cache.move_to_end(key)
-        return
-    _scan_ast(source, filename)
-    _ast_cache[key] = ast.parse(source, filename=filename)
-    _ast_cache.move_to_end(key)
-    while len(_ast_cache) > _AST_CACHE_MAX_SIZE:
-        _ast_cache.popitem(last=False)
-
-def _ast_cache_clear() -> None:
-    _ast_cache.clear()
+    if key not in _ast_cache:
+        _scan_ast(source, filename)
+        _ast_cache[key] = ast.parse(source, filename=filename)
 def _extract_missing_package(exc: ImportError) -> str | None:
     name = getattr(exc, "name", None)
     if name:
@@ -464,29 +363,14 @@ _IMPORT_TO_PIP: dict[str, str] = {
     "google": "google-generativeai",
 }
 
-async def _run_cmd(args: list[str], timeout: float | None = None) -> tuple[bool, str]:
-    proc: asyncio.subprocess.Process | None = None
+async def _run_cmd(args: list[str]) -> tuple[bool, str]:
     try:
         proc = await asyncio.create_subprocess_exec(
             *args,
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.PIPE,
         )
-        if timeout is not None:
-            try:
-                _, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-            except asyncio.TimeoutError:
-                try:
-                    proc.kill()
-                except ProcessLookupError:
-                    pass
-                try:
-                    await asyncio.wait_for(proc.wait(), timeout=5.0)
-                except asyncio.TimeoutError:
-                    pass
-                return False, f"command timed out after {timeout:.0f}s"
-        else:
-            _, stderr = await proc.communicate()
+        _, stderr = await proc.communicate()
         return proc.returncode == 0, stderr.decode(errors="replace")
     except FileNotFoundError:
         return False, "command not found"
@@ -505,61 +389,34 @@ def _is_permission_error(stderr: str) -> bool:
     low = stderr.lower()
     return any(m in low for m in _permission_markers)
 
-def _build_pip_base_cmd() -> list[str]:
-    override = os.environ.get("KITSUNE_PIP_CMD", "").strip()
-    if override:
-        try:
-            parts = shlex.split(override)
-        except ValueError:
-            parts = []
-        if parts:
-            return parts
-    return [sys.executable, "-m", "pip"]
-
-def _record_pip_stderr(package: str, pip_name: str, stderr: str) -> None:
-    tail = (stderr or "").strip()
-    if len(tail) > _PIP_STDERR_TAIL:
-        tail = tail[-_PIP_STDERR_TAIL:]
-    _LAST_PIP_STDERR[package] = tail
-    if pip_name != package:
-        _LAST_PIP_STDERR[pip_name] = tail
-
-def get_last_pip_stderr(package: str) -> str:
-    return _LAST_PIP_STDERR.get(package, "")
-
 async def _pip_install(package: str) -> bool:
     pip_name = _IMPORT_TO_PIP.get(package, package)
-    is_termux = "com.termux" in os.environ.get("PREFIX", "") or os.path.isdir("/data/data/com.termux")
+    import os as _os
+    is_termux = "com.termux" in _os.environ.get("PREFIX", "") or _os.path.isdir("/data/data/com.termux")
     _NAMESPACE_PKGS = {"google-generativeai", "google-cloud-storage", "google-auth"}
-    base = _build_pip_base_cmd()
-    args = base + ["install", pip_name, "--quiet", "--no-warn-script-location"]
+    args = [sys.executable, "-m", "pip", "install", pip_name, "--quiet", "--no-warn-script-location"]
     if pip_name in _NAMESPACE_PKGS:
         args.append("--upgrade")
     if is_termux:
         args += ["--prefer-binary", "--no-build-isolation"]
 
-    ok, stderr = await _run_cmd(args, timeout=_PIP_INSTALL_TIMEOUT)
+    ok, stderr = await _run_cmd(args)
     if ok:
         logger.info("Loader: pip installed %r successfully", pip_name)
-        _LAST_PIP_STDERR.pop(package, None)
-        _LAST_PIP_STDERR.pop(pip_name, None)
         importlib.invalidate_caches()
         return True
 
     if _is_permission_error(stderr):
         logger.info("Loader: pip install %r failed with permission error, retrying with sudo", pip_name)
-        ok, stderr = await _run_cmd(["sudo"] + args, timeout=_PIP_INSTALL_TIMEOUT)
+        ok, stderr = await _run_cmd(["sudo"] + args)
         if ok:
             logger.info("Loader: pip installed %r successfully (sudo)", pip_name)
-            _LAST_PIP_STDERR.pop(package, None)
-            _LAST_PIP_STDERR.pop(pip_name, None)
             importlib.invalidate_caches()
             return True
         logger.warning("Loader: pip install %r failed even with sudo: %s", pip_name, stderr[:300])
     else:
         logger.warning("Loader: pip install %r failed: %s", pip_name, stderr[:300])
 
-    _record_pip_stderr(package, pip_name, stderr)
     return False
 
 _SYSTEM_UTIL_TO_PKG: dict[str, dict[str, str]] = {
@@ -954,10 +811,8 @@ class Loader:
 
                 else:
                     sys.modules.pop(module_name, None)
-                    pip_tail = get_last_pip_stderr(missing_pkg)
-                    detail = f" | pip stderr: {pip_tail}" if pip_tail else ""
                     raise ModuleLoadError(
-                        f"Не удалось установить зависимость {missing_pkg!r}: {exc}{detail}"
+                        f"Не удалось установить зависимость {missing_pkg!r}: {exc}"
                     ) from exc
             except Exception as exc:
                 sys.modules.pop(module_name, None)

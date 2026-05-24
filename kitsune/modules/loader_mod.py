@@ -9,9 +9,10 @@ from telethon.extensions import html as tl_html
 from telethon.tl.types import MessageEntityBlockquote
 from ..core.loader import KitsuneModule, command, ModuleConfig, ConfigValue
 from ..core.security import OWNER
-from .._internal import DB_OWNER_LOADER as _DB_OWNER
 
 logger = logging.getLogger(__name__)
+
+_DB_OWNER = "kitsune.loader"
 
 class LoaderModule(KitsuneModule):
     name        = "Loader"

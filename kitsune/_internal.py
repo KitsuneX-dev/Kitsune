@@ -13,8 +13,6 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-DB_OWNER_LOADER: str = "kitsune.loader"
-
 async def fw_protect(min_ms: int = 500, max_ms: int = 1500) -> None:
     await asyncio.sleep(random.randint(min_ms, max_ms) / 1000)
 def is_docker() -> bool:
