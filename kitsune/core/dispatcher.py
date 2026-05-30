@@ -394,6 +394,11 @@ class CommandDispatcher:
                         )
                         return
         if sender_id not in sudo_users and not is_co_owner:
+            # Обычное входящее сообщение (ответ бота, чужое сообщение и т.п.).
+            # Командой оно не является (иначе ушло бы выше), поэтому отдаём его
+            # watcher'ам напрямую — раньше такие сообщения просто терялись и
+            # watcher'ы модулей (например, Iris) их не видели.
+            self._dispatch_watchers(event, message)
             return
         await self._handle_message(event, is_own=False, is_co_owner=is_co_owner)
     async def _handle_message(self, event: events.NewMessage.Event, *, is_own: bool, is_co_owner: bool = False, is_incoming: bool = False) -> None:
@@ -469,19 +474,36 @@ class CommandDispatcher:
                 return
             asyncio.ensure_future(self._safe_call(handler, event, cmd_name))
             return
-        if is_own:
-            for filter_func, handler, active_tags in self._watchers:
-                try:
-                    if filter_func is not None and not filter_func(message):
-                        continue
-                except Exception:
-                    logger.debug("Dispatcher: watcher filter raised, skipping: %s", handler.__name__, exc_info=True)
+        # Сообщение не является командой -> отдаём его watcher'ам.
+        # Раньше этот блок выполнялся только при is_own (исходящие), из-за чего
+        # watcher'ы НИКОГДА не получали входящие сообщения (ответы ботов, чужие
+        # сообщения). Теперь watcher'ы вызываются для любых сообщений, а нужное
+        # направление каждый watcher выбирает сам через теги out=/in_=.
+        self._dispatch_watchers(event, message)
+    def _dispatch_watchers(self, event: events.NewMessage.Event, message: Message) -> None:
+        """Прогоняет все зарегистрированные watcher'ы по сообщению.
+
+        Направление (исходящее/входящее) и прочие условия фильтруются самими
+        watcher'ами через теги (out=, in_=, chat_id=, from_id= и т.д.).
+        Watcher без тегов получает И исходящие, И входящие сообщения.
+        """
+        if not self._watchers:
+            return
+        for filter_func, handler, active_tags in self._watchers:
+            try:
+                if filter_func is not None and not filter_func(message):
                     continue
-                if active_tags and _should_skip_watcher(handler, active_tags, message):
-                    continue
-                asyncio.ensure_future(
-                    self._safe_call(handler, event, f"watcher:{handler.__name__}")
+            except Exception:
+                logger.debug(
+                    "Dispatcher: watcher filter raised, skipping: %s",
+                    handler.__name__, exc_info=True,
                 )
+                continue
+            if active_tags and _should_skip_watcher(handler, active_tags, message):
+                continue
+            asyncio.ensure_future(
+                self._safe_call(handler, event, f"watcher:{handler.__name__}")
+            )
     async def _safe_call(self, handler: typing.Callable, event: typing.Any, label: str) -> None:
         try:
             await handler(event)
