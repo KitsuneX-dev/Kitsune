@@ -138,6 +138,7 @@ class InlineManager:
         self._units:        dict[str, dict]  = {}
         self._bot_username: str | None       = None
         self._bot_id:       int | None       = None
+        self._inline_handlers: list[tuple[typing.Callable, bool]] = []
         self._started       = False
     async def start(self) -> None:
         if not AIOGRAM_AVAILABLE:
@@ -231,6 +232,30 @@ class InlineManager:
         cb_id = str(uuid.uuid4())[:12]
         self._callbacks[cb_id] = (func, args, kwargs or {})
         return cb_id
+    def register_inline_handler(self, func: typing.Callable) -> None:
+        """Регистрирует inline-хендлер из модуля.
+
+        Хендлер должен иметь сигнатуру::
+
+            async def handler(text: str, query: InlineQuery) -> bool: ...
+
+        Возвращает ``True`` если запрос обработан (маршрутизация
+        прекратится), ``False`` / ``None`` — передать дальше.
+
+        Атрибут ``_inline_only_own=True`` ограничивает хендлер
+        только запросами от владельца бота.
+        """
+        only_own = bool(getattr(func, "_inline_only_own", False))
+        entry    = (func, only_own)
+        if entry not in self._inline_handlers:
+            self._inline_handlers.append(entry)
+            logger.debug("InlineManager: registered inline_handler %r", func)
+    def unregister_inline_handler(self, func: typing.Callable) -> None:
+        """Удаляет ранее зарегистрированный inline-хендлер."""
+        self._inline_handlers = [
+            (h, o) for h, o in self._inline_handlers if h is not func
+        ]
+        logger.debug("InlineManager: unregistered inline_handler %r", func)
     async def form(
         self,
         text: str,
@@ -510,6 +535,23 @@ class InlineManager:
                 logger.exception("InlineManager._on_inline_query failed")
     async def _handle_inline_query(self, query: "InlineQuery") -> None:
         q = query.query.strip()
+
+        # --- Пользовательские inline-хендлеры из модулей ---
+        if self._inline_handlers:
+            from_uid = getattr(query.from_user, "id", None)
+            for handler, only_own in list(self._inline_handlers):
+                if only_own and from_uid != self._client.tg_id:
+                    continue
+                try:
+                    result = await handler(q, query)
+                    if result is True:
+                        return
+                except Exception:
+                    logger.exception(
+                        "InlineManager: inline_handler %r failed (query=%r)",
+                        handler, q,
+                    )
+
         for unit in self._units.values():
             for row in unit.get("buttons", []):
                 row_ = row if isinstance(row, list) else [row]

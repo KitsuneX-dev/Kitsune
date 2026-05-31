@@ -250,6 +250,35 @@ def watcher(
             setattr(func, tag_name, tag_value)
         return func
     return decorator
+def inline_handler(
+    *,
+    only_own: bool = False,
+) -> typing.Callable:
+    """Декоратор для обработки произвольных inline-запросов к боту.
+
+    Помечает метод модуля как inline-handler. Хендлер получает
+    ``(text: str, query: InlineQuery)`` и должен вернуть ``True``
+    если запрос обработан (дальнейшая маршрутизация прекратится),
+    или ``False`` / ``None`` чтобы передать управление дальше.
+
+    Пример::
+
+        @inline_handler()
+        async def my_handler(self, text: str, query) -> bool:
+            if not text.startswith("lyrics "):
+                return False
+            results = await self._search(text)
+            await query.answer(results, cache_time=10)
+            return True
+
+    Args:
+        only_own: если ``True`` — принимать запросы только от владельца бота.
+    """
+    def decorator(func: typing.Callable) -> typing.Callable:
+        func._is_inline_handler = True
+        func._inline_only_own   = only_own
+        return func
+    return decorator
 class _ASTScanner(ast.NodeVisitor):
     def __init__(self) -> None:
         self.errors: list[str] = []
