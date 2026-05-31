@@ -21,6 +21,7 @@ class InlineCall:
     data: str
     _answer: typing.Callable
     _edit:   typing.Callable
+    from_user_id: int | None = None
     async def answer(self, text: str = "", show_alert: bool = False) -> None:
         await self._answer(text=text, show_alert=show_alert)
     async def edit(

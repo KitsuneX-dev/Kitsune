@@ -769,6 +769,7 @@ class InlineManager:
             data=call.data,
             _answer=call.answer,
             _edit=call.message.edit_text if call.message else None,
+            from_user_id=call.from_user.id if call.from_user else None,
         )
         wrapped.inline_message_id = call.inline_message_id or ""
         try:
