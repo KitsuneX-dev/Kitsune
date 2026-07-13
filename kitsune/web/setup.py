@@ -4,135 +4,331 @@ import logging
 import webbrowser
 from typing import Any, Callable
 from aiohttp import web
+import os
+from pathlib import Path
+
+_STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 logger = logging.getLogger(__name__)
 
-_HTML = """<!DOCTYPE html>
+_HTML = r"""<!DOCTYPE html>
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>🦊 Kitsune Setup</title>
+<title>Kitsune · Настройка</title>
+<link rel="icon" type="image/png" href="/static/favicon-32.png">
+<link rel="apple-touch-icon" href="/static/favicon-180.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:opsz,wght@9..40,300;9..40,500;9..40,700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/theme.css">
 <style>
-*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
-:root{
-  --bg:#0d0d0f;--s1:#141418;--s2:#1c1c22;
-  --bd:rgba(255,255,255,0.07);--bd2:rgba(255,255,255,0.13);
-  --tx:#e8e8ec;--mu:rgba(255,255,255,0.35);--mu2:rgba(255,255,255,0.58);
-  --fox:#ff6b35;--fox2:#ff8c5a;
-  --green:#3dffaa;--red:#ff4a6b;--blue:#4a9eff;
-  --mono:'Space Mono',monospace;--body:'DM Sans',sans-serif;
-  --r:16px;--ease:.18s cubic-bezier(.4,0,.2,1);
+body {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: clamp(10px, 3vw, 20px);
+  padding-left: max(clamp(10px, 3vw, 20px), env(safe-area-inset-left));
+  padding-right: max(clamp(10px, 3vw, 20px), env(safe-area-inset-right));
+  padding-top: max(clamp(10px, 3vw, 20px), env(safe-area-inset-top));
+  padding-bottom: max(clamp(10px, 3vw, 20px), env(safe-area-inset-bottom));
+  min-height: 100vh;
+  min-height: 100dvh;
 }
-html,body{min-height:100%;height:100%}
-body{
-  font-family:var(--body);background:var(--bg);color:var(--tx);
-  display:flex;align-items:center;justify-content:center;
-  padding:20px;overflow-x:hidden;
-  background-image:
-    radial-gradient(ellipse 70% 50% at 10% 0%,rgba(255,107,53,0.09) 0%,transparent 55%),
-    radial-gradient(ellipse 50% 40% at 90% 100%,rgba(74,158,255,0.05) 0%,transparent 55%);
+
+.card {
+  width: 100%;
+  max-width: 440px;
+  background: var(--glass);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  border: 1px solid var(--bd3);
+  border-radius: 22px;
+  padding: clamp(22px, 6vw, 34px) clamp(16px, 5vw, 30px);
+  box-shadow: 0 0 70px var(--violet-glow), 0 24px 60px rgba(0, 0, 0, 0.55);
+  position: relative;
+  animation: card-in .6s cubic-bezier(.22, .8, .3, 1) both;
 }
-.card{
-  width:100%;max-width:440px;
-  background:var(--s1);border:1px solid var(--bd2);border-radius:22px;
-  padding:36px 32px;
-  box-shadow:0 0 60px rgba(255,107,53,0.07),0 24px 60px rgba(0,0,0,0.5);
+@keyframes card-in {
+  from { opacity: 0; transform: translateY(18px) scale(.98); }
+  to   { opacity: 1; transform: none; }
 }
-@media(max-width:480px){.card{padding:28px 20px;border-radius:18px}}
-.logo{text-align:center;font-size:3rem;margin-bottom:6px;filter:drop-shadow(0 0 20px rgba(255,107,53,0.4))}
-h1{text-align:center;font-family:var(--mono);font-size:1.15rem;font-weight:700;color:var(--tx);margin-bottom:4px;letter-spacing:-.01em}
-.sub{text-align:center;font-size:.74rem;color:var(--mu);margin-bottom:18px;font-family:var(--mono)}
+/* neon top edge on the card */
+.card::before {
+  content: '';
+  position: absolute;
+  top: -1px; left: 24px; right: 24px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--violet2), var(--fox2), transparent);
+  opacity: .8;
+  filter: drop-shadow(0 0 6px var(--violet-glow));
+  pointer-events: none;
+}
+@media (max-width: 480px) { .card { border-radius: 18px; } }
+@media (max-width: 360px) {
+  .brand-mark.lg { width: 68px !important; height: 68px !important; }
+  h1 { font-size: 1rem; }
+}
+/* на низких экранах (ландшафт телефона) карточка не центрируется жёстко, а скроллится */
+@media (max-height: 700px) {
+  body { align-items: flex-start; }
+}
+
+.brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.brand .brand-orbit { margin-bottom: 14px; }
+.brand-mark.lg {
+  width: 84px;
+  height: 84px;
+  box-shadow: 0 0 0 1px var(--bd3), 0 0 34px var(--violet-glow), 0 0 20px var(--fox-glow);
+  animation: logo-breathe 5s ease-in-out infinite;
+}
+@keyframes logo-breathe {
+  0%, 100% { box-shadow: 0 0 0 1px var(--bd3), 0 0 30px var(--violet-glow), 0 0 16px var(--fox-glow); }
+  50%      { box-shadow: 0 0 0 1px var(--bd3), 0 0 48px var(--violet-glow), 0 0 30px var(--fox-glow); }
+}
+
+h1 {
+  text-align: center;
+  font-family: var(--mono);
+  font-size: 1.12rem;
+  font-weight: 700;
+  background: linear-gradient(100deg, var(--tx) 20%, var(--violet2) 55%, var(--fox2) 85%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  letter-spacing: -.01em;
+}
+.sub {
+  text-align: center;
+  font-size: .74rem;
+  color: var(--mu);
+  margin: 4px 0 18px;
+  font-family: var(--mono);
+}
 
 /* Stage badge — Telethon / Hydrogram */
-.stage-badge{
-  display:flex;align-items:center;justify-content:center;gap:8px;
-  margin-bottom:18px;padding:8px 14px;border-radius:10px;
-  font-family:var(--mono);font-size:.72rem;font-weight:700;letter-spacing:.04em;
+.stage-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 18px;
+  padding: 8px 14px;
+  border-radius: 10px;
+  font-family: var(--mono);
+  font-size: clamp(.62rem, 2.6vw, .72rem);
+  font-weight: 700;
+  letter-spacing: .03em;
+  text-align: center;
+  flex-wrap: wrap;
 }
-.stage-badge.tele{background:rgba(74,158,255,0.1);border:1px solid rgba(74,158,255,0.25);color:var(--blue)}
-.stage-badge.hydro{background:rgba(255,107,53,0.1);border:1px solid rgba(255,107,53,0.25);color:var(--fox2)}
-.stage-badge .num{
-  display:inline-flex;width:20px;height:20px;border-radius:50%;
-  background:rgba(255,255,255,0.08);align-items:center;justify-content:center;
-  font-size:.65rem;
+.stage-badge .num { flex-shrink: 0; }
+.stage-badge.tele { background: rgba(74, 168, 255, 0.10); border: 1px solid rgba(74, 168, 255, 0.28); color: var(--blue); }
+.stage-badge.hydro { background: rgba(255, 90, 43, 0.10); border: 1px solid rgba(255, 90, 43, 0.28); color: var(--fox2); }
+.stage-badge .num {
+  display: inline-flex;
+  width: 20px; height: 20px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.08);
+  align-items: center;
+  justify-content: center;
+  font-size: .65rem;
 }
 
-.steps-bar{display:flex;gap:6px;justify-content:center;margin-bottom:24px;flex-wrap:wrap}
-.dot{width:8px;height:8px;border-radius:50%;background:var(--bd2);transition:all .3s}
-.dot.active{background:var(--fox);box-shadow:0 0 10px rgba(255,107,53,0.5);transform:scale(1.2)}
-.dot.done{background:var(--green);box-shadow:0 0 8px rgba(61,255,170,0.4)}
-.dot.tele.active{background:var(--blue);box-shadow:0 0 10px rgba(74,158,255,0.5)}
+.steps-bar { display: flex; gap: 6px; justify-content: center; margin-bottom: 24px; flex-wrap: wrap; }
+.step-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--bd3); transition: all .3s; }
+.step-dot.active { background: var(--violet); box-shadow: 0 0 10px var(--violet-glow); transform: scale(1.25); }
+.step-dot.active.tele { background: var(--blue); box-shadow: 0 0 10px rgba(74, 168, 255, 0.55); }
+.step-dot.done { background: var(--green); box-shadow: 0 0 8px rgba(56, 255, 176, 0.45); }
 
-.step{display:none;animation:fi .22s ease both}
-.step.active{display:block}
-@keyframes fi{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
-.step-title{font-size:.92rem;font-weight:700;color:var(--tx);margin-bottom:14px;font-family:var(--mono)}
-.step-desc{font-size:.78rem;color:var(--mu2);line-height:1.5;margin-bottom:18px}
+.step { display: none; animation: step-in .22s ease both; }
+.step.active { display: block; }
+@keyframes step-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.step-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: clamp(.8rem, 3.2vw, .92rem);
+  font-weight: 700;
+  color: var(--tx);
+  margin-bottom: 14px;
+  font-family: var(--mono);
+  flex-wrap: wrap;
+}
+.step-title .icon { flex-shrink: 0; }
+.step-title .icon { color: var(--violet2); }
+.step-desc { font-size: .78rem; color: var(--mu2); line-height: 1.5; margin-bottom: 18px; }
 
-label{display:block;font-size:.72rem;color:var(--mu2);margin-bottom:5px;margin-top:14px;letter-spacing:.04em;text-transform:uppercase}
-input{
-  width:100%;padding:11px 14px;
-  background:var(--s2);border:1px solid var(--bd2);border-radius:10px;
-  color:var(--tx);font-size:.88rem;font-family:var(--mono);
-  outline:none;transition:border-color var(--ease),box-shadow var(--ease);
+label {
+  display: block;
+  font-size: .7rem;
+  color: var(--mu2);
+  margin-bottom: 5px;
+  margin-top: 14px;
+  letter-spacing: .04em;
+  text-transform: uppercase;
 }
-input:focus{border-color:rgba(255,107,53,0.5);box-shadow:0 0 0 3px rgba(255,107,53,0.12)}
-input::placeholder{color:var(--mu)}
-.hint{font-size:.72rem;color:var(--mu);margin-top:7px;line-height:1.4}
-.hint a{color:var(--fox2);text-decoration:none}
-.hint a:hover{text-decoration:underline}
+input {
+  width: 100%;
+  padding: 11px 14px;
+  background: var(--s2);
+  border: 1px solid var(--bd2);
+  border-radius: 10px;
+  color: var(--tx);
+  font-size: .88rem;
+  font-family: var(--mono);
+  outline: none;
+  transition: border-color var(--ease), box-shadow var(--ease);
+}
+/* iOS не будет масштабировать страницу при фокусе, если шрифт >= 16px */
+@media (max-width: 560px) {
+  input { font-size: 16px; }
+}
+input:focus { border-color: var(--violet); box-shadow: 0 0 0 3px var(--violet-glow); }
+input::placeholder { color: var(--mu); }
+.hint { font-size: .72rem; color: var(--mu); margin-top: 7px; line-height: 1.4; }
 
-.note{
-  margin-top:14px;padding:11px 14px;
-  background:rgba(74,158,255,0.07);border:1px solid rgba(74,158,255,0.18);
-  border-radius:10px;font-size:.76rem;color:var(--mu2);line-height:1.45;
+.note {
+  margin-top: 14px;
+  padding: 11px 14px;
+  background: rgba(74, 168, 255, 0.07);
+  border: 1px solid rgba(74, 168, 255, 0.2);
+  border-radius: 10px;
+  font-size: .76rem;
+  color: var(--mu2);
+  line-height: 1.45;
+  display: flex;
+  gap: 9px;
 }
-.note.warn{background:rgba(255,200,87,0.07);border-color:rgba(255,200,87,0.2);color:#ffd486}
-.note b{color:var(--tx)}
+.note .icon { flex-shrink: 0; margin-top: 1px; color: var(--blue); }
+.note.warn { background: rgba(255, 200, 87, 0.07); border-color: rgba(255, 200, 87, 0.22); color: #ffd486; }
+.note.warn .icon { color: var(--yellow); }
+.note b { color: var(--tx); }
 
-button{
-  width:100%;margin-top:22px;padding:13px;
-  background:linear-gradient(135deg,#ff6b35,#ff4a6b);
-  border:none;border-radius:11px;
-  color:#fff;font-family:var(--body);font-size:.9rem;font-weight:700;
-  cursor:pointer;letter-spacing:.2px;
-  transition:filter var(--ease),transform .1s,box-shadow var(--ease);
-  box-shadow:0 4px 20px rgba(255,107,53,0.35);
+.step > button.primary {
+  width: 100%;
+  margin-top: 22px;
+  padding: 13px 10px;
+  font-size: clamp(.78rem, 3.2vw, .9rem);
+  flex-wrap: wrap;
+  text-align: center;
+  line-height: 1.3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: linear-gradient(135deg, var(--violet), var(--fox));
+  border: none;
+  border-radius: 11px;
+  color: #fff;
+  font-family: var(--body);
+  font-weight: 700;
+  cursor: pointer;
+  letter-spacing: .2px;
+  transition: filter var(--ease), transform .1s, box-shadow var(--ease);
+  box-shadow: 0 4px 22px var(--violet-glow);
+  position: relative;
+  overflow: hidden;
 }
-button:hover{filter:brightness(1.08);box-shadow:0 4px 28px rgba(255,107,53,0.5)}
-button:active{transform:scale(.98)}
-button:disabled{opacity:.35;cursor:not-allowed;box-shadow:none;filter:none}
-.error{
-  display:none;margin-top:13px;padding:10px 14px;
-  background:rgba(255,74,107,0.1);border:1px solid rgba(255,74,107,0.25);
-  border-radius:9px;font-size:.8rem;color:var(--red);line-height:1.4;
+/* moving sheen on primary buttons */
+.step > button.primary::after {
+  content: '';
+  position: absolute;
+  top: 0; left: -60%;
+  width: 40%; height: 100%;
+  background: linear-gradient(100deg, transparent, rgba(255, 255, 255, 0.22), transparent);
+  transform: skewX(-20deg);
+  animation: sheen 3.4s ease-in-out infinite;
+  pointer-events: none;
 }
-.done-wrap{text-align:center;padding:8px 0}
-.done-icon{font-size:3.5rem;margin-bottom:14px;filter:drop-shadow(0 0 20px rgba(61,255,170,0.5))}
-.done-title{font-family:var(--mono);font-size:1.15rem;font-weight:700;color:var(--green);margin-bottom:8px}
-.done-sub{font-size:.84rem;color:var(--mu2);line-height:1.5}
-.done-info{
-  margin-top:18px;padding:12px 16px;
-  background:rgba(255,107,53,0.08);border:1px solid rgba(255,107,53,0.2);
-  border-radius:11px;font-size:.82rem;color:var(--fox2);font-family:var(--mono);
+@keyframes sheen {
+  0%, 60% { left: -60%; }
+  100%    { left: 130%; }
 }
-.transition-card{
-  text-align:center;padding:18px 0;
+.step > button.primary:hover { filter: brightness(1.1); box-shadow: 0 4px 34px var(--violet-glow), 0 0 20px var(--fox-glow); transform: translateY(-1px); }
+.step > button.primary:active { transform: scale(.98); }
+.step > button.primary:disabled { opacity: .35; cursor: not-allowed; box-shadow: none; filter: none; }
+
+.error {
+  display: none;
+  margin-top: 13px;
+  padding: 10px 14px;
+  background: rgba(255, 77, 109, 0.1);
+  border: 1px solid rgba(255, 77, 109, 0.3);
+  border-radius: 9px;
+  font-size: .8rem;
+  color: var(--red);
+  line-height: 1.4;
+  gap: 8px;
+  align-items: flex-start;
 }
-.transition-icon{
-  font-size:2.8rem;margin-bottom:12px;
-  filter:drop-shadow(0 0 16px rgba(255,107,53,0.4));
+.error.show { display: flex; }
+.error .icon { flex-shrink: 0; margin-top: 1px; }
+
+.done-wrap { text-align: center; padding: 6px 0; }
+.done-icon {
+  width: 66px; height: 66px;
+  margin: 0 auto 16px;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--green-dim);
+  border: 1px solid rgba(56, 255, 176, 0.35);
+  box-shadow: 0 0 26px rgba(56, 255, 176, 0.35);
 }
+.done-icon .icon { width: 32px; height: 32px; color: var(--green); }
+.done-title { font-family: var(--mono); font-size: 1.15rem; font-weight: 700; color: var(--green); margin-bottom: 8px; }
+.done-sub { font-size: .84rem; color: var(--mu2); line-height: 1.5; }
+.done-info {
+  margin-top: 18px;
+  padding: 12px 16px;
+  background: rgba(255, 90, 43, 0.10);
+  border: 1px solid rgba(255, 90, 43, 0.35);
+  border-radius: 11px;
+  font-size: clamp(.72rem, 2.8vw, .82rem);
+  color: var(--fox2);
+  font-family: var(--mono);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: center;
+  flex-wrap: wrap;
+  overflow-wrap: anywhere;
+  text-align: center;
+}
+
+.transition-card { text-align: center; padding: 16px 0; }
+.transition-icons {
+  display: flex; align-items: center; justify-content: center; gap: 12px;
+  margin-bottom: 14px;
+}
+.transition-icons .icon-circle {
+  width: 46px; height: 46px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  border: 1px solid var(--bd3);
+}
+.transition-icons .icon-circle.done { background: var(--green-dim); border-color: rgba(56,255,176,.35); color: var(--green); }
+.transition-icons .icon-circle.next { background: rgba(255,90,43,.10); border-color: rgba(255,90,43,.3); color: var(--fox2); }
+.transition-icons .icon-circle .icon { width: 22px; height: 22px; }
+.transition-icons .arrow { color: var(--mu); width: 18px; height: 18px; }
 </style>
 </head>
 <body>
-<div class="card">
-  <div class="logo">🦊</div>
-  <h1 id="setup_title">Kitsune Userbot</h1>
-  <p class="sub" id="setup_sub">by Yushi · первоначальная настройка</p>
+<div class="bg-scene" aria-hidden="true"></div>
+<div class="bg-grid" aria-hidden="true"></div>
+<canvas id="fx" aria-hidden="true"></canvas>
+
+<main class="card" id="setup-card">
+  <div class="brand">
+    <span class="brand-orbit"><img class="brand-mark lg" src="/static/kitsune_logo.png" alt="Kitsune"></span>
+    <h1 id="setup_title">Kitsune Userbot</h1>
+    <p class="sub" id="setup_sub">первоначальная настройка</p>
+  </div>
 
   <!-- Stage badge: показывает к чему относятся текущие данные (Telethon vs Hydrogram) -->
   <div class="stage-badge tele" id="stage_badge">
@@ -147,7 +343,7 @@ button:disabled{opacity:.35;cursor:not-allowed;box-shadow:none;filter:none}
   <!-- STEP 1: Telethon — API + телефон                              -->
   <!-- ============================================================ -->
   <div class="step active" id="step1">
-    <div class="step-title">🔑 API-данные Telegram (для Telethon)</div>
+    <div class="step-title"><svg class="icon"><use href="#icon-key"/></svg> API-данные Telegram (для Telethon)</div>
     <div class="step-desc">
       Эти данные будут использованы для основного клиента — <b style="color:var(--blue)">Telethon</b>.
     </div>
@@ -165,14 +361,14 @@ button:disabled{opacity:.35;cursor:not-allowed;box-shadow:none;filter:none}
     <p class="hint">В международном формате, с символом +</p>
 
     <div class="error" id="err1"></div>
-    <button id="btn1" onclick="sendCode1()">Получить код Telegram →</button>
+    <button class="primary" id="btn1" onclick="sendCode1()">Получить код Telegram <svg class="icon"><use href="#icon-arrow-right"/></svg></button>
   </div>
 
   <!-- ============================================================ -->
   <!-- STEP 2: Telethon — Код подтверждения                          -->
   <!-- ============================================================ -->
   <div class="step" id="step2">
-    <div class="step-title">📱 Код подтверждения · Telethon</div>
+    <div class="step-title"><svg class="icon"><use href="#icon-phone"/></svg> Код подтверждения · Telethon</div>
     <div class="step-desc">Введи код из Telegram (придёт в личные сообщения).</div>
 
     <label>Код из Telegram</label>
@@ -180,21 +376,21 @@ button:disabled{opacity:.35;cursor:not-allowed;box-shadow:none;filter:none}
     <p class="hint">Telethon-сессия будет создана с этим кодом</p>
 
     <div class="error" id="err2"></div>
-    <button id="btn2" onclick="signIn1()">Войти (Telethon) →</button>
+    <button class="primary" id="btn2" onclick="signIn1()">Войти (Telethon) <svg class="icon"><use href="#icon-arrow-right"/></svg></button>
   </div>
 
   <!-- ============================================================ -->
   <!-- STEP 3: Telethon — 2FA                                        -->
   <!-- ============================================================ -->
   <div class="step" id="step3">
-    <div class="step-title">🔐 Облачный пароль · Telethon</div>
+    <div class="step-title"><svg class="icon"><use href="#icon-lock"/></svg> Облачный пароль · Telethon</div>
     <div class="step-desc">У тебя включена двухфакторная аутентификация. Введи облачный пароль Telegram.</div>
 
     <label>Облачный пароль</label>
     <input type="password" id="password1" placeholder="••••••••">
 
     <div class="error" id="err3"></div>
-    <button id="btn3" onclick="check2fa1()">Подтвердить (Telethon) →</button>
+    <button class="primary" id="btn3" onclick="check2fa1()">Подтвердить (Telethon) <svg class="icon"><use href="#icon-arrow-right"/></svg></button>
   </div>
 
   <!-- ============================================================ -->
@@ -202,31 +398,37 @@ button:disabled{opacity:.35;cursor:not-allowed;box-shadow:none;filter:none}
   <!-- ============================================================ -->
   <div class="step" id="step4">
     <div class="transition-card">
-      <div class="transition-icon">✅ → 🔁</div>
-      <div class="step-title" style="text-align:center">Telethon-сессия создана!</div>
+      <div class="transition-icons">
+        <span class="icon-circle done"><svg class="icon"><use href="#icon-check"/></svg></span>
+        <svg class="icon arrow"><use href="#icon-arrow-right"/></svg>
+        <span class="icon-circle next"><svg class="icon"><use href="#icon-refresh"/></svg></span>
+      </div>
+      <div class="step-title" style="justify-content:center">Telethon-сессия создана!</div>
       <div class="done-info" id="t1_info" style="margin-top:12px"></div>
 
       <div class="note" style="margin-top:18px;text-align:left">
-        <b>Теперь нужно создать вторую сессию — для Hydrogram.</b><br>
+        <svg class="icon"><use href="#icon-refresh"/></svg>
+        <span><b>Теперь нужно создать вторую сессию — для Hydrogram.</b><br>
         Hydrogram отвечает за работу с медиа (фото, видео, голосовые)
-        и работает параллельно с Telethon.
+        и работает параллельно с Telethon.</span>
       </div>
 
       <div class="note warn" style="text-align:left">
-        ⚠️ Сейчас Telegram пришлёт <b>новый код</b> в Saved Messages —
+        <svg class="icon"><use href="#icon-alert"/></svg>
+        <span>Сейчас Telegram пришлёт <b>новый код</b> в Saved Messages —
         он будет нужен для Hydrogram. Введи те же самые данные ещё раз
-        (API ID, API Hash и номер телефона уже сохранены, тебе нужно будет ввести только код и пароль).
+        (API ID, API Hash и номер телефона уже сохранены, тебе нужно будет ввести только код и пароль).</span>
       </div>
     </div>
 
-    <button id="btn4" onclick="startHydro()">Продолжить → создать Hydrogram-сессию</button>
+    <button class="primary" id="btn4" onclick="startHydro()">Продолжить · создать Hydrogram-сессию <svg class="icon"><use href="#icon-arrow-right"/></svg></button>
   </div>
 
   <!-- ============================================================ -->
   <!-- STEP 5: Hydrogram — телефон (повторный ввод)                  -->
   <!-- ============================================================ -->
   <div class="step" id="step5">
-    <div class="step-title">📞 Подтверждение номера · Hydrogram</div>
+    <div class="step-title"><svg class="icon"><use href="#icon-phone"/></svg> Подтверждение номера · Hydrogram</div>
     <div class="step-desc">
       Подтверди номер для <b style="color:var(--fox2)">Hydrogram-клиента</b>.
       Это вторая, независимая сессия (для медиа).
@@ -237,14 +439,14 @@ button:disabled{opacity:.35;cursor:not-allowed;box-shadow:none;filter:none}
     <p class="hint">Тот же самый номер. По умолчанию подставлен.</p>
 
     <div class="error" id="err5"></div>
-    <button id="btn5" onclick="sendCode2()">Получить код для Hydrogram →</button>
+    <button class="primary" id="btn5" onclick="sendCode2()">Получить код для Hydrogram <svg class="icon"><use href="#icon-arrow-right"/></svg></button>
   </div>
 
   <!-- ============================================================ -->
   <!-- STEP 6: Hydrogram — код                                       -->
   <!-- ============================================================ -->
   <div class="step" id="step6">
-    <div class="step-title">📱 Код подтверждения · Hydrogram</div>
+    <div class="step-title"><svg class="icon"><use href="#icon-phone"/></svg> Код подтверждения · Hydrogram</div>
     <div class="step-desc">
       Telegram прислал <b>новый код</b> для Hydrogram. Введи его сюда.
     </div>
@@ -254,21 +456,21 @@ button:disabled{opacity:.35;cursor:not-allowed;box-shadow:none;filter:none}
     <p class="hint">Это <b>другой код</b>, не тот, что был для Telethon</p>
 
     <div class="error" id="err6"></div>
-    <button id="btn6" onclick="signIn2()">Войти (Hydrogram) →</button>
+    <button class="primary" id="btn6" onclick="signIn2()">Войти (Hydrogram) <svg class="icon"><use href="#icon-arrow-right"/></svg></button>
   </div>
 
   <!-- ============================================================ -->
   <!-- STEP 7: Hydrogram — 2FA                                       -->
   <!-- ============================================================ -->
   <div class="step" id="step7">
-    <div class="step-title">🔐 Облачный пароль · Hydrogram</div>
+    <div class="step-title"><svg class="icon"><use href="#icon-lock"/></svg> Облачный пароль · Hydrogram</div>
     <div class="step-desc">Введи тот же облачный пароль Telegram (это нормально, Hydrogram его не сохранил).</div>
 
     <label>Облачный пароль</label>
     <input type="password" id="password2" placeholder="••••••••">
 
     <div class="error" id="err7"></div>
-    <button id="btn7" onclick="check2fa2()">Подтвердить (Hydrogram) →</button>
+    <button class="primary" id="btn7" onclick="check2fa2()">Подтвердить (Hydrogram) <svg class="icon"><use href="#icon-arrow-right"/></svg></button>
   </div>
 
   <!-- ============================================================ -->
@@ -276,7 +478,7 @@ button:disabled{opacity:.35;cursor:not-allowed;box-shadow:none;filter:none}
   <!-- ============================================================ -->
   <div class="step" id="step8">
     <div class="done-wrap">
-      <div class="done-icon">🎉</div>
+      <div class="done-icon"><svg class="icon"><use href="#icon-check-circle"/></svg></div>
       <div class="done-title">Готово!</div>
       <div class="done-sub">
         Обе сессии успешно созданы.<br>
@@ -285,7 +487,21 @@ button:disabled{opacity:.35;cursor:not-allowed;box-shadow:none;filter:none}
       <div class="done-info" id="done_info"></div>
     </div>
   </div>
-</div>
+</main>
+
+<!-- inline icon sprite -->
+<svg aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden">
+  <symbol id="icon-key" viewBox="0 0 24 24"><path d="M14.5 6.5a4 4 0 1 1-5.66 5.66L4 17v3h3l4.84-4.84A4 4 0 0 1 14.5 6.5Z"/><circle cx="16" cy="8" r="1.2" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="icon-phone" viewBox="0 0 24 24"><rect x="7" y="2" width="10" height="20" rx="2"/><line x1="11" y1="18" x2="13" y2="18"/></symbol>
+  <symbol id="icon-lock" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></symbol>
+  <symbol id="icon-check" viewBox="0 0 24 24"><polyline points="4 13 9 18 20 6"/></symbol>
+  <symbol id="icon-check-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><polyline points="8 12.5 11 15.5 16 9"/></symbol>
+  <symbol id="icon-arrow-right" viewBox="0 0 24 24"><line x1="4" y1="12" x2="19" y2="12"/><polyline points="13 6 19 12 13 18"/></symbol>
+  <symbol id="icon-alert" viewBox="0 0 24 24"><path d="M12 3 2 20h20L12 3Z"/><line x1="12" y1="10" x2="12" y2="14"/><circle cx="12" cy="17" r=".6" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="icon-refresh" viewBox="0 0 24 24"><path d="M4 4v6h6"/><path d="M20 20v-6h-6"/><path d="M5 13a7 7 0 0 1 12-4.6L20 10"/><path d="M19 11a7 7 0 0 1-12 4.6L4 14"/></symbol>
+</svg>
+
+<script src="/static/fx.js" defer></script>
 
 <script>
 let HYDRO_ONLY = false;     // режим повторной регистрации только Hydrogram
@@ -348,7 +564,7 @@ function buildDots(){
   const bar = document.getElementById('dots_bar');
   let html = '';
   for(let i=0;i<total;i++){
-    html += '<div class="dot" id="d'+(i+1)+'"></div>';
+    html += '<div class="step-dot" id="d'+(i+1)+'"></div>';
   }
   bar.innerHTML = html;
 }
@@ -366,7 +582,7 @@ function setProgress(stepNum){
   for(let i=1;i<=total;i++){
     const d = document.getElementById('d'+i);
     if(!d) continue;
-    d.className='dot';
+    d.className='step-dot';
     const stage = HYDRO_ONLY ? 'hydro' : (i<=3 ? 'tele' : 'hydro');
     if(i < dotIdx) d.classList.add('done');
     else if(i === dotIdx) {
@@ -410,8 +626,8 @@ function show(n){
 function showErr(n,msg){
   const el=document.getElementById('err'+n);
   if(!el) return;
-  el.textContent=msg;
-  el.style.display=msg?'block':'none';
+  el.innerHTML = msg ? '<svg class="icon"><use href="#icon-alert"/></svg><span>'+msg+'</span>' : '';
+  el.classList.toggle('show', !!msg);
 }
 
 function setBtn(id,text,disabled){
@@ -558,10 +774,10 @@ async function check2fa2(){
     showErr(7,res.error||'Неверный пароль');
   }
 }
-
 </script>
 </body>
-</html>"""
+</html>
+"""
 
 class SetupServer:
     def __init__(
@@ -592,6 +808,7 @@ class SetupServer:
         app.router.add_post("/api/signin", self._api_signin)
         app.router.add_post("/api/2fa", self._api_2fa)
         app.router.add_get("/api/mode", self._api_mode)
+        app.router.add_get("/static/{filename}", self._static)
         self._runner = web.AppRunner(app)
         await self._runner.setup()
         site = web.TCPSite(self._runner, host, port)
@@ -636,6 +853,18 @@ class SetupServer:
         return self._client
     def hydrogram_only_success(self) -> bool:
         return bool(self._hydrogram_success)
+    async def _static(self, request: web.Request) -> web.Response:
+        filename = request.match_info.get("filename", "")
+        if (not filename) or ("/" in filename) or ("\\" in filename) or (".." in filename):
+            return web.Response(status=404, text="not found")
+        path = (_STATIC_DIR / filename).resolve()
+        try:
+            path.relative_to(_STATIC_DIR)
+        except ValueError:
+            return web.Response(status=404, text="not found")
+        if not path.is_file():
+            return web.Response(status=404, text="not found")
+        return web.FileResponse(path)
     async def _index(self, _: web.Request) -> web.Response:
         return web.Response(text=_HTML, content_type="text/html")
     async def _api_mode(self, _: web.Request) -> web.Response:

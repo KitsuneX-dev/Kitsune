@@ -87,7 +87,11 @@ class SecurityModule(KitsuneModule):
     def _get_co_owners(self) -> list[int]:
         return list(self.db.get(_DB_KEY, "co_owners", []))
     async def _set_co_owners(self, owners: list[int]) -> None:
-        await self.db.set(_DB_KEY, "co_owners", owners)
+        dispatcher = getattr(self.client, "_kitsune_dispatcher", None)
+        if dispatcher is not None and hasattr(dispatcher, "set_co_owners"):
+            await dispatcher.set_co_owners(owners)
+        else:
+            await self.db.set(_DB_KEY, "co_owners", owners)
     @command("addsudo", required=OWNER)
     async def addsudo_cmd(self, event) -> None:
         uid, name = await self._resolve_user(event)

@@ -70,10 +70,10 @@ def install_signal_handlers(stop_event: asyncio.Event, loop: asyncio.AbstractEve
         with contextlib.suppress(NotImplementedError, OSError, RuntimeError):
             loop.add_signal_handler(sig, _shutdown)
 
-    # Fallback через signal.signal() — работает даже после закрытия цикла.
-    # asyncio перехватывает SIGINT через loop.add_signal_handler пока цикл жив,
-    # поэтому оба хандлера не конфликтуют: asyncio вызывает _shutdown напрямую,
-    # а signal.signal() срабатывает когда цикл уже остановлен.
+                                                                          
+                                                                               
+                                                                               
+                                                              
     def _raw_signal(signum, frame) -> None:
         _shutdown()
 

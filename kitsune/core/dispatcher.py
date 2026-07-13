@@ -2,6 +2,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import time
 import typing
 from telethon import events
 from telethon.tl.types import Message
@@ -225,6 +226,8 @@ class CommandDispatcher:
         self._pending_input: dict | None = None
         self._co_owners_cache: list[int] = []
         self._co_owners_dirty: bool = True
+        self._co_owners_ttl: float = 3.0
+        self._co_owners_loaded_at: float = 0.0
         self._client.add_event_handler(self._on_out_message,  events.NewMessage(outgoing=True))
         self._client.add_event_handler(self._on_in_message,   events.NewMessage(incoming=True))
     def register_command(
@@ -299,10 +302,20 @@ class CommandDispatcher:
         return self._pending_input
     def invalidate_co_owners(self) -> None:
         self._co_owners_dirty = True
+    async def set_co_owners(self, owners: list[int]) -> None:
+        cleaned = list(dict.fromkeys(int(o) for o in (owners or [])))
+        await self._db.set("kitsune.security", "co_owners", cleaned)
+        self._co_owners_cache = cleaned
+        self._co_owners_dirty = False
+        self._co_owners_loaded_at = time.monotonic()
+        logger.debug("Dispatcher: co-owners updated -> %s", cleaned)
     def _get_co_owners(self) -> list[int]:
-        if self._co_owners_dirty:
+        now = time.monotonic()
+        expired = (now - self._co_owners_loaded_at) >= self._co_owners_ttl
+        if self._co_owners_dirty or expired:
             self._co_owners_cache = self._db.get("kitsune.security", "co_owners", []) or []
             self._co_owners_dirty = False
+            self._co_owners_loaded_at = now
         return self._co_owners_cache
     async def _on_out_message(self, event: events.NewMessage.Event) -> None:
         await self._handle_message(event, is_own=True, is_co_owner=False)
@@ -394,10 +407,10 @@ class CommandDispatcher:
                         )
                         return
         if sender_id not in sudo_users and not is_co_owner:
-            # Обычное входящее сообщение (ответ бота, чужое сообщение и т.п.).
-            # Командой оно не является (иначе ушло бы выше), поэтому отдаём его
-            # watcher'ам напрямую — раньше такие сообщения просто терялись и
-            # watcher'ы модулей (например, Iris) их не видели.
+                                                                              
+                                                                               
+                                                                            
+                                                              
             self._dispatch_watchers(event, message)
             return
         await self._handle_message(event, is_own=False, is_co_owner=is_co_owner)
@@ -474,19 +487,13 @@ class CommandDispatcher:
                 return
             asyncio.ensure_future(self._safe_call(handler, event, cmd_name))
             return
-        # Сообщение не является командой -> отдаём его watcher'ам.
-        # Раньше этот блок выполнялся только при is_own (исходящие), из-за чего
-        # watcher'ы НИКОГДА не получали входящие сообщения (ответы ботов, чужие
-        # сообщения). Теперь watcher'ы вызываются для любых сообщений, а нужное
-        # направление каждый watcher выбирает сам через теги out=/in_=.
+                                                                  
+                                                                               
+                                                                               
+                                                                               
+                                                                       
         self._dispatch_watchers(event, message)
     def _dispatch_watchers(self, event: events.NewMessage.Event, message: Message) -> None:
-        """Прогоняет все зарегистрированные watcher'ы по сообщению.
-
-        Направление (исходящее/входящее) и прочие условия фильтруются самими
-        watcher'ами через теги (out=, in_=, chat_id=, from_id= и т.д.).
-        Watcher без тегов получает И исходящие, И входящие сообщения.
-        """
         if not self._watchers:
             return
         for filter_func, handler, active_tags in self._watchers:

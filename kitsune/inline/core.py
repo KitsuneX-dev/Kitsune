@@ -233,25 +233,12 @@ class InlineManager:
         self._callbacks[cb_id] = (func, args, kwargs or {})
         return cb_id
     def register_inline_handler(self, func: typing.Callable) -> None:
-        """Регистрирует inline-хендлер из модуля.
-
-        Хендлер должен иметь сигнатуру::
-
-            async def handler(text: str, query: InlineQuery) -> bool: ...
-
-        Возвращает ``True`` если запрос обработан (маршрутизация
-        прекратится), ``False`` / ``None`` — передать дальше.
-
-        Атрибут ``_inline_only_own=True`` ограничивает хендлер
-        только запросами от владельца бота.
-        """
         only_own = bool(getattr(func, "_inline_only_own", False))
         entry    = (func, only_own)
         if entry not in self._inline_handlers:
             self._inline_handlers.append(entry)
             logger.debug("InlineManager: registered inline_handler %r", func)
     def unregister_inline_handler(self, func: typing.Callable) -> None:
-        """Удаляет ранее зарегистрированный inline-хендлер."""
         self._inline_handlers = [
             (h, o) for h, o in self._inline_handlers if h is not func
         ]
@@ -536,7 +523,7 @@ class InlineManager:
     async def _handle_inline_query(self, query: "InlineQuery") -> None:
         q = query.query.strip()
 
-        # --- Пользовательские inline-хендлеры из модулей ---
+                                                             
         if self._inline_handlers:
             from_uid = getattr(query.from_user, "id", None)
             for handler, only_own in list(self._inline_handlers):

@@ -79,6 +79,12 @@ class SecurityModule(KitsuneModule):
     }
     def _inline(self):
         return getattr(self.client, "_kitsune_inline", None)
+    async def _set_co_owners(self, owners) -> None:
+        dispatcher = getattr(self.client, "_kitsune_dispatcher", None)
+        if dispatcher is not None and hasattr(dispatcher, "set_co_owners"):
+            await dispatcher.set_co_owners(owners)
+        else:
+            await self.db.set(_DB_OWNER, "co_owners", owners)
     async def _resolve_user(self, event):
         args = self.get_args(event).strip()
         if args:
@@ -136,7 +142,7 @@ class SecurityModule(KitsuneModule):
         owners = self.db.get(_DB_OWNER, "co_owners", [])
         if uid not in owners:
             owners.append(uid)
-            await self.db.set(_DB_OWNER, "co_owners", owners)
+            await self._set_co_owners(owners)
         inline = self._inline()
         if inline:
             await inline.edit(
@@ -184,7 +190,7 @@ class SecurityModule(KitsuneModule):
         owners = self.db.get(_DB_OWNER, "co_owners", [])
         if uid in owners:
             owners.remove(uid)
-            await self.db.set(_DB_OWNER, "co_owners", owners)
+            await self._set_co_owners(owners)
         inline = self._inline()
         if inline:
             await inline.edit(

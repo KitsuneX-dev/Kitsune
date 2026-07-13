@@ -28,7 +28,6 @@ class _FakeMessage:
 
 
 class _FakeCallbackQuery:
-    """Минимальная заглушка aiogram CallbackQuery для проверки _on_callback."""
 
     def __init__(self, data, from_user, message=None, inline_message_id=None):
         self.id = "cbq-1"
@@ -43,7 +42,6 @@ class _FakeCallbackQuery:
 
 
 def _make_manager():
-    """Создаёт InlineManager без вызова start() (без зависимости от aiogram)."""
     from kitsune.inline.core import InlineManager
 
     client = type("C", (), {"tg_id": 12345})()
@@ -52,7 +50,6 @@ def _make_manager():
 
 
 def test_inline_call_has_from_user_id_field():
-    """from_user_id присутствует как поле dataclass со значением по умолчанию None."""
     call = InlineCall(
         id="x",
         chat_id=1,
@@ -79,7 +76,6 @@ def test_inline_call_from_user_id_can_be_set_explicitly():
 
 
 def test_on_callback_sets_from_user_id():
-    """После нажатия кнопки у InlineCall корректно проставлен from_user_id."""
     manager = _make_manager()
 
     captured = {}
@@ -87,8 +83,8 @@ def test_on_callback_sets_from_user_id():
     async def handler(call, *args, **kwargs):
         captured["call"] = call
 
-    # Регистрируем callback так же, как это делает generate_markup:
-    # (handler, args, owner_id, disable_security, kwargs)
+                                                                   
+                                                         
     cb_id = "cb12345"
     manager._callbacks[cb_id] = (handler, (), manager._client.tg_id, False, {})
 
@@ -106,7 +102,6 @@ def test_on_callback_sets_from_user_id():
 
 
 def test_on_callback_from_user_id_none_when_no_user():
-    """Если from_user недоступен — from_user_id должен быть None."""
     manager = _make_manager()
 
     captured = {}
@@ -115,7 +110,7 @@ def test_on_callback_from_user_id_none_when_no_user():
         captured["call"] = call
 
     cb_id = "cbnouser"
-    # disable_security=True, чтобы проверка владельца не блокировала вызов
+                                                                          
     manager._callbacks[cb_id] = (handler, (), manager._client.tg_id, True, {})
 
     cbq = _FakeCallbackQuery(
