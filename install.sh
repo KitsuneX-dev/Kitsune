@@ -101,9 +101,9 @@ fi
 
 step "Проверка Python"
 PYTHON=""
-for cmd in python3.12 python3.11 python3.10 python3; do
+for cmd in python3.13 python3.12 python3.11 python3; do
     if command -v "$cmd" &>/dev/null; then
-        if $cmd -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)" 2>/dev/null; then
+        if $cmd -c "import sys; sys.exit(0 if sys.version_info >= (3, 13) else 1)" 2>/dev/null; then
             VER=$($cmd -c "import sys; print('.'.join(map(str,sys.version_info[:2])))")
             PYTHON="$cmd"
             ok "Python найден: $cmd ($VER)"
@@ -113,15 +113,24 @@ for cmd in python3.12 python3.11 python3.10 python3; do
 done
 
 if [[ -z "$PYTHON" ]]; then
-    warn "Python 3.10+ не найден — устанавливаю..."
+    warn "Python 3.13+ не найден — устанавливаю..."
     if $IS_TERMUX; then
         pkg install python -y; PYTHON="python3"
     elif $IS_UBUNTU; then
-        apt_install python3.11 python3.11-venv python3-pip \
-            || err "Установи Python вручную: sudo apt install python3.11 python3.11-venv"
-        PYTHON="python3.11"
+        if command -v add-apt-repository &>/dev/null; then
+            ${SUDO:-} add-apt-repository -y ppa:deadsnakes/ppa 2>/dev/null || true
+            ${SUDO:-} apt-get update -qq 2>/dev/null || true
+        fi
+        if apt_install python3.13 python3.13-venv python3-pip 2>/dev/null; then
+            PYTHON="python3.13"
+        elif apt_install python3.12 python3.12-venv python3-pip 2>/dev/null; then
+            PYTHON="python3.12"
+            warn "Python 3.13 недоступен в репозитории — поставлен 3.12 (минимально совместим)"
+        else
+            err "Установи Python 3.13 вручную: sudo add-apt-repository ppa:deadsnakes/ppa && sudo apt install python3.13 python3.13-venv"
+        fi
     else
-        err "Установи Python 3.10+ вручную: https://python.org"
+        err "Установи Python 3.13+ вручную: https://python.org"
     fi
     ok "Python: $PYTHON"
 fi
@@ -135,10 +144,14 @@ if $IS_TERMUX; then
     ok "Termux-пакеты готовы"
 elif $IS_UBUNTU; then
     PYVER=$($PYTHON -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+
     apt_install git curl build-essential libssl-dev libffi-dev \
         libjpeg-dev zlib1g-dev libpq-dev \
         "python${PYVER}-venv" python3-venv \
-        && ok "Системные пакеты — готово" || true
+        "python${PYVER}-dev" \
+        && ok "Системные пакеты — готово" \
+        || { apt_install python3-dev && ok "Системные пакеты — готово (с python3-dev fallback)"; } \
+        || true
 fi
 
 if $IS_UBUNTU; then
@@ -157,27 +170,51 @@ fi
 step "Исходный код"
 INSTALL_DIR="$HOME/Kitsune"
 
+mkdir -p "$HOME" 2>/dev/null || true
+
 if [[ -d "$INSTALL_DIR/.git" ]]; then
     info "Репозиторий уже есть — обновляю..."
-    cd "$INSTALL_DIR"
+    cd "$INSTALL_DIR" || err "Не удалось перейти в $INSTALL_DIR"
     git pull --ff-only origin main 2>/dev/null || warn "git pull не удался, продолжаю с текущей версией"
     ok "Код обновлён"
 else
-    info "Клонирую репозиторий..."
+    if [[ -e "$INSTALL_DIR" ]]; then
+        warn "Папка $INSTALL_DIR существует, но не является git-репозиторием — пересоздаю..."
+        rm -rf "$INSTALL_DIR" || err "Не удалось удалить старую папку $INSTALL_DIR"
+    fi
+
+    info "Клонирую репозиторий в $INSTALL_DIR ..."
     git clone https://github.com/KitsuneX-dev/Kitsune "$INSTALL_DIR" \
         || err "Не удалось клонировать репозиторий. Проверь интернет-соединение."
-    cd "$INSTALL_DIR"
+
+    if [[ ! -d "$INSTALL_DIR" ]]; then
+        warn "Папка $INSTALL_DIR не создана git'ом — создаю вручную и повторяю клон..."
+        mkdir -p "$INSTALL_DIR" || err "Не удалось создать папку $INSTALL_DIR"
+        git clone https://github.com/KitsuneX-dev/Kitsune "$INSTALL_DIR" \
+            || err "Повторный клон не удался. Проверь интернет и права доступа к $HOME."
+    fi
+
+    if [[ ! -d "$INSTALL_DIR/.git" ]]; then
+        err "Папка $INSTALL_DIR создана, но репозиторий внутри не инициализирован."
+    fi
+
+    cd "$INSTALL_DIR" || err "Не удалось перейти в $INSTALL_DIR"
     ok "Репозиторий склонирован: $INSTALL_DIR"
 fi
+
+if [[ ! -d "$INSTALL_DIR" ]]; then
+    err "Критическая ошибка: папка $INSTALL_DIR отсутствует после установки."
+fi
+ok "Папка Kitsune подтверждена: $INSTALL_DIR"
 
 step "Виртуальное окружение"
 VENV_DIR="$INSTALL_DIR/venv"
 if [[ ! -d "$VENV_DIR" ]]; then
     if ! $PYTHON -m venv "$VENV_DIR"; then
-        warn "venv не создался — пробую доустановить python${PYVER:-3.10}-venv..."
-        ${SUDO:-} apt-get install -y "python${PYVER:-3.10}-venv" python3-venv 2>/dev/null || true
+        warn "venv не создался — пробую доустановить python${PYVER:-3.13}-venv..."
+        ${SUDO:-} apt-get install -y "python${PYVER:-3.13}-venv" python3-venv 2>/dev/null || true
         $PYTHON -m venv "$VENV_DIR" \
-            || err "Не удалось создать venv. Запусти вручную: sudo apt install python3.10-venv"
+            || err "Не удалось создать venv. Запусти вручную: sudo apt install python3.13-venv"
     fi
     ok "venv создан: $VENV_DIR"
 else
@@ -261,14 +298,38 @@ else
     ok "pyaes уже установлен — пропускаю"
 fi
 rm -rf "$_PYAES_TMP"
+
+if "$PIP" install --prefer-binary --no-cache-dir --no-warn-script-location \
+       --disable-pip-version-check --quiet "tgcrypto>=1.2.5" 2>/dev/null; then
+    ok "tgcrypto установлен (prebuilt wheel)"
+else
+    info "Prebuilt wheel не найден — собираю tgcrypto из исходников..."
+
+    _PY_INC=$("$PYTHON_VENV" -c "import sysconfig; print(sysconfig.get_path('include'))" 2>/dev/null || true)
+    _BUILD_OK=false
+    if [[ -n "$_PY_INC" && -f "$_PY_INC/Python.h" ]]; then
+        CFLAGS="-I$_PY_INC" "$PIP" install --no-cache-dir --no-warn-script-location \
+            --disable-pip-version-check --quiet "tgcrypto>=1.2.5" 2>/dev/null \
+            && _BUILD_OK=true
+    fi
+    if ! $_BUILD_OK; then
+        "$PIP" install --no-build-isolation --no-cache-dir --no-warn-script-location \
+            --disable-pip-version-check --quiet "tgcrypto>=1.2.5" 2>/dev/null \
+            && _BUILD_OK=true
+    fi
+    if $_BUILD_OK; then
+        ok "tgcrypto установлен (собран из исходников)"
+    else
+        warn "tgcrypto не установился — Hydrogram будет работать без C-ускорения"
+    fi
+fi
+
 "$PIP" install --no-cache-dir -r requirements.txt \
     --no-warn-script-location --disable-pip-version-check --quiet \
     --no-build-isolation \
     || err "Не удалось установить зависимости. Проверь requirements.txt"
 ok "Зависимости установлены"
 
-# python-socks нужен Telethon >=1.36 для всех типов прокси (включая MTProto).
-# Дублируем явную установку — на случай старых requirements.txt у обновляющихся пользователей.
 "$PIP" install --no-cache-dir --no-warn-script-location --disable-pip-version-check --quiet \
     "python-socks[asyncio]>=2.4.4" PySocks \
     && ok "python-socks[asyncio] установлен (нужен для прокси и обхода РКН)" \

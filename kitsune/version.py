@@ -1,20 +1,14 @@
 from __future__ import annotations
-
 import contextlib
-
 import os
 
-__version__ = (1, 3, 0)
+__version__ = (1, 4, 2)
 
 __version_str__ = ".".join(map(str, __version__))
 
 branch: str = "main"
 
 with contextlib.suppress(Exception):
-
     import git
-
     _repo_path = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-
     branch = git.Repo(path=_repo_path).active_branch.name
-

@@ -1,63 +1,52 @@
-# Python
 __pycache__/
 **/__pycache__/
 *.py[cod]
 *.pyo
 *.pyd
+*.pyc
 .Python
 
-# Virtual environments
 venv/
 .venv/
 env/
 .env/
 
-# Session & keys (НИКОГДА не коммитить)
 *.session
 *.session.enc
 *.session-journal
 *.key
 kitsune.key
 
-# Database
 *.db
 *.db-shm
 *.db-wal
 
-# Kitsune runtime artefacts
 .kitsune/
 kitsune-*.db
 kitsune-assets/
 
-# Logs
 *.log
 logs/
 
-# Config с секретами
-# config.toml — намеренно НЕ исключён (содержит шаблон без секретов)
+config.toml
 
-# OS
 .DS_Store
 Thumbs.db
 desktop.ini
 
-# IDE
 .idea/
 .vscode/
 *.swp
 *.swo
 
-# Build / dist
 build/
 dist/
 *.egg-info/
 *.egg
 
-# pytest
 .pytest_cache/
 .coverage
 coverage.xml
 htmlcov/
 
-# mypy
 .mypy_cache/

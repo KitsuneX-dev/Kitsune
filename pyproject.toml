@@ -1,48 +1,74 @@
 [build-system]
 requires = ["setuptools>=68.0", "wheel"]
-build-backend = "setuptools.backends.legacy:build"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "kitsune"
-version = "1.3.0"
+version = "1.4.1"
 description = "Kitsune Userbot — fast, stable, modern Telegram userbot"
 readme = "README.md"
 license = { text = "AGPLv3" }
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 authors = [
-    { name = "Yushi", contact = "@Mikasu32" }
+    { name = "Yushi", email = "mikasu32@kitsune.local" }
 ]
 keywords = ["telegram", "userbot", "kitsune"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: GNU Affero General Public License v3",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Communications :: Chat",
+]
 
 dependencies = [
-    "heroku-tl-new>=2.0.0",
-    "TgCrypto-pyrofork",
-    "pyrogram>=2.0.106",
-    "tgcrypto>=1.2.5",
-    "aiohttp>=3.9.3",
-    "aiohttp-jinja2>=1.6",
-    "Jinja2>=3.1.4",
-    "aiogram>=3.7.0",
-    "httpx[asyncio]>=0.27.0",
-    "GitPython>=3.1.43",
-    "meval>=2.5",
+    "telethon>=1.36.0,<2.0.0",
+    "hydrogram>=0.1.4",
+    "aiohttp>=3.9.3,<4.0.0",
+    "aiohttp-jinja2>=1.6,<2.0",
+    "aiohttp-socks>=0.9.0,<1.0.0",
+    "httpx>=0.27.0,<1.0.0",
+    "Jinja2>=3.1.4,<4.0.0",
+    "werkzeug>=3.0.3,<4.0.0",
+    "aiogram>=3.7.0,<4.0.0",
+    "pydantic>=2.7.0,<3.0.0",
+    "GitPython>=3.1.43,<4.0.0",
+    "meval>=2.5,<3.0",
     "grapheme>=0.6.0",
-    "emoji>=2.12.1",
-    "werkzeug>=3.0.3",
-    "psutil>=5.9.8",
-    "rsa>=4.9",
-    "ruamel.yaml>=0.18.6",
-    "pydantic>=2.7.0",
-    "toml>=0.10.2",
-    "aiofiles>=23.2.1",
-    "colorama>=0.4.6",
-    "PySocks>=1.7.1",
-    "python-socks[asyncio]>=2.4.4",
+    "emoji>=2.12.1,<3.0.0",
+    "psutil>=5.9.8,<7.0.0",
+    "aiofiles>=23.2.1,<25.0.0",
+    "colorama>=0.4.6,<1.0.0",
+    "toml>=0.10.2,<1.0.0",
+    "ruamel.yaml>=0.18.6,<1.0.0",
+    "distro>=1.8.0,<2.0.0",
+    "deep-translator>=1.11.0,<2.0.0",
+    "PySocks>=1.7.1,<2.0.0",
+    "python-socks[asyncio]>=2.4.4,<3.0.0",
+    "cryptography>=42.0.0,<46.0.0",
+    "rsa>=4.9,<5.0.0",
+    "Pillow>=10.0.0,<12.0.0",
+    "orjson>=3.9.0",
 ]
 
 [project.optional-dependencies]
 redis = ["redis>=5.0.4"]
-dev = ["mypy>=1.10.0", "black>=24.4.2", "ruff>=0.4.4"]
+speedups = [
+    "tgcrypto>=1.2.5",
+    "uvloop>=0.19.0; sys_platform != 'win32'",
+]
+dev = [
+    "mypy>=1.10.0",
+    "black>=24.4.2",
+    "ruff>=0.4.4",
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+]
 
 [project.scripts]
 kitsune = "kitsune.__main__:main"
@@ -53,13 +79,36 @@ include = ["kitsune*"]
 
 [tool.black]
 line-length = 100
-target-version = ["py310", "py311", "py312"]
+target-version = ["py312", "py313"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py310"
+target-version = "py312"
+extend-exclude = [
+    "kitsune/web",
+    "kitsune/modules/eval.py",
+    "kitsune/modules/terminal.py",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "W"]
+ignore = [
+    "E401", "E402", "E501", "E701", "E702", "E711", "E712", "E721", "E722", "E731", "E741",
+    "F401", "F403", "F405", "F541", "F811", "F821", "F841",
+    "W291", "W292", "W293", "W391", "W605",
+]
 
 [tool.mypy]
-python_version = "3.10"
-warn_return_any = true
-warn_unused_configs = true
+python_version = "3.12"
+warn_return_any = false
+warn_unused_configs = false
+ignore_missing_imports = true
+ignore_errors = true
+follow_imports = "skip"
+no_implicit_optional = false
+check_untyped_defs = false
+files = ["kitsune"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

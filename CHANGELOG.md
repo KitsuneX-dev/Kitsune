@@ -4,6 +4,29 @@ All notable changes to Kitsune Userbot are documented here.
 
 ---
 
+## [1.4.1] — CI & module-level tests
+
+### 🔬 Tests
+- Новый файл `tests/test_modules.py` — для каждого встроенного модуля `kitsune/modules/*.py`
+  выполняется три проверки:
+  - модуль импортируется без `ImportError`,
+  - после загрузки `Loader._register_module()` регистрирует хендлеры
+    в `Dispatcher` (либо класс является служебным — без хендлеров),
+  - `instance.strings(key)` отдаёт строки локализации как на `ru`, так и на `en`.
+
+### ⚙️ CI
+- Добавлен `.github/workflows/ci.yml` — GitHub Actions запускает
+  `ruff`, `mypy` и `pytest` на Python 3.12 и 3.13 при каждом push / pull_request.
+- Добавлен optional-dependency `speedups` (`tgcrypto` + `uvloop`).
+- `pyproject.toml`: исправлено поле `authors` (PEP 621), `requires-python` понижен до `>=3.12`,
+  добавлены разделы `[tool.ruff.lint]` и `[tool.pytest.ini_options]`.
+
+### 🔖 Versioning
+- Глобальная версия проекта поднята до **1.4.1**.
+- Версия модулей `Config` и `KitsuneInfo` обновлена `1.4.0 → 1.4.1`.
+
+---
+
 ## [1.3.0] — Phase 3: Reliability
 
 ### 🛡 Reliability subsystem
