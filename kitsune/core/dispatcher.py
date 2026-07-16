@@ -321,7 +321,19 @@ class CommandDispatcher:
         await self._handle_message(event, is_own=True, is_co_owner=False)
     async def _on_in_message(self, event: events.NewMessage.Event) -> None:
         message = event.message
+<<<<<<< HEAD
         if not message or not message.text:
+=======
+        if not message:
+            return
+        if not message.text:
+            sender_id = message.sender_id
+            own_id = getattr(self._client, "tg_id", 0) or 0
+            if not sender_id or sender_id == own_id:
+                return
+            if getattr(message, "media", None) is not None:
+                self._dispatch_watchers(event, message)
+>>>>>>> 827a3e04fbf2feb5273f17dc7ab618950e32a870
             return
         sender_id = message.sender_id
         own_id = getattr(self._client, "tg_id", 0) or 0
@@ -416,7 +428,15 @@ class CommandDispatcher:
         await self._handle_message(event, is_own=False, is_co_owner=is_co_owner)
     async def _handle_message(self, event: events.NewMessage.Event, *, is_own: bool, is_co_owner: bool = False, is_incoming: bool = False) -> None:
         message = event.message
+<<<<<<< HEAD
         if not message or not message.text:
+=======
+        if not message:
+            return
+        if not message.text:
+            if getattr(message, "media", None) is not None:
+                self._dispatch_watchers(event, message)
+>>>>>>> 827a3e04fbf2feb5273f17dc7ab618950e32a870
             return
         text: str = (message.raw_text or message.text or "").strip()
         if text.startswith(self._prefix):
