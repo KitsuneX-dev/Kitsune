@@ -19,14 +19,7 @@ def backend(db_path):
     yield be
     be.close()
 def run(coro):
-    try:
-        loop = asyncio.get_event_loop()
-        if loop.is_closed():
-            raise RuntimeError("closed")
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-    return loop.run_until_complete(coro)
+    return asyncio.run(coro)
 class _FakeClient:
     def __init__(self, tg_id=12345):
         self.tg_id = tg_id

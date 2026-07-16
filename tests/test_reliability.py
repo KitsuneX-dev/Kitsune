@@ -18,7 +18,7 @@ from kitsune.core.reliability import (
 
 
 def _arun(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
+    return asyncio.run(coro)
 class CircuitBreakerTests(unittest.TestCase):
     def setUp(self) -> None:
         self.name = f"test_cb_{id(self)}_{time.monotonic_ns()}"
@@ -190,3 +190,4 @@ class RegistryTests(unittest.TestCase):
         global_registry.unregister(name)
 if __name__ == "__main__":
     unittest.main()
+
