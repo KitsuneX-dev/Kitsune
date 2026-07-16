@@ -57,15 +57,35 @@ pip_install "Pillow" && ok "Pillow установлен" || warn "Pillow не у
 
 step "Клонирование репозитория"
 INSTALL_DIR="$HOME/Kitsune"
+
+mkdir -p "$HOME" 2>/dev/null || true
+
 if [[ -d "$INSTALL_DIR/.git" ]]; then
     info "Обновляю существующий репозиторий..."
     cd "$INSTALL_DIR" && git pull --ff-only origin main || \
         warn "git pull не удался, продолжаю с текущей версией"
 else
-    rm -rf "$INSTALL_DIR"
-    git clone https://github.com/KitsuneX-dev/Kitsune "$INSTALL_DIR"
+    if [[ -e "$INSTALL_DIR" ]]; then
+        warn "Папка $INSTALL_DIR существует, но без .git — удаляю и пересоздаю..."
+        rm -rf "$INSTALL_DIR" || err "Не удалось удалить $INSTALL_DIR (проверь права)"
+    fi
+
+    info "Клонирую в $INSTALL_DIR ..."
+    git clone https://github.com/KitsuneX-dev/Kitsune "$INSTALL_DIR" \
+        || err "Не удалось клонировать репозиторий. Проверь интернет-соединение."
+
+    if [[ ! -d "$INSTALL_DIR" ]]; then
+        warn "Папка $INSTALL_DIR не создана — создаю вручную и повторяю клон..."
+        mkdir -p "$INSTALL_DIR" || err "Не удалось создать $INSTALL_DIR"
+        git clone https://github.com/KitsuneX-dev/Kitsune "$INSTALL_DIR" \
+            || err "Повторный клон не удался."
+    fi
 fi
-cd "$INSTALL_DIR"
+
+if [[ ! -d "$INSTALL_DIR" ]]; then
+    err "Критическая ошибка: папка $INSTALL_DIR не создана."
+fi
+cd "$INSTALL_DIR" || err "Не удалось перейти в $INSTALL_DIR"
 ok "Репозиторий готов: $INSTALL_DIR"
 
 step "Telethon (основная библиотека)"
@@ -120,8 +140,27 @@ else
 fi
 
 step "Hydrogram"
-pip_install "hydrogram" && pip_install "tgcrypto" && \
+pip_install "hydrogram" && \
     ok "Hydrogram установлен" || warn "Hydrogram не установился — продолжаю без него"
+
+if pip install --prefer-binary --no-cache-dir -q "tgcrypto>=1.2.5" 2>/dev/null; then
+    ok "tgcrypto установлен (prebuilt wheel)"
+else
+    info "Prebuilt wheel не найден — собираю tgcrypto из исходников..."
+    _BUILD_OK=false
+
+    if pip install --no-cache-dir -q "tgcrypto>=1.2.5" 2>/dev/null; then
+        _BUILD_OK=true
+
+    elif pip install --no-build-isolation --no-cache-dir -q "tgcrypto>=1.2.5" 2>/dev/null; then
+        _BUILD_OK=true
+    fi
+    if $_BUILD_OK; then
+        ok "tgcrypto установлен (собран из исходников)"
+    else
+        warn "tgcrypto не установился — Hydrogram будет работать без C-ускорения"
+    fi
+fi
 
 step "Директории и права"
 mkdir -p "$HOME/.kitsune/modules" "$HOME/.kitsune/logs"
