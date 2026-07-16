@@ -3,6 +3,7 @@ import asyncio
 import logging
 import os
 import signal
+import sys
 from ..core.loader import KitsuneModule, command
 from ..core.security import OWNER
 from ..utils import escape_html, auto_delete, truncate
@@ -12,6 +13,29 @@ logger = logging.getLogger(__name__)
 _TIMEOUT = 120
 _MAX_OUT = 3000
 _MAX_ERR = 3000
+
+
+def _venv_aware_env() -> dict[str, str]:
+    """Собрать окружение для подпроцесса, осознающее venv бота."""
+    env = {
+        **os.environ,
+        "TERM": "xterm-256color",
+        "DEBIAN_FRONTEND": "noninteractive",
+    }
+
+    bin_dir = os.path.dirname(os.path.abspath(sys.executable))
+    if bin_dir:
+        old_path = env.get("PATH", "")
+        parts = old_path.split(os.pathsep) if old_path else []
+        if bin_dir not in parts:
+            env["PATH"] = os.pathsep.join([bin_dir, *parts]) if parts else bin_dir
+
+    venv_root = os.path.dirname(bin_dir)
+    if venv_root and os.path.isfile(os.path.join(venv_root, "pyvenv.cfg")):
+        env["VIRTUAL_ENV"] = venv_root
+        env.pop("PYTHONHOME", None)
+
+    return env
 
 
 class TerminalModule(KitsuneModule):
@@ -77,7 +101,7 @@ class TerminalModule(KitsuneModule):
     async def _run(self, event, cmd: str, *, use_sudo: bool) -> None:
         if use_sudo and not cmd.startswith("sudo "):
             cmd = f"sudo {cmd}"
-        env = {**os.environ, "TERM": "xterm-256color", "DEBIAN_FRONTEND": "noninteractive"}
+        env = _venv_aware_env()
         try:
             proc = await asyncio.create_subprocess_shell(
                 cmd,

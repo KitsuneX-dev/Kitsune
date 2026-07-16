@@ -158,7 +158,7 @@ class KitsuneSettingsModule(KitsuneModule):
             return
         disabled = self.db.get(_DB_MAIN, "disabled_watchers", [])
         lines = []
-        for _f, handler in disp._watchers:
+        for _f, handler, *_rest in disp._watchers:
             name = getattr(handler.__self__, "name", "?") + "." + handler.__name__
             icon = "⏸" if name in disabled else "▶️"
             lines.append(f"{icon} <code>{name}</code>")

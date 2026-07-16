@@ -4,6 +4,58 @@ All notable changes to Kitsune Userbot are documented here.
 
 ---
 
+## [1.4.3] — Фиксы автоустановки зависимостей и выгрузки модулей
+
+### 🐞 Загрузка/установка зависимостей
+- **Исправлен маппинг пакета для нового Google SDK.** В `kitsune/core/loader.py`
+  словарь `_IMPORT_TO_PIP` теперь связывает импорт `google` с актуальным
+  пакетом **`google-genai`** (было устаревшее `google-generativeai`).
+  Модули, использующие `from google import genai` (например пользовательский
+  `GeminiK`), теперь корректно доустанавливают зависимость при первой загрузке.
+- `google-genai` добавлен в набор namespace-пакетов (`_NAMESPACE_PKGS`)
+  в `_pip_install`; старый `google-generativeai` там сохранён ради
+  обратной совместимости.
+- **`.sh` / терминал теперь ставит пакеты в venv бота.** В
+  `kitsune/modules/terminal.py` добавлена функция `_venv_aware_env()`:
+  каталог текущего интерпретатора (`sys.executable`) ставится первым в `PATH`,
+  а при настоящем venv (наличие `pyvenv.cfg`) выставляется `VIRTUAL_ENV`
+  и убирается `PYTHONHOME`. Раньше `.sh pip install ...` мог попадать
+  в системный/`--user` Python мимо venv.
+
+### 🐞 Выгрузка модулей (`.unloadmod` / `.ulm`)
+- **Модуль больше не «живёт» после выгрузки.** В `unload_module`
+  (`kitsune/core/loader.py`) добавлена очистка `sys.modules`
+  (метод `_purge_sys_modules`): удаляются и сам Python-модуль, и все его
+  подмодули, после чего вызывается `importlib.invalidate_caches()`.
+  Это устраняло причину, по которой фоновые asyncio-задачи, замыкания
+  и напрямую навешенные telethon-хендлеры продолжали работать
+  до полной перезагрузки процесса.
+- **Снятие inline-хендлеров при выгрузке.** Добавлен
+  `_unregister_inline_handlers_for`; в `inline/core.py`
+  `unregister_inline_handler` теперь сопоставляет связанные методы
+  по `__self__`/`__func__`, а не по `is` (иначе rebound-метод из
+  `inspect.getmembers` не находился). Callback-хендлеры в текущей версии
+  не задействованы (декоратора и регистрации нет), поэтому мёртвый код
+  не добавлялся.
+- **Watcher'ы и команды снимаются по модулю-владельцу.** В диспетчере
+  (`kitsune/core/dispatcher.py`) `register_watcher` сохраняет владельца
+  явным полем, а `unregister_watchers_for` снимает по нему — теперь
+  корректно снимаются и watcher'ы, зарегистрированные как несвязанные
+  функции/замыкания (без `__self__`). Проверка по `__self__` оставлена
+  как дополнительный критерий. Команды снимаются по модулю из записи
+  диспетчера, а не только по `__self__`.
+
+### 🔬 Tests
+- Новый файл `tests/test_unload_fixes.py`: маппинг `google → google-genai`,
+  снятие watcher'а по владельцу (в т.ч. для функции без `__self__`),
+  очистка `sys.modules` при `unload_module` (сам модуль и подмодули),
+  снятие inline-хендлеров при выгрузке, а также поведение `_venv_aware_env()`.
+
+### 🔖 Versioning
+- Глобальная версия проекта поднята до **1.4.3**.
+
+---
+
 ## [1.4.1] — CI & module-level tests
 
 ### 🔬 Tests

@@ -222,7 +222,7 @@ class CommandDispatcher:
         self._limiter  = RateLimiter()
         self._loader: typing.Any = None
         self._commands: dict[str, tuple[typing.Callable, typing.Any, typing.Any]] = {}
-        self._watchers: list[tuple[typing.Callable | None, typing.Callable, tuple[str, ...]]] = []
+        self._watchers: list[tuple[typing.Callable | None, typing.Callable, tuple[str, ...], typing.Any]] = []
         self._pending_input: dict | None = None
         self._co_owners_cache: list[int] = []
         self._co_owners_dirty: bool = True
@@ -282,13 +282,21 @@ class CommandDispatcher:
         if sender_id in self._get_co_owners():
             return True
         return sender_id in self._get_role_users(module, role_name)
-    def register_watcher(self, handler: typing.Callable, filter_func: typing.Callable | None = None) -> None:
+    def register_watcher(
+        self,
+        handler: typing.Callable,
+        filter_func: typing.Callable | None = None,
+        *,
+        module: typing.Any = None,
+    ) -> None:
         active_tags = _collect_active_tags(handler)
-        self._watchers.append((filter_func, handler, active_tags))
+        if module is None:
+            module = getattr(handler, "__self__", None)
+        self._watchers.append((filter_func, handler, active_tags, module))
     def unregister_watchers_for(self, module: typing.Any) -> None:
         self._watchers = [
-            (f, h, t) for f, h, t in self._watchers
-            if getattr(h, "__self__", None) is not module
+            (f, h, t, m) for f, h, t, m in self._watchers
+            if m is not module and getattr(h, "__self__", None) is not module
         ]
     def set_prefix(self, prefix: str) -> None:
         self._prefix = prefix
@@ -508,7 +516,7 @@ class CommandDispatcher:
     def _dispatch_watchers(self, event: events.NewMessage.Event, message: Message) -> None:
         if not self._watchers:
             return
-        for filter_func, handler, active_tags in self._watchers:
+        for filter_func, handler, active_tags, _module in self._watchers:
             try:
                 if filter_func is not None and not filter_func(message):
                     continue

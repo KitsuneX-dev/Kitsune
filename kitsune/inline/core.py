@@ -239,8 +239,17 @@ class InlineManager:
             self._inline_handlers.append(entry)
             logger.debug("InlineManager: registered inline_handler %r", func)
     def unregister_inline_handler(self, func: typing.Callable) -> None:
+        def _same(h: typing.Callable) -> bool:
+            if h is func:
+                return True
+            h_self = getattr(h, "__self__", None)
+            f_self = getattr(func, "__self__", None)
+            if h_self is not None and h_self is f_self:
+                return getattr(h, "__func__", None) is getattr(func, "__func__", None)
+            return False
+
         self._inline_handlers = [
-            (h, o) for h, o in self._inline_handlers if h is not func
+            (h, o) for h, o in self._inline_handlers if not _same(h)
         ]
         logger.debug("InlineManager: unregistered inline_handler %r", func)
     async def form(

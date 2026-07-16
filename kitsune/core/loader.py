@@ -470,7 +470,7 @@ _IMPORT_TO_PIP: dict[str, str] = {
     "magic": "python-magic",
     "usb": "pyusb",
     "serial": "pyserial",
-    "google": "google-generativeai",
+    "google": "google-genai",
 }
 
 async def _run_cmd(args: list[str], timeout: float | None = None) -> tuple[bool, str]:
@@ -539,7 +539,7 @@ def get_last_pip_stderr(package: str) -> str:
 async def _pip_install(package: str) -> bool:
     pip_name = _IMPORT_TO_PIP.get(package, package)
     is_termux = "com.termux" in os.environ.get("PREFIX", "") or os.path.isdir("/data/data/com.termux")
-    _NAMESPACE_PKGS = {"google-generativeai", "google-cloud-storage", "google-auth"}
+    _NAMESPACE_PKGS = {"google-genai", "google-generativeai", "google-cloud-storage", "google-auth"}
     base = _build_pip_base_cmd()
     args = base + ["install", pip_name, "--quiet", "--no-warn-script-location"]
     if pip_name in _NAMESPACE_PKGS:
@@ -772,6 +772,42 @@ class Loader:
             path, is_builtin=False, progress_cb=progress_cb,
             already_scanned=True, prefetched_source=source,
         )
+    def _purge_sys_modules(self, mod: KitsuneModule) -> None:
+        module_name = getattr(mod, "_py_module_name", None)
+        if not module_name:
+            source_path = getattr(mod, "_source_path", None)
+            if source_path:
+                path = Path(source_path)
+                if path.name == "__init__.py":
+                    module_name = f"kitsune.modules.{path.parent.name}"
+                else:
+                    module_name = f"kitsune.modules.{path.stem}"
+        if not module_name:
+            return
+        prefix = module_name + "."
+        to_remove = [
+            key for key in list(sys.modules)
+            if key == module_name or key.startswith(prefix)
+        ]
+        for key in to_remove:
+            sys.modules.pop(key, None)
+        importlib.invalidate_caches()
+
+    def _unregister_inline_handlers_for(self, mod: KitsuneModule) -> None:
+        _inline = getattr(self._client, "inline", None)
+        if _inline is None:
+            return
+        for _, method in inspect.getmembers(mod, predicate=inspect.ismethod):
+            if getattr(method, "_is_inline_handler", False):
+                if hasattr(_inline, "unregister_inline_handler"):
+                    try:
+                        _inline.unregister_inline_handler(method)
+                    except Exception as _ie:
+                        logger.debug(
+                            "Loader: unregister inline_handler %r failed: %s",
+                            getattr(method, "__name__", "?"), _ie,
+                        )
+
     async def unload_module(self, name: str) -> bool:
         mod = self._modules.get(name.lower())
         if mod is None:
@@ -783,12 +819,15 @@ class Loader:
         for cmd_name in list(self._dispatcher._commands):
             entry = self._dispatcher._commands[cmd_name]
             handler = entry[0]
-            if getattr(handler, "__self__", None) is mod:
+            owner = entry[2] if len(entry) > 2 else None
+            if getattr(handler, "__self__", None) is mod or owner is mod:
                 self._dispatcher.unregister_command(cmd_name)
         self._dispatcher.unregister_watchers_for(mod)
+        self._unregister_inline_handlers_for(mod)
         from ..events import bus
         bus.unsubscribe_all(mod)
         del self._modules[name.lower()]
+        self._purge_sys_modules(mod)
         logger.info("Loader: unloaded %s", name)
         return True
     async def reload_module(self, name: str, progress_cb=None) -> KitsuneModule:
@@ -998,6 +1037,7 @@ class Loader:
             mod = mod_class(self._client, self._db)
         mod.tg_id = self._client.tg_id
         mod._source_path = str(path)
+        mod._py_module_name = module_name
         mod._is_builtin = is_builtin
         mod._load_config_from_db()
         existing = self._modules.get(mod.name.lower())
@@ -1030,7 +1070,7 @@ class Loader:
                     self._dispatcher.register_command(alias, method, required, module=mod)
             if getattr(method, "_is_watcher", False):
                 filter_func = method._watcher_filter
-                self._dispatcher.register_watcher(method, filter_func)
+                self._dispatcher.register_watcher(method, filter_func, module=mod)
             if getattr(method, "_is_inline_handler", False):
                 _inline = getattr(self._client, "inline", None)
                 if _inline and hasattr(_inline, "register_inline_handler"):
