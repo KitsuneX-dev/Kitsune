@@ -42,7 +42,7 @@ class TerminalModule(KitsuneModule):
     name        = "terminal"
     description = "Shell command execution"
     author      = "Yushi"
-    version     = "1.4.0"
+    version     = "1.4.3"
     icon        = "🖥"
     category    = "system"
 
