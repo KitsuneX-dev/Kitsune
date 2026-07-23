@@ -180,7 +180,7 @@ class UpdateChecker:
                 logger.debug("UpdateChecker: could not add bot to group — %s", exc)
         except Exception:
             logger.debug("UpdateChecker: _ensure_bot_in_group failed", exc_info=True)
-    async def do_update_inline(self, chat_id: int = 0, msg_id: int = 0, edit_fn=None) -> None:
+    async def do_update_inline(self, chat_id: int = 0, msg_id: int = 0, edit_fn=None, inline_message_id: str = "") -> None:
         import inspect as _inspect
         async def edit(text: str) -> None:
             if edit_fn:
@@ -192,7 +192,8 @@ class UpdateChecker:
                     pass
         await self._db.set(_DB_KEY, "update_msg_chat",      chat_id)
         await self._db.set(_DB_KEY, "update_msg_id",        msg_id)
-        await self._db.set(_DB_KEY, "update_msg_via_telethon", True)
+        await self._db.set(_DB_KEY, "update_msg_inline_id", inline_message_id)
+        await self._db.set(_DB_KEY, "update_msg_via_telethon", not inline_message_id)
         await self._db.set(_DB_KEY, "update_start_time",    time.time())
         await self._db.force_save()
         await self._run_update(edit)
@@ -291,13 +292,15 @@ class UpdateChecker:
         await asyncio.sleep(1)
         os.execl(sys.executable, sys.executable, "-m", "kitsune")
     async def notify_update_done(self) -> None:
-        chat_id    = self._db.get(_DB_KEY, "update_msg_chat",  None)
-        msg_id     = self._db.get(_DB_KEY, "update_msg_id",    None)
-        start_time = self._db.get(_DB_KEY, "update_start_time", None)
-        if not chat_id or not msg_id or not start_time:
+        chat_id     = self._db.get(_DB_KEY, "update_msg_chat",  None)
+        msg_id      = self._db.get(_DB_KEY, "update_msg_id",    None)
+        inline_id   = self._db.get(_DB_KEY, "update_msg_inline_id", None)
+        start_time  = self._db.get(_DB_KEY, "update_start_time", None)
+        if not start_time or (not inline_id and (not chat_id or not msg_id)):
             return
         await self._db.delete(_DB_KEY, "update_msg_chat")
         await self._db.delete(_DB_KEY, "update_msg_id")
+        await self._db.delete(_DB_KEY, "update_msg_inline_id")
         await self._db.delete(_DB_KEY, "update_start_time")
         await asyncio.sleep(3)
         elapsed      = time.time() - float(start_time)
@@ -314,7 +317,21 @@ class UpdateChecker:
         await self._db.delete(_DB_KEY, "update_msg_via_telethon")
         token    = self._db.get(_DB_KEY, "bot_token", None)
         owner_id = self._db.get(_DB_KEY, "owner_id",  None)
-        if token and chat_id and msg_id:
+        if token and inline_id:
+            try:
+                from kitsune.modules.notifier.bot_runner import _make_bot
+                bot = _make_bot(str(token))
+                await bot.edit_message_text(
+                    inline_message_id=str(inline_id),
+                    text=done_text,
+                    parse_mode="HTML",
+                )
+                await bot.session.close()
+                edited = True
+                logger.info("UpdateChecker: update message edited via inline_message_id")
+            except Exception as _inline_edit_exc:
+                logger.debug("UpdateChecker: inline edit failed (%s)", _inline_edit_exc)
+        if not edited and token and chat_id and msg_id:
             try:
                 from kitsune.modules.notifier.bot_runner import _make_bot
                 bot = _make_bot(str(token))

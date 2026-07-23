@@ -259,6 +259,7 @@ class UpdaterModule(KitsuneModule):
         await self.db.delete(_DB_OWNER, "pending_update")
         chat_id = getattr(call, "chat_id", 0) or pending.get("chat_id", 0)
         msg_id  = getattr(call, "message_id", 0) or pending.get("msg_id", 0)
+        inline_message_id = getattr(call, "inline_message_id", "") or ""
         async def _edit(text: str) -> None:
             if inline:
                 try:
@@ -272,6 +273,7 @@ class UpdaterModule(KitsuneModule):
                     chat_id=chat_id,
                     msg_id=msg_id,
                     edit_fn=_edit,
+                    inline_message_id=inline_message_id,
                 )
             )
         else:
