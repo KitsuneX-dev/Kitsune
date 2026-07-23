@@ -267,38 +267,6 @@ else
     warn "setuptools dist_info.py не найден — пропускаю патч"
 fi
 
-_GRAPHEME_TMP="$HOME/tmp/grapheme_install"
-mkdir -p "$_GRAPHEME_TMP"
-curl -sSL "https://files.pythonhosted.org/packages/source/g/grapheme/grapheme-0.6.0.tar.gz" \
-    -o "$_GRAPHEME_TMP/grapheme-0.6.0.tar.gz" \
-    || err "Не удалось скачать grapheme"
-(cd "$_GRAPHEME_TMP" && tar xzf grapheme-0.6.0.tar.gz)
-_SITE_PACKAGES=$("$PYTHON_VENV" -c "import site; print(site.getsitepackages()[0])")
-cp -r "$_GRAPHEME_TMP/grapheme-0.6.0/grapheme" "$_SITE_PACKAGES/"
-rm -rf "$_GRAPHEME_TMP"
-ok "grapheme установлен"
-
-_PYAES_VER="1.6.1"
-_PYAES_TMP="$HOME/tmp/pyaes_install"
-mkdir -p "$_PYAES_TMP"
-if ! "$PYTHON_VENV" -c "import pyaes" 2>/dev/null; then
-    curl -sSL "https://files.pythonhosted.org/packages/source/p/pyaes/pyaes-${_PYAES_VER}.tar.gz" \
-        -o "$_PYAES_TMP/pyaes-${_PYAES_VER}.tar.gz" \
-        || warn "Не удалось скачать pyaes — pip попробует сам"
-    (cd "$_PYAES_TMP" && tar xzf "pyaes-${_PYAES_VER}.tar.gz" 2>/dev/null)
-    cp -r "$_PYAES_TMP/pyaes-${_PYAES_VER}/pyaes" "$_SITE_PACKAGES/"
-    _PYAES_DIST="$_SITE_PACKAGES/pyaes-${_PYAES_VER}.dist-info"
-    mkdir -p "$_PYAES_DIST"
-    printf "Metadata-Version: 2.1\nName: pyaes\nVersion: %s\n" "$_PYAES_VER" > "$_PYAES_DIST/METADATA"
-    echo "pip"   > "$_PYAES_DIST/INSTALLER"
-    echo "pyaes" > "$_PYAES_DIST/top_level.txt"
-    touch "$_PYAES_DIST/RECORD"
-    ok "pyaes ${_PYAES_VER} установлен вручную"
-else
-    ok "pyaes уже установлен — пропускаю"
-fi
-rm -rf "$_PYAES_TMP"
-
 if "$PIP" install --prefer-binary --no-cache-dir --no-warn-script-location \
        --disable-pip-version-check --quiet "tgcrypto>=1.2.5" 2>/dev/null; then
     ok "tgcrypto установлен (prebuilt wheel)"
@@ -324,21 +292,43 @@ else
     fi
 fi
 
-"$PIP" install --no-cache-dir -r requirements.txt \
-    --no-warn-script-location --disable-pip-version-check --quiet \
-    --no-build-isolation \
-    || err "Не удалось установить зависимости. Проверь requirements.txt"
+if ! "$PIP" install --prefer-binary --no-cache-dir -r requirements.txt \
+        --no-warn-script-location --disable-pip-version-check; then
+    warn "Первая попытка не удалась — повторяю установку зависимостей..."
+    "$PIP" install --no-cache-dir -r requirements.txt \
+        --no-warn-script-location --disable-pip-version-check \
+        || err "Не удалось установить зависимости. Проверь requirements.txt"
+fi
 ok "Зависимости установлены"
+
+step "Telethon (основная библиотека)"
+if ! "$PYTHON_VENV" -c "import telethon" 2>/dev/null; then
+    "$PIP" install --prefer-binary --no-cache-dir "telethon>=1.36.0,<2.0.0" \
+        --no-warn-script-location --disable-pip-version-check 2>/dev/null \
+        || "$PIP" install --no-cache-dir "telethon>=1.36.0,<2.0.0" \
+            --no-warn-script-location --disable-pip-version-check
+fi
+"$PYTHON_VENV" -c "import telethon" 2>/dev/null \
+    && ok "Telethon установлен и импортируется" \
+    || err "Telethon не установился — без него бот не запустится. Запусти вручную: $PIP install 'telethon>=1.36.0'"
 
 "$PIP" install --no-cache-dir --no-warn-script-location --disable-pip-version-check --quiet \
     "python-socks[asyncio]>=2.4.4" PySocks \
     && ok "python-socks[asyncio] установлен (нужен для прокси и обхода РКН)" \
     || warn "python-socks не установился — прокси/RKNBypass работать не будут"
 
-"$PIP" install --no-cache-dir hydrogram --no-build-isolation \
+"$PIP" install --prefer-binary --no-cache-dir hydrogram \
     --no-warn-script-location --disable-pip-version-check --quiet \
     && ok "Hydrogram установлен" \
     || warn "Hydrogram не установлен (необязательный пакет)"
+
+step "Проверка ключевых модулей"
+"$PYTHON_VENV" -c "import telethon" 2>/dev/null && ok "telethon ✓" || err "telethon не найден — установка не удалась!"
+"$PYTHON_VENV" -c "import aiohttp"  2>/dev/null && ok "aiohttp ✓"  || warn "aiohttp не найден"
+"$PYTHON_VENV" -c "import aiogram"  2>/dev/null && ok "aiogram ✓"  || warn "aiogram не найден — нотификатор недоступен"
+"$PYTHON_VENV" -c "import pydantic" 2>/dev/null && ok "pydantic ✓" || warn "pydantic не найден"
+"$PYTHON_VENV" -c "import cryptography" 2>/dev/null && ok "cryptography ✓" || warn "cryptography не найдена (fallback активен)"
+"$PYTHON_VENV" -c "import PIL" 2>/dev/null && ok "Pillow ✓" || warn "Pillow не найден"
 
 step "Директории и права"
 mkdir -p "$HOME/.kitsune/modules" "$HOME/.kitsune/logs"
