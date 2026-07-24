@@ -1052,14 +1052,43 @@ class Loader:
         logger.info("Loader: loaded %s v%s (%s)", mod.name, mod.version, path.name)
         return mod
     def _find_module_class(self, py_module: ModuleType) -> type | None:
+        module_name = getattr(py_module, "__name__", "")
+        candidates: list[type] = []
         for obj in vars(py_module).values():
-            if (
-                inspect.isclass(obj)
-                and issubclass(obj, KitsuneModule)
-                and obj is not KitsuneModule
-            ):
+            if not inspect.isclass(obj):
+                continue
+            if obj is KitsuneModule:
+                continue
+            if getattr(obj, "__module__", "") != module_name:
+                continue
+            try:
+                is_direct = issubclass(obj, KitsuneModule)
+            except TypeError:
+                is_direct = False
+            if is_direct:
+                candidates.append(obj)
+                continue
+            if self._inherits_kitsune_module(obj):
+                candidates.append(obj)
+        if not candidates:
+            return None
+        for obj in candidates:
+            if not obj.__subclasses__():
                 return obj
-        return None
+        return candidates[0]
+
+    @staticmethod
+    def _inherits_kitsune_module(obj: type) -> bool:
+        canonical = f"{KitsuneModule.__module__}.{KitsuneModule.__qualname__}"
+        for base in inspect.getmro(obj):
+            if base is object:
+                continue
+            base_id = f"{getattr(base, '__module__', '')}.{getattr(base, '__qualname__', '')}"
+            if base.__name__ == "KitsuneModule" and base is not obj:
+                return True
+            if base_id == canonical and base is not obj:
+                return True
+        return False
     def _register_module(self, mod: KitsuneModule) -> None:
         for _, method in inspect.getmembers(mod, predicate=inspect.ismethod):
             if getattr(method, "_is_command", False):
