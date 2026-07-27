@@ -197,12 +197,14 @@ class HelpModule(KitsuneModule):
         if mod.description:
             header += f"\n<i>ℹ️ {mod.description}</i>"
         cmd_lines = []
+        lang = self.db.get("kitsune.core", "lang", "ru") if self.db else "ru"
         for attr in sorted(dir(mod)):
             m = getattr(mod, attr, None)
             if not (callable(m) and getattr(m, "_is_command", False)):
                 continue
             cmd_name = m._command_name
-            doc = (inspect.getdoc(m) or "").strip()
+            localized = getattr(m, f"_{lang}_doc", None)
+            doc = (localized or inspect.getdoc(m) or "").strip()
             if "—" in doc:
                 doc = doc.split("—", 1)[-1].strip()
             elif doc.lower().startswith(f"{prefix}{cmd_name}") or doc.lower().startswith(f".{cmd_name}"):

@@ -223,6 +223,8 @@ def command(
     required: "int | str" = 0,
     aliases: list[str] | None = None,
     incoming: bool = False,
+    ru_doc: str | None = None,
+    en_doc: str | None = None,
 ) -> typing.Callable:
     if required is not None and not isinstance(required, (int, str)):
         raise TypeError(
@@ -236,6 +238,8 @@ def command(
         func._command_name = name or func.__name__.removesuffix("_cmd")
         func._required = required
         func._aliases = aliases or []
+        func._ru_doc = ru_doc
+        func._en_doc = en_doc
         func._incoming = bool(incoming) or isinstance(required, str)
         return func
     return decorator
