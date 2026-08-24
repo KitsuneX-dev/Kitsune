@@ -5,6 +5,16 @@ import re
 import time
 from ..core.loader import KitsuneModule, command, ModuleConfig, ConfigValue
 from ..core.security import OWNER
+from ..utils.platform import (
+    get_cpu_model_cores,
+    get_hostname,
+    get_kernel_release,
+    get_named_platform_label,
+    get_os_pretty_name,
+    get_run_environment,
+    get_username,
+)
+from ..utils.tg_html import parse_html_with_tg_emoji
 
 
 try:
@@ -106,7 +116,8 @@ class InfoModule(KitsuneModule):
                     "Кастомный текст сообщения в info. "
                     "Может содержать ключевые слова {me}, {version}, {build}, "
                     "{prefix}, {platform}, {upd}, {uptime}, {cpu_usage}, "
-                    "{ram_usage}, {branch}"
+                    "{ram_usage}, {branch}, {os}, {kernel}, {hostname}, "
+                    "{user}, {cpu}, {env}, {ping}"
                 ),
             ),
             ConfigValue(
@@ -168,12 +179,28 @@ class InfoModule(KitsuneModule):
         return " ".join(parts)
 
     def _get_platform(self) -> str:
-        import platform as pf
-        import os
-        if os.environ.get("TERMUX_VERSION") or os.path.isdir("/data/data/com.termux"):
-            return "📱 Termux — Android"
-        s = pf.system()
-        return {"Linux": "🐧 Linux", "Windows": "🪟 Windows", "Darwin": "🍎 macOS"}.get(s, f"❓ {s}")
+        return get_named_platform_label(termux_suffix=True)
+
+    def _get_os(self) -> str:
+        return get_os_pretty_name()
+
+    def _get_kernel(self) -> str:
+        return get_kernel_release()
+
+    def _get_hostname(self) -> str:
+        return get_hostname()
+
+    def _get_user(self) -> str:
+        return get_username()
+
+    def _get_cpu(self) -> str:
+        return get_cpu_model_cores()
+
+    def _get_env(self) -> str:
+        return get_run_environment()
+
+    def _get_ping(self):
+        return getattr(self, "_last_ping_ms", "—")
 
     def _get_cpu_usage(self) -> str:
         try:
@@ -243,6 +270,13 @@ class InfoModule(KitsuneModule):
                 "cpu_usage": cpu,
                 "ram_usage": ram,
                 "branch": branch,
+                "os": self._get_os(),
+                "kernel": self._get_kernel(),
+                "hostname": self._get_hostname(),
+                "user": self._get_user(),
+                "cpu": self._get_cpu(),
+                "env": self._get_env(),
+                "ping": self._get_ping(),
             })
         return (
             f"🦊 <b>Kitsune</b>\n\n"
@@ -266,52 +300,7 @@ class InfoModule(KitsuneModule):
 
     @staticmethod
     def _parse_html_with_tg_emoji(html_text: str):
-        from telethon.extensions import html as tl_html
-        from telethon.tl.types import MessageEntityCustomEmoji
-        tg_pattern = re.compile(
-            r'<tg-emoji\s+emoji-id=["\'](\d+)["\']>(.*?)</tg-emoji>',
-            re.DOTALL,
-        )
-        if not tg_pattern.search(html_text):
-            return tl_html.parse(html_text)
-        result_text     = ""
-        result_entities = []
-        cursor          = 0
-        pos_in_html     = 0
-        for m in tg_pattern.finditer(html_text):
-            before_html = html_text[pos_in_html:m.start()]
-            if before_html:
-                plain_before, ents_before = tl_html.parse(before_html)
-                for e in (ents_before or []):
-                    e.offset += cursor
-                result_text     += plain_before
-                result_entities += list(ents_before or [])
-                cursor          += len(plain_before)
-            emoji_id    = m.group(1)
-            inner_html  = m.group(2)
-            inner_plain, inner_ents = tl_html.parse(inner_html)
-            for e in (inner_ents or []):
-                e.offset += cursor
-            result_entities.append(
-                MessageEntityCustomEmoji(
-                    offset=cursor,
-                    length=len(inner_plain),
-                    document_id=int(emoji_id),
-                )
-            )
-            result_entities += list(inner_ents or [])
-            result_text     += inner_plain
-            cursor          += len(inner_plain)
-            pos_in_html      = m.end()
-        tail_html = html_text[pos_in_html:]
-        if tail_html:
-            plain_tail, ents_tail = tl_html.parse(tail_html)
-            for e in (ents_tail or []):
-                e.offset += cursor
-            result_text     += plain_tail
-            result_entities += list(ents_tail or [])
-        result_entities.sort(key=lambda e: e.offset)
-        return result_text, result_entities
+        return parse_html_with_tg_emoji(html_text)
 
     @staticmethod
     def _is_photo_url(url: str) -> bool:
@@ -395,8 +384,15 @@ class InfoModule(KitsuneModule):
     async def info_cmd(self, event) -> None:
         import asyncio as _asyncio
         loop = _asyncio.get_event_loop()
+
+        async def _timed_get_me():
+            started = time.monotonic()
+            result = await self.client.get_me()
+            self._last_ping_ms = int(round((time.monotonic() - started) * 1000))
+            return result
+
         me, git_info = await _asyncio.gather(
-            self.client.get_me(),
+            _timed_get_me(),
             loop.run_in_executor(None, self._get_git_info),
         )
         text   = self._render_info(me, git_info)
@@ -561,7 +557,7 @@ class InfoModule(KitsuneModule):
         try:
             await self.db.force_save()
         except Exception:
-            pass
+            logger.exception("setinfo: не удалось сохранить БД, настройка может потеряться")
         await event.message.edit(self.strings("setinfo_success"), parse_mode="html")
 
     @command("resetinfo", required=OWNER)
@@ -571,7 +567,7 @@ class InfoModule(KitsuneModule):
         try:
             await self.db.force_save()
         except Exception:
-            pass
+            logger.exception("resetinfo: не удалось сохранить БД, сброс может не примениться")
         await event.reply("✅ Info-сообщение сброшено.", parse_mode="html")
 
     @command("fmt", required=OWNER)
@@ -635,8 +631,6 @@ class InfoModule(KitsuneModule):
             )
             return
         raw_full = event.message.raw_text or ""
-        dispatcher = getattr(self.client, "_kitsune_dispatcher", None)
-        prefix = dispatcher._prefix if dispatcher else "."
         skip = len(raw_full) - len(after_subcmd)
         entities = list(event.message.entities or [])
         relevant = [

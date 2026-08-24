@@ -1,4 +1,5 @@
 from __future__ import annotations
+import asyncio
 import logging
 from ..core.loader import KitsuneModule, command
 from ..core.security import OWNER

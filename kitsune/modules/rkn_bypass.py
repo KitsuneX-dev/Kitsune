@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 def ensure_python_socks(auto_install: bool = True) -> bool:
     try:
-        import python_socks              
+        import python_socks
         return True
     except ImportError:
         pass
@@ -28,7 +28,7 @@ def ensure_python_socks(auto_install: bool = True) -> bool:
         )
         import importlib
         importlib.invalidate_caches()
-        import python_socks              
+        import python_socks
         logger.info("rkn_bypass: python-socks[asyncio] успешно установлен в рантайме")
         return True
     except Exception as exc:
@@ -58,7 +58,7 @@ def _patch_telethon_mtproxy() -> None:
         )
         return
     if getattr(target_cls.readexactly, "_kitsune_size_guard", False):
-        return                  
+        return
     original = target_cls.readexactly
     async def readexactly_safe(self, n):
         if n is None or n < 0:
@@ -125,19 +125,39 @@ _RE_TG_PROXY_ALT = re.compile(
     re.IGNORECASE,
 )
 
-def make_ssl_ctx_no_verify() -> ssl.SSLContext:
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
+def make_ssl_ctx(verify: bool = True) -> ssl.SSLContext:
+    if not verify:
+        logger.warning(
+            "rkn_bypass: SSL-верификация ОТКЛЮЧЕНА (insecure) — "
+            "допустимо только для парсинга публичных списков прокси",
+        )
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        return ctx
+    try:
+        import certifi
+        ctx = ssl.create_default_context(cafile=certifi.where())
+    except Exception:
+        ctx = ssl.create_default_context()
     return ctx
+def make_ssl_ctx_no_verify() -> ssl.SSLContext:
+    import warnings
+    warnings.warn(
+        "make_ssl_ctx_no_verify() устарела — используй make_ssl_ctx(verify=False) "
+        "и только для публичных списков прокси",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return make_ssl_ctx(verify=False)
 def get_aiohttp_connector():
     import aiohttp
-    return aiohttp.TCPConnector(ssl=make_ssl_ctx_no_verify())
+    return aiohttp.TCPConnector(ssl=make_ssl_ctx())
 def get_aiogram_session(timeout: int = 30):
     try:
         from aiogram.client.session.aiohttp import AiohttpSession
         import aiohttp
-        ssl_ctx = make_ssl_ctx_no_verify()
+        ssl_ctx = make_ssl_ctx()
         class _RKNBypassSession(AiohttpSession):
             async def create_connector(self, _bot=None):
                 connector = aiohttp.TCPConnector(ssl=ssl_ctx)
@@ -186,7 +206,7 @@ async def test_connection(
 async def _fetch_from_tg_channel(url: str) -> list[tuple[str, int, str]]:
     try:
         import aiohttp
-        ssl_ctx = make_ssl_ctx_no_verify()
+        ssl_ctx = make_ssl_ctx(verify=False)
         async with aiohttp.ClientSession(
             connector=aiohttp.TCPConnector(ssl=ssl_ctx)
         ) as session:
@@ -208,7 +228,7 @@ async def _fetch_from_tg_channel(url: str) -> list[tuple[str, int, str]]:
 async def _fetch_from_mtpro_xyz() -> list[tuple[str, int, str]]:
     try:
         import aiohttp
-        ssl_ctx = make_ssl_ctx_no_verify()
+        ssl_ctx = make_ssl_ctx(verify=False)
         async with aiohttp.ClientSession(
             connector=aiohttp.TCPConnector(ssl=ssl_ctx)
         ) as session:

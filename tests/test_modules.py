@@ -8,6 +8,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from conftest import FakeDB
+
 from kitsune.core.loader import KitsuneModule
 
 
@@ -59,21 +61,6 @@ def _make_client():
     return c
 
 
-class _FakeDB:
-    def __init__(self, lang: str = "ru") -> None:
-        self._lang = lang
-        self._store: dict[tuple[str, str], object] = {}
-
-    def get(self, owner, key, default=None):
-        if owner == "kitsune.core" and key == "lang":
-            return self._lang
-        return self._store.get((owner, key), default)
-
-    async def set(self, owner, key, value):
-        self._store[(owner, key)] = value
-        return True
-
-
 def _make_dispatcher():
     d = MagicMock()
     d._commands = {}
@@ -87,7 +74,7 @@ def _make_dispatcher():
 
 def _instantiate(cls: type):
     client = _make_client()
-    db = _FakeDB()
+    db = FakeDB()
     try:
         return cls(client, db), client, db
     except TypeError:
@@ -163,20 +150,22 @@ def test_module_returns_localized_strings(module_name: str) -> None:
     strings_en_attr = getattr(cls, "strings_en", None)
     ru_keys = list(strings_ru_attr.keys()) if isinstance(strings_ru_attr, dict) else []
     en_keys = list(strings_en_attr.keys()) if isinstance(strings_en_attr, dict) else []
-    sample_key = ru_keys[0] if ru_keys else (en_keys[0] if en_keys else "__kitsune_probe__")
-    instance.db = _FakeDB(lang="ru")
+    if not ru_keys and not en_keys:
+        pytest.skip(f"'{module_name}' has no localized strings to probe")
+    sample_key = ru_keys[0] if ru_keys else en_keys[0]
+    instance.db = FakeDB(lang="ru")
     value_ru = instance.strings(sample_key)
     assert isinstance(value_ru, str) and value_ru, (
         f"strings('{sample_key}') for module '{module_name}' on lang=ru returned non-string"
     )
-    instance.db = _FakeDB(lang="en")
+    instance.db = FakeDB(lang="en")
     value_en = instance.strings(sample_key)
     assert isinstance(value_en, str) and value_en, (
         f"strings('{sample_key}') for module '{module_name}' on lang=en returned non-string"
     )
     if ru_keys and isinstance(strings_ru_attr, dict):
         expected = strings_ru_attr[sample_key]
-        instance.db = _FakeDB(lang="ru")
+        instance.db = FakeDB(lang="ru")
         rendered = instance.strings(sample_key)
         assert isinstance(expected, str) and rendered, (
             f"Module '{module_name}': ru localization for '{sample_key}' is empty"

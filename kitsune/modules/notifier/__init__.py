@@ -1,5 +1,6 @@
 from __future__ import annotations
 import asyncio
+import contextlib
 import logging
 import re
 from ...core.loader import KitsuneModule, command
@@ -28,6 +29,32 @@ class NotifierModule(KitsuneModule):
         self._setup:   BotSetup | None = None
         self._runner:  BotRunner | None = None
         self._updater: UpdateChecker | None = None
+
+
+        self._bg_tasks: set[asyncio.Task] = set()
+
+    def _spawn(self, coro) -> asyncio.Task:
+        task = asyncio.ensure_future(coro)
+        self._bg_tasks.add(task)
+        task.add_done_callback(self._bg_tasks.discard)
+        return task
+
+    def _cancel_bg_tasks(self) -> list[asyncio.Task]:
+        tasks = [t for t in list(self._bg_tasks) if not t.done()]
+        for t in tasks:
+            t.cancel()
+        return tasks
+
+    async def _cancel_bg_tasks_and_wait(self) -> None:
+        tasks = self._cancel_bg_tasks()
+        if not tasks:
+            return
+        with contextlib.suppress(Exception):
+            await asyncio.wait_for(
+                asyncio.gather(*tasks, return_exceptions=True),
+                timeout=5.0,
+            )
+
     async def on_load(self) -> None:
         self._setup   = BotSetup(self.client, self.db)
         self._runner  = BotRunner(self.client, self.db)
@@ -39,14 +66,17 @@ class NotifierModule(KitsuneModule):
         token = self.db.get(_DB_KEY, "bot_token", None)
         if token:
             backup_asked = self.db.get(_DB_KEY, "backup_interval_asked", False)
-            asyncio.ensure_future(self._runner.start(str(token), first_run=not backup_asked))
+            self._spawn(self._runner.start(str(token), first_run=not backup_asked))
             self._updater.start()
-            asyncio.ensure_future(self._updater.notify_update_done())
-            asyncio.ensure_future(self._start_inline_manager(str(token)))
-            asyncio.ensure_future(self._polling_watchdog(str(token)))
+            self._spawn(self._updater.notify_update_done())
+            self._spawn(self._start_inline_manager(str(token)))
+            self._spawn(self._polling_watchdog(str(token)))
         else:
-            asyncio.ensure_future(self._auto_setup())
+            self._spawn(self._auto_setup())
     async def on_unload(self) -> None:
+
+
+        await self._cancel_bg_tasks_and_wait()
         if self._updater:
             self._updater.stop()
         if self._runner:
@@ -55,6 +85,9 @@ class NotifierModule(KitsuneModule):
     async def resetbot_cmd(self, event) -> None:
         for key in ("bot_token", "bot_name", "bot_username", "backup_interval_asked"):
             await self.db.delete(_DB_KEY, key)
+
+
+        await self._cancel_bg_tasks_and_wait()
         if self._runner:
             await self._runner.stop()
         await event.reply(self.strings("reset_done"), parse_mode="html")
@@ -119,8 +152,12 @@ class NotifierModule(KitsuneModule):
                 await self.db.set(_DB_KEY, "bot_token", token)
                 await self.db.set(_DB_KEY, "bot_username", bot_username)
                 self._setup.save_token_to_config(token)
-                asyncio.ensure_future(self._runner.start(token, first_run=False))
-                asyncio.ensure_future(self._start_inline_manager(token))
+
+
+                self._cancel_bg_tasks()
+                self._spawn(self._runner.start(token, first_run=False))
+                self._spawn(self._start_inline_manager(token))
+                self._spawn(self._polling_watchdog(token))
                 await m.edit(f"✅ Теперь использую бота <b>@{bot_username}</b>.", parse_mode="html")
             except Exception as exc:
                 await m.edit(f"❌ Ошибка: <code>{exc}</code>", parse_mode="html")
@@ -149,8 +186,12 @@ class NotifierModule(KitsuneModule):
             await self.db.set(_DB_KEY, "bot_token", token)
             await self.db.set(_DB_KEY, "bot_username", arg)
             self._setup.save_token_to_config(token)
-            asyncio.ensure_future(self._runner.start(token, first_run=False))
-            asyncio.ensure_future(self._start_inline_manager(token))
+
+
+            self._cancel_bg_tasks()
+            self._spawn(self._runner.start(token, first_run=False))
+            self._spawn(self._start_inline_manager(token))
+            self._spawn(self._polling_watchdog(token))
             await m.edit(f"✅ Теперь использую бота <b>@{arg}</b>.", parse_mode="html")
         except Exception as exc:
             await m.edit(f"❌ Ошибка: <code>{exc}</code>", parse_mode="html")
@@ -179,15 +220,15 @@ class NotifierModule(KitsuneModule):
             await self.db.set(_DB_KEY, "owner_id", me.id)
             self._setup.save_token_to_config(token)
             if bot_username:
-                asyncio.ensure_future(self._setup.enable_inline_mode(bot_username))
+                self._spawn(self._setup.enable_inline_mode(bot_username))
             key = "reused" if reused else "done"
             await self.client.send_message("me", self.strings(key).format(name=bot_name), parse_mode="html")
             backup_asked = self.db.get(_DB_KEY, "backup_interval_asked", False)
             need_welcome = not backup_asked
-            asyncio.ensure_future(self._runner.start(token, first_run=need_welcome))
+            self._spawn(self._runner.start(token, first_run=need_welcome))
             self._updater.start()
-            asyncio.ensure_future(self._start_inline_manager(token))
-            asyncio.ensure_future(self._polling_watchdog(token))
+            self._spawn(self._start_inline_manager(token))
+            self._spawn(self._polling_watchdog(token))
         except asyncio.TimeoutError:
             logger.warning("Notifier: BotFather timed out, retry on next restart")
         except Exception:

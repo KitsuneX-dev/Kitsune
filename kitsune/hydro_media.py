@@ -11,9 +11,11 @@ logger = logging.getLogger(__name__)
 
 _LARGE_FILE_THRESHOLD = 10 * 1024 * 1024
 
+_STREAM_DOWNLOAD_THRESHOLD = 50 * 1024 * 1024
 
-_HYDRO_FAIL_THRESHOLD = 3                                                      
-_HYDRO_REVIVE_TTL_S   = 300.0                                  
+
+_HYDRO_FAIL_THRESHOLD = 3
+_HYDRO_REVIVE_TTL_S   = 300.0
 
 _hydro_consecutive_fails: int = 0
 _hydro_dead_until: float = 0.0
@@ -258,20 +260,38 @@ async def download_media(
     *,
     force_telethon: bool = False,
     progress_msg_id: int | None = None,
-) -> bytes:
+    file: str | os.PathLike | typing.BinaryIO | None = None,
+) -> bytes | str:
+    dest_path = _resolve_download_dest(file)
+    stream_to_disk = dest_path is not None
+
+    if not stream_to_disk:
+        est = _estimate_media_size(message)
+        if est is not None and est > _STREAM_DOWNLOAD_THRESHOLD:
+            return await _download_via_tempfile(
+                client, message, force_telethon=force_telethon, progress_msg_id=progress_msg_id
+            )
+
     hydro = _hydro(client)
     if hydro and not force_telethon:
         try:
-            buf = io.BytesIO()
             file_ref = _get_hydro_file_ref(message)
             if not file_ref:
                 raise ValueError("no file_ref")
-            kwargs: dict = dict(file_name=buf)
+            kwargs: dict = {}
             if progress_msg_id:
                 chat_id = _msg_chat_id(message)
                 kwargs["progress"] = _make_progress_cb(
                     client, chat_id, progress_msg_id, "📥 Скачиваю файл..."
                 )
+            if stream_to_disk:
+                kwargs["file_name"] = dest_path if isinstance(dest_path, str) else file
+                await hydro.download_media(file_ref, **kwargs)
+                _hydro_record_success()
+                logger.debug("hydro_media: streamed download via Hydrogram -> %s", dest_path)
+                return dest_path if isinstance(dest_path, str) else "<stream>"
+            buf = io.BytesIO()
+            kwargs["file_name"] = buf
             await hydro.download_media(file_ref, **kwargs)
             buf.seek(0)
             data = buf.read()
@@ -283,7 +303,66 @@ async def download_media(
         except Exception as exc:
             _hydro_record_failure(f"download_media: {type(exc).__name__}")
             logger.warning("hydro_media: Hydrogram download failed (%s), falling back to Telethon", exc)
+
+    if stream_to_disk:
+        target = dest_path if isinstance(dest_path, str) else file
+        await message.download_media(file=target)
+        logger.debug("hydro_media: streamed download via Telethon -> %s", dest_path)
+        return dest_path if isinstance(dest_path, str) else "<stream>"
     return await message.download_media(bytes)
+
+
+def _resolve_download_dest(
+    file: str | os.PathLike | typing.BinaryIO | None,
+) -> str | None:
+    if file is None:
+        return None
+    if isinstance(file, (str, os.PathLike)):
+        return os.fspath(file)
+    return None
+
+
+def _estimate_media_size(message: typing.Any) -> int | None:
+    doc = getattr(message, "document", None)
+    if doc is not None:
+        size = getattr(doc, "size", None) or getattr(doc, "file_size", None)
+        if isinstance(size, int) and size > 0:
+            return size
+    media = getattr(message, "media", None)
+    for holder in (media, getattr(media, "document", None)):
+        if holder is None:
+            continue
+        size = getattr(holder, "size", None) or getattr(holder, "file_size", None)
+        if isinstance(size, int) and size > 0:
+            return size
+    return None
+
+
+async def _download_via_tempfile(
+    client: typing.Any,
+    message: typing.Any,
+    *,
+    force_telethon: bool = False,
+    progress_msg_id: int | None = None,
+) -> bytes:
+    import tempfile
+
+    fd, tmp_path = tempfile.mkstemp(prefix="kitsune_dl_", suffix=".bin")
+    os.close(fd)
+    try:
+        await download_media(
+            client, message,
+            force_telethon=force_telethon,
+            progress_msg_id=progress_msg_id,
+            file=tmp_path,
+        )
+        with open(tmp_path, "rb") as fh:
+            return fh.read()
+    finally:
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
 def _msg_chat_id(message: typing.Any) -> int:
     cid = getattr(message, "chat_id", None)
     if cid:

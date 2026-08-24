@@ -1,7 +1,9 @@
 from __future__ import annotations
 import asyncio
+import functools
 import inspect
 import io
+import re
 from ..hydro_media import send_file as _hydro_send_file
 import logging
 from pathlib import Path
@@ -59,6 +61,88 @@ class LoaderModule(KitsuneModule):
         return getattr(self.client, "_kitsune_loader", None)
     def _dispatcher(self):
         return getattr(self.client, "_kitsune_dispatcher", None)
+    def _inline(self):
+        return getattr(self.client, "_kitsune_inline", None)
+    @staticmethod
+    def _parse_findings(findings: list[str]) -> list[tuple[str, str]]:
+        out: list[tuple[str, str]] = []
+        pattern = re.compile(r": (\S+) \(line (\d+)\)")
+        for f in findings:
+            m = pattern.search(f)
+            if m:
+                out.append((m.group(1), m.group(2)))
+            else:
+                out.append((f, "?"))
+        return out
+    async def _confirm_soft_findings(
+        self, findings: list[str], *, message=None
+    ) -> bool:
+        inline = self._inline()
+        if not inline or not getattr(inline, "_bot", None):
+
+
+            logger.warning(
+                "loader_mod: soft AST findings, но inline недоступен: %s", findings
+            )
+            return True
+        if message is None:
+            logger.warning(
+                "loader_mod: soft AST findings, но нет сообщения для формы: %s",
+                findings,
+            )
+            return True
+        result_event = asyncio.Event()
+        result_holder: dict[str, bool] = {}
+
+        async def _cb_yes(call) -> None:
+            result_holder["value"] = True
+            result_event.set()
+            if inline:
+                await inline.edit(
+                    call,
+                    "🦊 Хорошо, устанавливаю. Если что — я слежу за модулями и дальше.",
+                )
+            await call.answer("✅ Продолжаю установку")
+
+        async def _cb_no(call) -> None:
+            result_holder["value"] = False
+            result_event.set()
+            if inline:
+                await inline.edit(
+                    call,
+                    "🦊 Хорошо, я не стала его устанавливать. Так безопаснее.",
+                )
+            await call.answer("🚫 Отменено")
+
+        lines = "\n".join(
+            f"🔸 строка {n}: обращение к <code>{a}</code>"
+            for a, n in self._parse_findings(findings)
+        )
+        text = (
+            "🦊 <b>Кицунэ насторожилась...</b>\n\n"
+            "Проверяя модуль, я унюхала кое-что подозрительное:\n\n"
+            f"{lines}\n\n"
+            "Само по себе это не обязательно опасно — так иногда пишут вполне "
+            "безобидный код.\n"
+            "Но я не могу быть уверена на 100%, поэтому спрашиваю тебя: "
+            "доверяешь этому модулю?\n\n"
+            "Устанавливать дальше?"
+        )
+        markup = [
+            [
+                {"text": "✅ Да, доверяю, продолжить", "callback": _cb_yes},
+                {"text": "🚫 Нет, отменить", "callback": _cb_no},
+            ]
+        ]
+        await inline.form(text, message, markup)
+        try:
+            await asyncio.wait_for(result_event.wait(), timeout=120)
+        except asyncio.TimeoutError:
+            logger.warning(
+                "loader_mod: soft-confirm истёк по таймауту, считаю как отказ"
+            )
+            return False
+        return result_holder.get("value", False)
     def _prefix(self) -> str:
         d = self._dispatcher()
         return d._prefix if d else "."
@@ -144,23 +228,25 @@ class LoaderModule(KitsuneModule):
             ]
             try:
                 import aiohttp
-                async with aiohttp.ClientSession() as sess:
-                    async with sess.get(f"{repo}/full.txt", timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                        if resp.status == 200:
-                            text = await resp.text()
-                            for line in text.splitlines():
-                                line = line.strip()
-                                if line.lower().endswith(f"/{name.lower()}.py"):
-                                    candidates.insert(0, line if line.startswith("http") else f"{repo}/{line}")
+                from ..net.http_pool import get_shared_session
+                sess = get_shared_session()
+                async with sess.get(f"{repo}/full.txt", timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                    if resp.status == 200:
+                        text = await resp.text()
+                        for line in text.splitlines():
+                            line = line.strip()
+                            if line.lower().endswith(f"/{name.lower()}.py"):
+                                candidates.insert(0, line if line.startswith("http") else f"{repo}/{line}")
             except Exception:
                 pass
             for url in candidates:
                 try:
                     import aiohttp
-                    async with aiohttp.ClientSession() as sess:
-                        async with sess.head(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
-                            if resp.status == 200:
-                                return url
+                    from ..net.http_pool import get_shared_session
+                    sess = get_shared_session()
+                    async with sess.head(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+                        if resp.status == 200:
+                            return url
                 except Exception:
                     continue
         return None
@@ -191,7 +277,13 @@ class LoaderModule(KitsuneModule):
             except Exception:
                 pass
         try:
-            mod = await loader.load_from_url(url, progress_cb=progress_cb)
+            mod = await loader.load_from_url(
+                url,
+                progress_cb=progress_cb,
+                on_soft_findings=functools.partial(
+                    self._confirm_soft_findings, message=event.message
+                ),
+            )
             user_mods = self._get_user_modules()
             user_mods[mod.name] = url
             await self._save_user_modules(user_mods)
@@ -219,7 +311,8 @@ class LoaderModule(KitsuneModule):
         loader = self._loader()
         if not loader:
             return
-        user_dir = Path.home() / ".kitsune" / "modules"
+        from ..paths import data_dir as _kdd
+        user_dir = _kdd() / "modules"
         user_dir.mkdir(parents=True, exist_ok=True)
         filename = getattr(msg.file, "name", None) or "custom_module.py"
         if not filename.endswith(".py"):
@@ -232,7 +325,13 @@ class LoaderModule(KitsuneModule):
             except Exception:
                 pass
         try:
-            mod = await loader.load_from_file(path, progress_cb=progress_cb)
+            mod = await loader.load_from_file(
+                path,
+                progress_cb=progress_cb,
+                on_soft_findings=functools.partial(
+                    self._confirm_soft_findings, message=event.message
+                ),
+            )
             await self._show_installed_help(event, mod)
         except Exception as exc:
             logger.exception("loadmod: failed")
@@ -261,7 +360,8 @@ class LoaderModule(KitsuneModule):
                     removed_keys.append(key)
                     user_mods.pop(key, None)
             await self._save_user_modules(user_mods)
-            user_dir = Path.home() / ".kitsune" / "modules"
+            from ..paths import data_dir as _kdd
+            user_dir = _kdd() / "modules"
             deleted_files: list[Path] = []
             try:
                 if source_path and not is_builtin:
@@ -336,10 +436,10 @@ class LoaderModule(KitsuneModule):
                 parse_mode="html",
             )
             try:
-                import aiohttp
-                async with aiohttp.ClientSession() as sess:
-                    async with sess.get(url) as resp:
-                        content = await resp.read()
+                from ..net.http_pool import get_shared_session
+                sess = get_shared_session()
+                async with sess.get(url) as resp:
+                    content = await resp.read()
                 buf = io.BytesIO(content)
                 buf.name = f"{mod.name}.py"
                 buf.seek(0)
@@ -374,7 +474,8 @@ class LoaderModule(KitsuneModule):
         for name in list(user_mods.keys()):
             await loader.unload_module(name)
         await self._save_user_modules({})
-        user_dir = Path.home() / ".kitsune" / "modules"
+        from ..paths import data_dir as _kdd
+        user_dir = _kdd() / "modules"
         if user_dir.exists():
             import shutil
             for f in user_dir.glob("*.py"):

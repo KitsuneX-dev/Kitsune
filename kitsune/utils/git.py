@@ -40,6 +40,12 @@ def get_remote_commit(branch: str | None = None) -> str | None:
     if repo is None:
         return None
     try:
+        from .git_async import ensure_git_env
+
+        ensure_git_env()
+    except Exception:
+        pass
+    try:
         if branch is None:
             branch = get_current_branch() or "main"
         origin = repo.remote("origin")

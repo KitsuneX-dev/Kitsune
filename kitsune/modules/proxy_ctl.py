@@ -250,7 +250,7 @@ class ProxyCtl(KitsuneModule):
             lines.append("   • <i>не задан</i>")
         lines.append("")
         try:
-            import aiohttp_socks              
+            import aiohttp_socks
             lines.append("<b>3) Зависимости</b>")
             lines.append("   • aiohttp-socks: <code>OK</code>")
         except ImportError:

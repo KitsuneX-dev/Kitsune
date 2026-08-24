@@ -74,6 +74,12 @@ class InlineList:
                 await status_msg.delete()
             except Exception:
                 pass
+        if unit_id in self._units:
+            if getattr(m, "id", None):
+                self._units[unit_id]["message_id"] = m.id
+            chat = getattr(m, "chat_id", None) or getattr(m, "peer_id", None)
+            if chat is not None:
+                self._units[unit_id]["chat"] = chat
         return m
     def _build_list_page(self, unit_id: str) -> tuple[str, list]:
         unit      = self._units[unit_id]
@@ -151,3 +157,35 @@ class InlineList:
         text  = unit.pop("_pending_text",  "")
         markup = unit.pop("_pending_markup", [])
         return text, markup
+    async def _list_inline_handler(self, inline_query: typing.Any, unit_id: str) -> bool:
+        unit = self._units.get(unit_id)
+        if not unit or unit.get("type") != "list":
+            return False
+        if getattr(inline_query.from_user, "id", None) != self._me:
+            return False
+        text, markup = self._get_pending_list_content(unit_id)
+        if not text:
+            text, markup = self._build_list_page(unit_id)
+        try:
+            import uuid
+            from aiogram.types import InlineQueryResultArticle, InputTextMessageContent
+            await inline_query.answer(
+                results=[
+                    InlineQueryResultArticle(
+                        id=str(uuid.uuid4()),
+                        title=unit.get("title") or "Kitsune",
+                        description=f"{len(unit.get('items', []))} элементов",
+                        input_message_content=InputTextMessageContent(
+                            message_text=text,
+                            parse_mode="HTML",
+                            disable_web_page_preview=True,
+                        ),
+                        reply_markup=self.generate_markup(markup),
+                    )
+                ],
+                cache_time=0,
+            )
+            return True
+        except Exception:
+            logger.exception("InlineList: ошибка ответа на inline query")
+            return False

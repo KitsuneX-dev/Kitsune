@@ -8,11 +8,14 @@ import os
 import re
 import sys
 import traceback
+import queue as _queue
 import typing
-from logging.handlers import RotatingFileHandler
+from collections import deque
+from logging.handlers import QueueHandler, QueueListener, RotatingFileHandler
 from pathlib import Path
 
-LOG_DIR = Path.home() / ".kitsune" / "logs"
+from .paths import data_dir as _kdd
+LOG_DIR = _kdd() / "logs"
 
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -83,7 +86,7 @@ class KitsuneException:
         )
         filename, lineno, name = match
         full_stack = "\n".join(fmt_line(line) for line in full_tb.splitlines())
-        caller = utils.find_caller(stack or inspect.stack())
+        caller = utils.find_caller(stack) if stack else utils.find_caller()
         caller_prefix = ""
         if caller and hasattr(caller, "__self__") and hasattr(caller, "__name__"):
             caller_prefix = (
@@ -178,7 +181,7 @@ class KitsuneLogsHandler(logging.Handler):
         self.targets = targets
         self.capacity = capacity
         self.buffer: list[logging.LogRecord] = []
-        self.handledbuffer: list[logging.LogRecord] = []
+        self.handledbuffer: deque[logging.LogRecord] = deque(maxlen=self.capacity)
         self._tg_queue: asyncio.Queue = asyncio.Queue()
         self._mods: dict[int, typing.Any] = {}
         self._task: asyncio.Task | None = None
@@ -262,26 +265,23 @@ class KitsuneLogsHandler(logging.Handler):
         for chunk in chunks[1:]:
             await bot.send_message(chat_id=call.chat_id, text=chunk)
     def dump(self) -> list[logging.LogRecord]:
-        return self.handledbuffer + self.buffer
+        return list(self.handledbuffer) + self.buffer
     def dumps(self, lvl: int = 0, client_id: int | None = None) -> list[str]:
         return [
             self.targets[0].format(r)
-            for r in (self.buffer + self.handledbuffer)
+            for r in (self.buffer + list(self.handledbuffer))
             if r.levelno >= lvl and (not getattr(r, "kitsune_caller", None) or client_id == r.kitsune_caller)
         ]
     def emit(self, record: logging.LogRecord) -> None:
         caller: int | None = None
         try:
-            caller = next(
-                (
-                    fi.frame.f_locals["_kitsune_client_id_logging_tag"]
-                    for fi in inspect.stack()
-                    if isinstance(
-                        fi.frame.f_locals.get("_kitsune_client_id_logging_tag"), int
-                    )
-                ),
-                None,
-            )
+            frame = sys._getframe(1)
+            while frame is not None:
+                tag = frame.f_locals.get("_kitsune_client_id_logging_tag")
+                if isinstance(tag, int):
+                    caller = tag
+                    break
+                frame = frame.f_back
         except Exception:
             pass
         record.kitsune_caller = caller
@@ -308,7 +308,7 @@ class KitsuneLogsHandler(logging.Handler):
         total = len(self.buffer) + len(self.handledbuffer)
         if total >= self.capacity:
             if self.handledbuffer:
-                del self.handledbuffer[0]
+                self.handledbuffer.popleft()
             elif self.buffer:
                 del self.buffer[0]
         self.buffer.append(record)
@@ -319,14 +319,20 @@ class KitsuneLogsHandler(logging.Handler):
                     for target in self.targets:
                         if rec.levelno >= target.level:
                             target.handle(rec)
-                self.handledbuffer = (
-                    self.handledbuffer[-(self.capacity - len(self.buffer)):] + self.buffer
-                )
+                self.handledbuffer.extend(self.buffer)
                 self.buffer = []
             finally:
                 self.release()
     def setLevel(self, level: int) -> None:
         self.lvl = level
+        try:
+            root = logging.getLogger()
+            if level > logging.NOTSET:
+                root.setLevel(level)
+            else:
+                root.setLevel(logging.INFO)
+        except Exception:
+            pass
 _main_formatter = logging.Formatter(
     fmt="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
@@ -408,7 +414,7 @@ class _ConsoleStartupFilter(logging.Filter):
             if any(s in msg for s in self._SUPPRESS):
                 return False
         return True
-rotating_handler = RotatingFileHandler(
+_file_handler = RotatingFileHandler(
     filename=str(LOG_FILE),
     mode="a",
     maxBytes=10 * 1024 * 1024,
@@ -417,7 +423,52 @@ rotating_handler = RotatingFileHandler(
     delay=False,
 )
 
-rotating_handler.setFormatter(_main_formatter)
+_file_handler.setFormatter(_main_formatter)
+
+
+class _PassThroughQueueHandler(QueueHandler):
+
+    def prepare(self, record: logging.LogRecord) -> logging.LogRecord:  # type: ignore[override]
+        return record
+
+
+_log_queue: _queue.SimpleQueue = _queue.SimpleQueue()
+
+
+rotating_handler: logging.Handler = _PassThroughQueueHandler(_log_queue)
+rotating_handler.setLevel(logging.NOTSET)
+
+_log_listener: QueueListener | None = None
+
+
+def start_log_listener() -> None:
+    global _log_listener
+    if _log_listener is not None:
+        return
+    listener = QueueListener(_log_queue, _file_handler, respect_handler_level=True)
+    listener.daemon = True
+    listener.start()
+    _log_listener = listener
+
+
+def stop_log_listener() -> None:
+    global _log_listener
+    listener = _log_listener
+    _log_listener = None
+    if listener is None:
+        return
+    try:
+        listener.stop()
+    except Exception:
+        pass
+    try:
+        _file_handler.flush()
+    except Exception:
+        pass
+
+
+def shutdown() -> None:
+    stop_log_listener()
 
 _tg_channel_handler: TelegramChannelHandler | None = None
 
@@ -426,7 +477,7 @@ def _get_bot_ready_event(client: typing.Any) -> asyncio.Event | None:
     if event is None:
         try:
             event = asyncio.Event()
-            setattr(client, "_kitsune_bot_ready", event)
+            client._kitsune_bot_ready = event
         except Exception:
             return None
     return event
@@ -698,11 +749,13 @@ async def _send_startup_banner_via_bot(
             commit_url = f"https://github.com/KitsuneX-dev/Kitsune/commit/{repo.head.commit.hexsha}"
         update_status = "✅ Актуальная версия"
         with contextlib.suppress(Exception):
-            import git
+
+
+            from .utils import git_async
             repo_path = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-            repo = git.Repo(path=repo_path)
-            repo.remotes.origin.fetch()
-            behind = list(repo.iter_commits(f"HEAD..origin/{branch}"))
+            repo = await git_async.open_repo(repo_path)
+            await git_async.fetch(repo, "origin", timeout=25)
+            behind = await git_async.iter_commits(repo, f"HEAD..origin/{branch}")
             if behind:
                 update_status = f"🆕 Доступно обновление ({len(behind)} коммитов)"
         cfg_web_port = 8080
@@ -806,8 +859,9 @@ def init() -> None:
     console_handler.addFilter(_ConsoleStartupFilter())
     root = logging.getLogger()
     root.handlers = []
+    start_log_listener()
     root.addHandler(KitsuneLogsHandler([console_handler, rotating_handler], capacity=7000))
-    root.setLevel(logging.NOTSET)
+    root.setLevel(logging.INFO)
     for noisy in ("telethon", "hydrogram", "matplotlib", "aiohttp", "aiogram", "httpx"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
     _network_noise_filter = _NetworkNoiseFilter()

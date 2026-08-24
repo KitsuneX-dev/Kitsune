@@ -50,3 +50,5 @@ coverage.xml
 htmlcov/
 
 .mypy_cache/
+
+kitsune_checkpoint_*.zip

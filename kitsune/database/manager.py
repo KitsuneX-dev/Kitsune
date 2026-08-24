@@ -10,9 +10,54 @@ from .._json import dumps as json_dumps, loads as json_loads, is_serializable
 logger = logging.getLogger(__name__)
 
 try:
-    _IS_ANDROID = "android" in Path("/proc/version").read_text().lower()
+    from ..utils.platform import is_mobile as _is_mobile
+    _IS_ANDROID = _is_mobile()
 except Exception:
-    _IS_ANDROID = False
+    try:
+        _IS_ANDROID = "android" in Path("/proc/version").read_text(errors="ignore").lower()
+    except Exception:
+        _IS_ANDROID = False
+
+try:
+    from ..utils.platform import _detect_proot
+    _UNDER_PROOT = _detect_proot()
+except Exception:
+    _UNDER_PROOT = False
+
+_DELAY_CACHE_TTL = 30.0
+_delay_cache: float | None = None
+_delay_checked_at: float = 0.0
+
+_DB_SIDECARS = ("-wal", "-shm", "-journal")
+
+
+def _journal_settings() -> tuple[str, int]:
+    if _UNDER_PROOT:
+        return "WAL", 0
+    if _IS_ANDROID:
+        return "DELETE", 0
+    return "WAL", 64 << 20
+
+
+def _migrate_legacy_db(legacy_dir: Path, new_path: Path) -> None:
+    try:
+        legacy_path = Path(legacy_dir) / new_path.name
+        if legacy_path == new_path or not legacy_path.is_file() or new_path.exists():
+            return
+        import shutil
+        new_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(legacy_path), str(new_path))
+        logger.info("Database: БД перенесена %s -> %s", legacy_path, new_path)
+        for suffix in _DB_SIDECARS:
+            side = legacy_path.with_name(legacy_path.name + suffix)
+            target = new_path.with_name(new_path.name + suffix)
+            if side.is_file() and not target.exists():
+                try:
+                    shutil.move(str(side), str(target))
+                except OSError:
+                    logger.warning("Database: не удалось перенести %s", side, exc_info=True)
+    except Exception:
+        logger.warning("Database: миграция старой БД не удалась", exc_info=True)
 
 JSONValue = typing.Union[
     None, bool, int, float, str,
@@ -28,18 +73,29 @@ class SQLiteBackend:
     def _get_conn(self) -> sqlite3.Connection:
         if self._conn is None:
             conn = sqlite3.connect(str(self._path), timeout=10, check_same_thread=False)
-            if _IS_ANDROID:
-                conn.execute("PRAGMA journal_mode=DELETE")
+            journal_mode, mmap_size = _journal_settings()
+            if _UNDER_PROOT:
+
+
+                conn.execute(f"PRAGMA journal_mode={journal_mode}")
                 conn.execute("PRAGMA synchronous=NORMAL")
-                conn.execute("PRAGMA mmap_size=0")
+                conn.execute("PRAGMA cache_size=-4000")
+                conn.execute(f"PRAGMA mmap_size={mmap_size}")
+                conn.execute("PRAGMA temp_store=MEMORY")
+                conn.execute("PRAGMA wal_autocheckpoint=10000")
+                conn.execute("PRAGMA busy_timeout=5000")
+            elif _IS_ANDROID:
+                conn.execute(f"PRAGMA journal_mode={journal_mode}")
+                conn.execute("PRAGMA synchronous=NORMAL")
+                conn.execute(f"PRAGMA mmap_size={mmap_size}")
                 conn.execute("PRAGMA cache_size=-4000")
                 conn.execute("PRAGMA temp_store=MEMORY")
                 conn.execute("PRAGMA busy_timeout=5000")
             else:
-                conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute(f"PRAGMA journal_mode={journal_mode}")
                 conn.execute("PRAGMA synchronous=NORMAL")
                 conn.execute("PRAGMA cache_size=-8000")
-                conn.execute("PRAGMA mmap_size=67108864")
+                conn.execute(f"PRAGMA mmap_size={mmap_size}")
                 conn.execute("PRAGMA temp_store=MEMORY")
                 conn.execute("PRAGMA wal_autocheckpoint=10000")
                 conn.execute("PRAGMA busy_timeout=5000")
@@ -188,6 +244,19 @@ class DatabaseManager:
         self._sqlite_fallback: SQLiteBackend | None = None
         self._redis_uri: str | None = None
         self._sqlite_path: typing.Any = None
+    def _save_delay(self) -> float:
+        global _delay_cache, _delay_checked_at
+        now = time.monotonic()
+        if _delay_cache is not None and now - _delay_checked_at < _DELAY_CACHE_TTL:
+            return _delay_cache
+        try:
+            from ..low_power import load_config, save_delay
+            value = save_delay(load_config())
+        except Exception:
+            return self._SAVE_DELAY
+        _delay_cache = value
+        _delay_checked_at = now
+        return value
     async def init(self) -> None:
         import os as _os
         from pathlib import Path as _Path
@@ -195,14 +264,21 @@ class DatabaseManager:
         if not redis_uri:
             try:
                 import toml as _toml
-                _cfg_path = _Path(__file__).parent.parent.parent / "config.toml"
+                from ..paths import effective_config_path as _eff_cfg
+                _cfg_path = _eff_cfg()
                 if _cfg_path.exists():
                     _cfg = _toml.loads(_cfg_path.read_text(encoding="utf-8"))
                     redis_uri = _cfg.get("redis_uri")
             except Exception:
                 pass
-        _base = _Path(__file__).parent.parent.parent
+        from ..paths import data_dir as _data_dir
+        _base = _data_dir()
+        try:
+            _base.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            logger.warning("Database: не удалось создать каталог данных %s", _base, exc_info=True)
         db_path = _base / f"kitsune-{self._client.tg_id}.db"
+        _migrate_legacy_db(_Path(__file__).parent.parent.parent, db_path)
         self._sqlite_path = db_path
         if redis_uri:
             self._redis_uri = redis_uri
@@ -378,6 +454,8 @@ class DatabaseManager:
             self._deleted.add((owner, key))
         self._kick_save()
         return True
+    async def remove(self, owner: str, key: str) -> bool:
+        return await self.delete(owner, key)
     async def force_save(self) -> bool:
         if self._backend is None:
             return False
@@ -541,7 +619,7 @@ class DatabaseManager:
         task.add_done_callback(self._bg_tasks.discard)
     async def _schedule_save(self) -> None:
         try:
-            await asyncio.sleep(self._SAVE_DELAY)
+            await asyncio.sleep(self._save_delay())
         except asyncio.CancelledError:
             return
         if not self._backend:

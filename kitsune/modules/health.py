@@ -36,7 +36,7 @@ async def probe_sqlite(db: typing.Any) -> dict:
     try:
         loop = asyncio.get_event_loop()
         def _ping() -> int:
-            conn = backend._get_conn()                                
+            conn = backend._get_conn()
             cur = conn.execute("SELECT 1")
             row = cur.fetchone()
             return int(row[0]) if row else 0
@@ -200,7 +200,7 @@ async def collect_health(client: typing.Any, db: typing.Any) -> dict:
         pass
     if start_time is None:
         try:
-            import psutil as _ps              
+            import psutil as _ps
             start_time = psutil.Process().create_time() if _PSUTIL else time.time()
         except Exception:
             start_time = time.time()

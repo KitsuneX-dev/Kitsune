@@ -76,6 +76,6 @@ class TranslatorModule(KitsuneModule):
                     self.strings("result").format(lang=lang, text=translated),
                     parse_mode="html",
                 )
-        except Exception as exc:
+        except Exception:
             logger.exception("Translator: translation failed")
             await event.message.edit(self.strings("error"), parse_mode="html")

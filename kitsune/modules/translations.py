@@ -76,10 +76,11 @@ class TranslationsModule(KitsuneModule):
         await event.message.edit("⏳ Загружаю языковой пакет...", parse_mode="html")
         try:
             import aiohttp
-            async with aiohttp.ClientSession() as sess:
-                async with sess.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
-                    resp.raise_for_status()
-                    content = await resp.text()
+            from ..net.http_pool import get_shared_session
+            sess = get_shared_session()
+            async with sess.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                resp.raise_for_status()
+                content = await resp.text()
             filename = url.rstrip("/").split("/")[-1]
             if not filename.endswith(".yml"):
                 filename += ".yml"
@@ -88,6 +89,6 @@ class TranslationsModule(KitsuneModule):
             lang_code = dest.stem
             await self.db.set(_DB_OWNER, "lang", lang_code)
             await event.message.edit(self.strings("pack_saved"), parse_mode="html")
-        except Exception as exc:
+        except Exception:
             logger.exception("dllangpack failed")
             await event.message.edit(self.strings("pack_failed"), parse_mode="html")

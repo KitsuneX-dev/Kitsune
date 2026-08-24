@@ -1,11 +1,4 @@
-/* ==========================================================================
-   Kitsune Web UI — shared theme  (v2 · Neon Fox redesign)
-   Palette extracted from the official Kitsune fox logo:
-     background : near-black with a violet cast
-     ring/glow  : neon violet
-     fur        : warm fox orange
-   Used by both the setup wizard and the control panel.
-   ========================================================================== */
+
 
 *, *::before, *::after {
   box-sizing: border-box;
@@ -15,31 +8,31 @@
 }
 
 :root {
-  /* surfaces */
+
   --bg: #06040c;
   --s1: #120c1e;
   --s2: #1a1329;
   --s3: #221a34;
 
-  /* glass surfaces */
+
   --glass: rgba(22, 14, 38, 0.72);
   --glass2: rgba(30, 20, 50, 0.55);
 
-  /* borders (усилены для лучшей видимости плашек — v3) */
+
   --bd: rgba(216, 130, 255, 0.38);
   --bd2: rgba(216, 130, 255, 0.55);
   --bd3: rgba(222, 150, 255, 0.72);
-  /* градиентная обводка плашек (violet → fox) */
+
   --bd-grad: linear-gradient(135deg, rgba(216, 130, 255, 0.75), rgba(255, 138, 92, 0.55) 55%, rgba(184, 44, 240, 0.65));
 
-  /* text (максимальная контрастность — v3) */
+
   --tx: #ffffff;
   --mu: rgba(240, 236, 253, 0.78);
   --mu2: rgba(245, 242, 255, 0.92);
-  /* тень для читаемости текста поверх фона */
+
   --tx-shadow: 0 1px 3px rgba(0, 0, 0, 0.55);
 
-  /* brand */
+
   --violet: #b82cf0;
   --violet2: #d98bff;
   --violet-glow: rgba(184, 44, 240, 0.35);
@@ -47,7 +40,7 @@
   --fox2: #ff8a5c;
   --fox-glow: rgba(255, 90, 43, 0.35);
 
-  /* status */
+
   --green: #38ffb0;
   --red: #ff4d6d;
   --yellow: #ffc857;
@@ -76,7 +69,6 @@ body {
   -webkit-text-size-adjust: 100%;
 }
 
-/* радиальная виньетка поверх фона: края темнее → контент читается лучше */
 body::before {
   content: '';
   position: fixed;
@@ -88,7 +80,6 @@ body::before {
     linear-gradient(180deg, rgba(6, 4, 12, 0.28) 0%, transparent 30%, transparent 70%, rgba(6, 4, 12, 0.35) 100%);
 }
 
-/* ---------- photo background (kitsune spirit smoke) ---------- */
 .bg-scene {
   position: fixed;
   inset: 0;
@@ -96,11 +87,11 @@ body::before {
   overflow: hidden;
   background: var(--bg) url('bg.jpg') center center / cover no-repeat;
 }
-/* затемнение + виньетка поверх фото — центр темнее для максимальной читаемости контента */
+
 .bg-scene {
   box-shadow: inset 0 0 0 100vmax rgba(6, 4, 12, 0.30);
 }
-/* мягкая радиальная виньетка — края тёмнее, центр открыт */
+
 .bg-scene {
   background-blend-mode: normal;
 }
@@ -108,7 +99,7 @@ body::before {
 .bg-scene {
   position: fixed;
 }
-/* мягкие живые блики поверх фото — дышащая аура */
+
 .bg-scene::before,
 .bg-scene::after {
   content: '';
@@ -139,10 +130,8 @@ body::before {
   to   { transform: translate(-8vmax, -6vmax) scale(0.95); }
 }
 
-/* grid overlay удалён — оставлен пустой класс для совместимости разметки */
 .bg-grid { display: none !important; }
 
-/* particles canvas (ember / spirit fire) */
 #fx {
   position: fixed;
   inset: 0;
@@ -158,10 +147,8 @@ body::before {
 a { color: var(--violet2); text-decoration: none; transition: var(--ease); }
 a:hover { text-decoration: underline; text-shadow: 0 0 12px var(--violet-glow); }
 
-/* selection */
 ::selection { background: rgba(184, 44, 240, 0.35); color: #fff; }
 
-/* ---------- brand mark ---------- */
 .brand-mark {
   border-radius: 50%;
   display: block;
@@ -170,7 +157,6 @@ a:hover { text-decoration: underline; text-shadow: 0 0 12px var(--violet-glow); 
   box-shadow: 0 0 0 1px var(--bd2), 0 6px 22px rgba(184, 44, 240, 0.22);
 }
 
-/* orbital ring around big brand mark */
 .brand-orbit {
   position: relative;
   display: inline-flex;
@@ -198,7 +184,6 @@ a:hover { text-decoration: underline; text-shadow: 0 0 12px var(--violet-glow); 
 }
 @keyframes orbit-spin { to { transform: rotate(360deg); } }
 
-/* ---------- generic buttons ---------- */
 .btn {
   display: inline-flex;
   align-items: center;
@@ -226,16 +211,13 @@ a:hover { text-decoration: underline; text-shadow: 0 0 12px var(--violet-glow); 
 .btn.sm { padding: 5px 10px; font-size: .7rem; }
 .btn svg { width: 14px; height: 14px; flex-shrink: 0; }
 
-/* ---------- icon helpers ---------- */
 .icon { width: 1em; height: 1em; display: inline-block; stroke: currentColor; fill: none; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; vertical-align: -0.14em; }
 .icon-fill { fill: currentColor; stroke: none; }
 
-/* ---------- scrollbars ---------- */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-thumb { background: rgba(200, 150, 255, 0.18); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: rgba(200, 150, 255, 0.32); }
 
-/* ---------- toast ---------- */
 .toast {
   position: fixed;
   bottom: 24px;
@@ -263,7 +245,6 @@ a:hover { text-decoration: underline; text-shadow: 0 0 12px var(--violet-glow); 
 .toast .tdot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--green); box-shadow: 0 0 8px var(--green); }
 .toast.err .tdot { background: var(--red); box-shadow: 0 0 8px var(--red); }
 
-/* ---------- spinner ---------- */
 .sp {
   display: inline-block;
   width: 14px; height: 14px;
@@ -276,12 +257,10 @@ a:hover { text-decoration: underline; text-shadow: 0 0 12px var(--violet-glow); 
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-/* ---------- empty / loading states ---------- */
 .empty { text-align: center; padding: 40px 20px; color: var(--mu); }
 .empty .icon { width: 32px; height: 32px; opacity: .4; margin-bottom: 8px; }
 .ld2 { text-align: center; padding: 32px; color: var(--mu); font-size: .8rem; }
 
-/* ---------- reveal-on-load animation helpers ---------- */
 .rv-up { animation: rv-up .55s cubic-bezier(.22, .8, .3, 1) both; }
 .rv-d1 { animation-delay: .07s; }
 .rv-d2 { animation-delay: .14s; }
@@ -295,14 +274,6 @@ a:hover { text-decoration: underline; text-shadow: 0 0 12px var(--violet-glow); 
   .rv-up { animation: none; }
 }
 
-/* ==========================================================================
-   v3 ENHANCEMENTS — обводки плашек, читаемость текста, глубина
-   (подключается ко всем страницам: мастер настройки и панель управления)
-   ========================================================================== */
-
-/* ---------- усиленная обводка карточек: яркая градиентная рамка ---------- */
-/* На .card добавляем светящуюся градиентную рамку через второй ::after слой.
-   ::before в разметке уже используется под неоновую верхнюю кромку — не трогаем. */
 .card {
   border-color: var(--bd3) !important;
   box-shadow:
@@ -311,7 +282,7 @@ a:hover { text-decoration: underline; text-shadow: 0 0 12px var(--violet-glow); 
     0 0 26px rgba(184, 44, 240, 0.16),
     0 0 44px rgba(255, 90, 43, 0.06) !important;
 }
-/* градиентная светящаяся кромка по всему периметру карточки */
+
 .card::after {
   content: '';
   position: absolute;
@@ -329,7 +300,6 @@ a:hover { text-decoration: underline; text-shadow: 0 0 12px var(--violet-glow); 
 }
 .card:hover::after { opacity: 0.9; }
 
-/* stat-плашки, module-плашки, лог-окно — более заметная рамка + двойное свечение */
 .sb, .mc2, .lw, .nb, .fi {
   border-color: var(--bd2) !important;
 }
@@ -352,46 +322,34 @@ a:hover { text-decoration: underline; text-shadow: 0 0 12px var(--violet-glow); 
     0 0 16px rgba(184, 44, 240, 0.10) !important;
 }
 
-/* модальное окно и toast — самая яркая обводка */
 .modal { border-color: var(--bd3) !important; }
 .toast { border-color: var(--bd3) !important; }
 
-/* input / select / textarea — заметнее в спокойном состоянии */
 input, .inp, .sel, .mi2 {
   border-color: var(--bd2) !important;
   background: rgba(20, 14, 34, 0.85) !important;
 }
 
-/* ---------- читаемость текста: аккуратные тени поверх живого фона ---------- */
-/* заголовки и подписи получают лёгкую тень, чтобы «отрываться» от фона */
 h1, .hdr-title, .step-title, .done-title, .ctit, .mtit,
 .slb, .sl, .sv, .mn, .rk, .rv, .bn, .bvv {
   text-shadow: var(--tx-shadow);
 }
-/* градиентные заголовки (clip-text) не поддерживают text-shadow —
-   даём им свечение через drop-shadow фильтр */
+
 h1, .hdr-title {
   filter: drop-shadow(0 1px 4px rgba(0, 0, 0, 0.5));
 }
 
-/* описания и подсказки — чуть плотнее и с мягкой тенью */
 .step-desc, .done-sub, .hint, .sub, .hdr-sub, .ss, .md, .mm, .bn {
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
 }
 
-/* приглушённый текст стал заметно контрастнее (см. --mu/--mu2 в :root) */
-
-/* ссылки чуть ярче */
 a { color: #e6b3ff; }
 
-/* иконки внутри плашек — мягкое свечение для акцента */
 .mi .icon, .step-title .icon, .note .icon { filter: drop-shadow(0 0 4px rgba(184, 44, 240, 0.35)); }
 
-/* brand-mark — более выразительная обводка вокруг логотипа */
 .brand-mark {
   box-shadow: 0 0 0 1px var(--bd3), 0 6px 24px rgba(184, 44, 240, 0.30), 0 0 18px rgba(255, 90, 43, 0.12) !important;
 }
 
-/* усиливаем блики фоновой сцены — фон стал живее */
 .bg-scene::before { opacity: .38 !important; }
 .bg-scene::after  { opacity: .34 !important; }

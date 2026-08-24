@@ -132,7 +132,7 @@ class WeatherModule(KitsuneModule):
         await event.edit(self.strings("loading"), parse_mode="html")
         try:
             data = await self._fetch_weather(city)
-        except ValueError as exc:
+        except ValueError:
             await event.edit(self.strings("not_found").format(city=escape_html(city)), parse_mode="html")
             return
         except Exception as exc:
@@ -145,19 +145,20 @@ class WeatherModule(KitsuneModule):
         await event.edit(text, parse_mode="html", link_preview=False)
     async def _fetch_weather(self, city: str) -> dict:
         import aiohttp
+        from ..net.http_pool import get_shared_session
         url = _WTTR_URL.format(city=city.replace(" ", "+"))
-        async with aiohttp.ClientSession() as session:
-            async with session.get(
-                url,
-                timeout=aiohttp.ClientTimeout(total=15),
-                headers={"Accept-Language": "ru-RU,ru;q=0.9"},
-            ) as resp:
-                if resp.status == 404:
-                    raise ValueError(f"City {city!r} not found")
-                if resp.status != 200:
-                    raise RuntimeError(f"HTTP {resp.status}")
-                text = await resp.text()
-                if not text.strip().startswith("{"):
-                    raise ValueError(f"City {city!r} not found")
-                import json
-                return json.loads(text)
+        session = get_shared_session()
+        async with session.get(
+            url,
+            timeout=aiohttp.ClientTimeout(total=15),
+            headers={"Accept-Language": "ru-RU,ru;q=0.9"},
+        ) as resp:
+            if resp.status == 404:
+                raise ValueError(f"City {city!r} not found")
+            if resp.status != 200:
+                raise RuntimeError(f"HTTP {resp.status}")
+            text = await resp.text()
+            if not text.strip().startswith("{"):
+                raise ValueError(f"City {city!r} not found")
+            import json
+            return json.loads(text)

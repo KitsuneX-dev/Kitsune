@@ -12,6 +12,7 @@ import pytest
 def isolate_key(monkeypatch, tmp_path):
     import kitsune.crypto as crypto
     monkeypatch.setattr(crypto, "KEY_PATH", tmp_path / "test.key")
+    monkeypatch.setattr(crypto, "SALT_PATH", tmp_path / "test.key.salt")
     monkeypatch.delenv("KITSUNE_KEY", raising=False)
     yield
 def _crypto():
@@ -45,7 +46,7 @@ def test_aes_gcm_used_when_available():
     if not c._AES_GCM_AVAILABLE:
         pytest.skip("AES-GCM not available")
     enc = c.encrypt(b"some payload")
-    assert b"AESGCM1:" in enc[:32]
+    assert b"AESGCM2:" in enc[:32]
 def test_aes_gcm_random_nonce_unique_ciphertexts():
     c = _crypto()
     if not c._AES_GCM_AVAILABLE:
@@ -62,8 +63,8 @@ def test_aes_gcm_nonce_length_is_12():
         pytest.skip("AES-GCM not available")
     enc = c.encrypt(b"payload")
     payload = enc[len(c.MAGIC):]
-    assert payload.startswith(b"AESGCM1:")
-    body = payload[len(b"AESGCM1:"):]
+    assert payload.startswith(b"AESGCM2:")
+    body = payload[len(b"AESGCM2:"):]
     nonce_len = struct.unpack(">I", body[:4])[0]
     assert nonce_len == 12
 def test_aes_gcm_tampered_ciphertext_fails():
@@ -79,7 +80,7 @@ def test_aes_gcm_tampered_nonce_fails():
     if not c._AES_GCM_AVAILABLE:
         pytest.skip("AES-GCM not available")
     enc = bytearray(c.encrypt(b"genuine"))
-    pos = len(c.MAGIC) + len(b"AESGCM1:") + 4
+    pos = len(c.MAGIC) + len(b"AESGCM2:") + 4
     enc[pos] ^= 0xAA
     with pytest.raises(Exception):
         c.decrypt(bytes(enc))
@@ -93,7 +94,7 @@ def test_aes_gcm_large_data():
     c = _crypto()
     if not c._AES_GCM_AVAILABLE:
         pytest.skip("AES-GCM not available")
-    big = os.urandom(1024 * 256)           
+    big = os.urandom(1024 * 256)
     enc = c.encrypt(big)
     assert c.decrypt(enc) == big
 def test_aes_gcm_binary_data_with_zero_bytes():
@@ -140,12 +141,12 @@ def test_chacha_backend():
     c = _crypto()
     data = b"chacha backup data"
     key = c._load_or_create_key()
-    enc = c.MAGIC + b"CHACHA1:" + c._chacha_encrypt(data, key)
+    enc = c.MAGIC + b"CHACHA2:" + c._chacha_encrypt(data, key)
     assert c.decrypt(enc) == data
 def test_chacha_tag_authentication():
     c = _crypto()
     key = c._load_or_create_key()
-    enc = c.MAGIC + b"CHACHA1:" + c._chacha_encrypt(b"data", key)
+    enc = c.MAGIC + b"CHACHA2:" + c._chacha_encrypt(b"data", key)
     bad = bytearray(enc)
     bad[-1] ^= 0x01
     with pytest.raises(Exception):
@@ -196,8 +197,11 @@ def test_derived_key_from_credentials(tmp_path, monkeypatch):
     cfg = tmp_path / "config.toml"
     cfg.write_text('api_id = "123456"\napi_hash = "abcdef0123456789abcdef0123456789"\n')
     monkeypatch.setattr(crypto, "KEY_PATH", tmp_path / ".kitsune" / "kitsune.key")
-    real_init = crypto.__file__
-    monkeypatch.setattr(crypto, "__file__", str(tmp_path / "fake" / "crypto.py"))
+    import kitsune.main as kmain
+    monkeypatch.delenv("KITSUNE_DATA_DIR", raising=False)
+    monkeypatch.delenv("DOCKER", raising=False)
+    monkeypatch.setenv("KITSUNE_CONFIG", str(cfg))
+    monkeypatch.setattr(kmain, "CONFIG_PATH", cfg)
     derived = crypto._derive_key_from_credentials()
     assert derived is not None
     assert isinstance(derived, bytes)
@@ -205,7 +209,51 @@ def test_derived_key_from_credentials(tmp_path, monkeypatch):
     assert derived == derived2
 def test_derived_key_returns_none_without_config(tmp_path, monkeypatch):
     import kitsune.crypto as crypto
-    monkeypatch.setattr(crypto, "__file__", str(tmp_path / "no_cfg" / "crypto.py"))
+    import kitsune.main as kmain
+    monkeypatch.delenv("KITSUNE_DATA_DIR", raising=False)
+    monkeypatch.delenv("DOCKER", raising=False)
+    monkeypatch.setenv("KITSUNE_CONFIG", str(tmp_path / "no_cfg" / "config.toml"))
+    monkeypatch.setattr(kmain, "CONFIG_PATH", tmp_path / "no_cfg" / "config.toml")
     monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path / "home_no_kitsune")
     result = crypto._derive_key_from_credentials()
     assert result is None
+
+
+def test_pbkdf2_key_used_for_new_backups(monkeypatch):
+    c = _crypto()
+    if not c._AES_GCM_AVAILABLE:
+        pytest.skip("AES-GCM not available")
+    monkeypatch.setenv("KITSUNE_KEY", "dGVzdC1rZXktZm9yLWNyeXB0by1wYmtkZjItY2hlY2s")
+    data = b"pbkdf2 payload " * 50
+    enc = c.encrypt(data)
+    assert c.format_version(enc) == 2
+    assert c.decrypt(enc) == data
+
+
+def test_salt_is_stable_across_calls(monkeypatch):
+    c = _crypto()
+    monkeypatch.setenv("KITSUNE_KEY", "c3RhYmxlLXNhbHQtY2hlY2sta2V5LXZhbHVlLTEyMzQ1")
+    s1 = c._load_or_create_salt()
+    s2 = c._load_or_create_salt()
+    assert s1 == s2 and len(s1) >= c._SALT_LEN
+
+
+def test_legacy_backup_still_decrypts(monkeypatch):
+    c = _crypto()
+    if not c._AES_GCM_AVAILABLE:
+        pytest.skip("AES-GCM not available")
+    monkeypatch.setenv("KITSUNE_KEY", "bGVnYWN5LWZvcm1hdC1jaGVjay1rZXktdmFsdWUxMjM")
+    data = b"legacy sha256 backup payload " * 30
+    key = c._load_or_create_key()
+    raw_key = base64.urlsafe_b64decode(key + b"==")
+    aes_key = hashlib.sha256(raw_key).digest()
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    nonce = os.urandom(12)
+    ct = AESGCM(aes_key).encrypt(nonce, data, None)
+    legacy = c.MAGIC + b"AESGCM1:" + struct.pack(">I", len(nonce)) + nonce + ct
+    assert c.format_version(legacy) == 1
+    assert c.decrypt(legacy) == data
+    pt, migrated = c.decrypt_and_reencrypt(legacy)
+    assert pt == data
+    assert migrated is not None and c.format_version(migrated) == 2
+    assert c.decrypt(migrated) == data

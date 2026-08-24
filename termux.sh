@@ -162,12 +162,45 @@ else
     fi
 fi
 
+step "cryptg (ускорение AES-IGE для Telethon)"
+if python3 -c "import cryptg" 2>/dev/null; then
+    ok "cryptg уже установлен"
+else
+    _CRYPTG_OK=false
+    if pip install --prefer-binary --only-binary=:all: --no-cache-dir -q "cryptg>=0.6.0" 2>/dev/null; then
+        _CRYPTG_OK=true
+        ok "cryptg установлен (prebuilt wheel)"
+    elif command -v cargo >/dev/null 2>&1; then
+        warn "prebuilt wheel для cryptg нет — пробую собрать через cargo (это долго)"
+        if pip install --no-cache-dir -q "cryptg>=0.6.0" 2>/dev/null; then
+            _CRYPTG_OK=true
+            ok "cryptg установлен (собран из исходников через cargo)"
+        fi
+    else
+        warn "cargo не найден — сборка cryptg из исходников невозможна"
+    fi
+    if ! $_CRYPTG_OK; then
+        warn "cryptg не установился — будет использован фолбэк на tgcrypto (AES-IGE патч Kitsune)"
+    fi
+fi
+
+step "uvloop (ускорение event loop)"
+pkg install -y libuv 2>/dev/null && ok "libuv установлен (нативный)" || \
+    warn "libuv через pkg недоступен — пробую собрать uvloop с вендорным libuv"
+if UVLOOP_USE_SYSTEM_LIBUV=1 pip install --prefer-binary --no-cache-dir -q "uvloop>=0.19.0" 2>/dev/null; then
+    ok "uvloop установлен (system libuv)"
+elif pip_install "uvloop>=0.19.0"; then
+    ok "uvloop установлен"
+else
+    warn "uvloop не установился — бот будет работать на стандартном asyncio"
+fi
+
 step "Директории и права"
 mkdir -p "$HOME/.kitsune/modules" "$HOME/.kitsune/logs"
-chmod 755 "$HOME/.kitsune"
+chmod 700 "$HOME/.kitsune"
 chmod 755 "$HOME/.kitsune/modules"
 chmod 755 "$HOME/.kitsune/logs"
-[[ -f "$HOME/.kitsune/kitsune.session" ]]     && chmod 644 "$HOME/.kitsune/kitsune.session"     || true
+[[ -f "$HOME/.kitsune/kitsune.session" ]]     && chmod 600 "$HOME/.kitsune/kitsune.session"     || true
 [[ -f "$HOME/.kitsune/kitsune.session.enc" ]] && chmod 600 "$HOME/.kitsune/kitsune.session.enc" || true
 ok "Директории созданы, права выставлены"
 
@@ -178,16 +211,85 @@ python3 -c "import aiogram"       2>/dev/null && ok "aiogram ✓"       || warn 
 python3 -c "import cryptography"  2>/dev/null && ok "cryptography ✓"  || warn "cryptography не найдена (fallback активен)"
 python3 -c "import psutil"        2>/dev/null && ok "psutil ✓"        || warn "psutil не найден (мониторинг отключён)"
 python3 -c "import pydantic"      2>/dev/null && ok "pydantic ✓"      || warn "pydantic не найден"
+python3 -c "import uvloop"        2>/dev/null && ok "uvloop ✓"        || warn "uvloop не найден (стандартный asyncio)"
+python3 -c "import cryptg"        2>/dev/null && ok "cryptg ✓"        || warn "cryptg не найден (фолбэк на tgcrypto)"
+
+step "Прекомпиляция байткода"
+unset PYTHONDONTWRITEBYTECODE
+python3 -m compileall -q -j 0 "$INSTALL_DIR/kitsune" 2>/dev/null && ok "Байткод скомпилирован" || \
+    warn "Не удалось прекомпилировать байткод — первый запуск будет медленнее"
+SITE_PACKAGES=$(python3 -c "import site; print(site.getsitepackages()[0])" 2>/dev/null || true)
+if [[ -n "$SITE_PACKAGES" && -d "$SITE_PACKAGES" ]]; then
+    python3 -m compileall -q -j 0 "$SITE_PACKAGES" 2>/dev/null && ok "Байткод зависимостей скомпилирован" || \
+        info "Прекомпиляция зависимостей пропущена"
+fi
+
+step "Режим экономии ресурсов (KITSUNE_LOW_POWER)"
+
+LOW_POWER_TRUE_VALUE="1"
+LOW_POWER_FALSE_VALUE="0"
+
+if [[ -n "${KITSUNE_LOW_POWER:-}" ]]; then
+    LOW_POWER_SOURCE="переменная окружения"
+    info "KITSUNE_LOW_POWER уже задан в окружении: ${KITSUNE_LOW_POWER} — не меняю"
+else
+    KITSUNE_LOW_POWER="$LOW_POWER_TRUE_VALUE"
+    LOW_POWER_SOURCE="по умолчанию для Termux"
+    info "Termux — включаю режим экономии ресурсов по умолчанию"
+fi
+
+export KITSUNE_LOW_POWER
+ok "KITSUNE_LOW_POWER=$KITSUNE_LOW_POWER ($LOW_POWER_SOURCE)"
+
+persist_low_power_rc() {
+    local _rc="$1"
+    local _line="export KITSUNE_LOW_POWER=\"$KITSUNE_LOW_POWER\""
+    [[ -e "$_rc" ]] || touch "$_rc" 2>/dev/null || return 1
+    if grep -q '^[[:space:]]*export[[:space:]]\+KITSUNE_LOW_POWER=' "$_rc" 2>/dev/null; then
+        sed -i "s|^[[:space:]]*export[[:space:]]\\+KITSUNE_LOW_POWER=.*|$_line|" "$_rc" \
+            && ok "KITSUNE_LOW_POWER обновлён в $_rc" \
+            || warn "Не удалось обновить KITSUNE_LOW_POWER в $_rc"
+    else
+        {
+            echo ""
+            echo "# Kitsune: режим экономии ресурсов (добавлено установщиком)"
+            echo "$_line"
+        } >> "$_rc" && ok "KITSUNE_LOW_POWER добавлен в $_rc" \
+            || warn "Не удалось записать KITSUNE_LOW_POWER в $_rc"
+    fi
+}
+
+for _RC in "$HOME/.bashrc" "$HOME/.profile"; do
+    persist_low_power_rc "$_RC" || true
+done
+
+case "$(echo "$KITSUNE_LOW_POWER" | tr '[:upper:]' '[:lower:]')" in
+    1|true|yes|on|y|t)
+        touch "$INSTALL_DIR/config.toml" 2>/dev/null || true
+        if [[ -f "$INSTALL_DIR/config.toml" ]]; then
+            if grep -q '^[[:space:]]*low_power[[:space:]]*=' "$INSTALL_DIR/config.toml" 2>/dev/null; then
+                info "low_power уже задан в config.toml — не меняю"
+            else
+                echo 'low_power = true' >> "$INSTALL_DIR/config.toml"
+                ok "Режим экономии ресурсов записан в config.toml (low_power = true)"
+            fi
+        fi
+        ;;
+    *)
+        info "low_power в config.toml не пишу (KITSUNE_LOW_POWER=$KITSUNE_LOW_POWER)"
+        ;;
+esac
 
 step "Автозапуск"
 if [[ -z "${NO_AUTOSTART:-}" ]]; then
     echo '' > "${PREFIX}/etc/motd" 2>/dev/null || true
-    cat > "$HOME/.bash_profile" << 'PROFILE'
+    cat > "$HOME/.bash_profile" << PROFILE
 clear
 echo -e "\033[1;35m  🦊 Kitsune Userbot\033[0m"
-cd "$HOME/Kitsune" && python3 -m kitsune
+export KITSUNE_LOW_POWER="$KITSUNE_LOW_POWER"
+cd "\$HOME/Kitsune" && python3 -m kitsune
 PROFILE
-    ok "Автозапуск настроен (~/.bash_profile)"
+    ok "Автозапуск настроен (~/.bash_profile), KITSUNE_LOW_POWER=$KITSUNE_LOW_POWER"
 fi
 
 echo ""
@@ -195,6 +297,7 @@ echo -e "${MAGENTA}${BOLD}━━━━━━━━━━━━━━━━━━
 echo -e "  ${GREEN}${BOLD}🦊 Готово!${RESET}"
 echo -e "  ${CYAN}Запуск:${RESET} cd ~/Kitsune && python3 -m kitsune"
 echo -e "  ${YELLOW}Конфиг:${RESET} ~/Kitsune/config.toml"
+echo -e "  ${CYAN}KITSUNE_LOW_POWER:${RESET} $KITSUNE_LOW_POWER  ${YELLOW}($LOW_POWER_SOURCE)${RESET}"
 echo -e "${MAGENTA}${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}\n"
 
 python3 -m kitsune

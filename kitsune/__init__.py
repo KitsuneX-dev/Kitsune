@@ -16,22 +16,18 @@ def _chmod_session_files(filename) -> None:
     if not filename or filename == ":memory:":
         return
     try:
-        import os as _os
         from pathlib import Path as _PP
+
+
+        from .paths import harden_dir as _hd, harden_file as _hf
         base = _PP(str(filename))
         parent = base.parent
-        try:
-            if parent.exists():
-                _os.chmod(parent, 0o755)
-        except Exception:
-            pass
+        if parent.exists():
+            _hd(parent, create=False)
         for _suf in ("", "-wal", "-shm", "-journal"):
             _p = _PP(str(filename) + _suf)
             if _p.exists():
-                try:
-                    _os.chmod(_p, 0o644)
-                except Exception:
-                    pass
+                _hf(_p)
     except Exception:
         pass
 def install_patches() -> None:
@@ -348,6 +344,40 @@ def install_patches() -> None:
             "kitsune: TelegramBaseClient._save_states_and_entities patch skipped — %s",
             _exc,
         )
+
+
+    try:
+        from telethon.crypto import aes as _tl_aes
+        if getattr(_tl_aes, "cryptg", None) is None:
+            try:
+                import os as _os
+                import tgcrypto as _tgc
+
+                class _FastAES:
+
+                    @staticmethod
+                    def encrypt_ige(plain_text: bytes, key: bytes, iv: bytes) -> bytes:
+                        padding = len(plain_text) % 16
+                        if padding:
+                            plain_text += _os.urandom(16 - padding)
+                        return _tgc.ige256_encrypt(plain_text, key, iv)
+
+                    @staticmethod
+                    def decrypt_ige(cipher_text: bytes, key: bytes, iv: bytes) -> bytes:
+                        return _tgc.ige256_decrypt(cipher_text, key, iv)
+
+                _tl_aes.AES = _FastAES
+                _log.info(
+                    "kitsune: cryptg недоступен — AES-IGE ускорен через tgcrypto"
+                )
+            except ImportError:
+                _log.warning(
+                    "kitsune: ни cryptg, ни tgcrypto не установлены — "
+                    "используется медленный чистый Python AES-IGE Telethon. "
+                    "Установите: pip install cryptg (или tgcrypto)"
+                )
+    except Exception as _exc:
+        _log.debug("kitsune: AES-IGE fallback patch skipped — %s", _exc)
     _PATCHES_INSTALLED = True
 try:
     install_patches()

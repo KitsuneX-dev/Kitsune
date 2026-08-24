@@ -16,21 +16,38 @@ trap 'echo -e "${RED}❌ Ошибка на строке $LINENO — устано
 IS_TERMUX=false
 IS_UBUNTU=false
 IS_USERLAND=false
+IS_DEBIAN_FAMILY=false
+IS_REAL_UBUNTU=false
+IS_ALPINE=false
+IS_ARCH=false
 SUDO="sudo"
 
 if [[ -n "${PREFIX:-}" && "$PREFIX" == *"com.termux"* ]]; then
     IS_TERMUX=true
 elif [[ -d "/data/user/0/tech.ula" \
+     || -d "/data/data/tech.ula" \
      || -n "${USERLAND_VERSION:-}" \
      || -f "/etc/userland-release" \
      || "$(cat /proc/version 2>/dev/null)" == *"android"* \
      || "$(uname -r 2>/dev/null)" == *"android"* \
      || "$(uname -o 2>/dev/null)" == *"ndroid"* \
-     || -f "/proc/1/cmdline" && "$(cat /proc/1/cmdline 2>/dev/null)" == *"bash"* ]]; then
+     || ( -f "/proc/1/cmdline" && "$(cat /proc/1/cmdline 2>/dev/null)" == *"bash"* ) ]]; then
     IS_USERLAND=true
     IS_UBUNTU=true
 elif command -v apt-get &>/dev/null; then
     IS_UBUNTU=true
+fi
+
+if $IS_UBUNTU; then
+    IS_DEBIAN_FAMILY=true
+    if [[ -r /etc/os-release ]]; then
+        . /etc/os-release
+        [[ "${ID:-}" == "ubuntu" || " ${ID_LIKE:-} " == *" ubuntu "* ]] && IS_REAL_UBUNTU=true
+    fi
+elif command -v apk &>/dev/null; then
+    IS_ALPINE=true
+elif command -v pacman &>/dev/null; then
+    IS_ARCH=true
 fi
 
 if ! $IS_USERLAND; then
@@ -49,8 +66,10 @@ EOF
 echo -e "${RESET}${CYAN}           Userbot by Yushi (@Mikasu32)${RESET}\n"
 
 if $IS_TERMUX;   then info "Среда: Termux"
-elif $IS_USERLAND; then info "Среда: UserLand (Ubuntu on Android)"
-elif $IS_UBUNTU;   then info "Среда: Ubuntu / Debian"
+elif $IS_USERLAND; then info "Среда: UserLand (${PRETTY_NAME:-Linux} on Android)"
+elif $IS_UBUNTU;   then info "Среда: ${PRETTY_NAME:-Ubuntu / Debian}"
+elif $IS_ALPINE;   then info "Среда: Alpine Linux (musl)"
+elif $IS_ARCH;     then info "Среда: Arch Linux"
 else warn "Неизвестная среда — попытка продолжить..."; fi
 
 if [[ "$(id -u)" == "0" ]]; then
@@ -88,12 +107,34 @@ apt_install() {
         || { warn "Не удалось установить: $* — попробуй вручную: sudo apt install $*"; return 1; }
 }
 
+apk_install() {
+    if [[ -z "$SUDO" && "$(id -u)" != "0" ]]; then
+        warn "Нет прав root для apk. Попробуй: sudo apk add $*"
+        return 1
+    fi
+    $SUDO apk add --no-cache "$@" \
+        || { warn "Не удалось установить: $* — попробуй вручную: sudo apk add $*"; return 1; }
+}
+
+pacman_install() {
+    if [[ -z "$SUDO" && "$(id -u)" != "0" ]]; then
+        warn "Нет прав root для pacman. Попробуй: sudo pacman -S $*"
+        return 1
+    fi
+    $SUDO pacman -Sy --needed --noconfirm "$@" \
+        || { warn "Не удалось установить: $* — попробуй вручную: sudo pacman -S $*"; return 1; }
+}
+
 if ! command -v git &>/dev/null; then
     warn "git не найден — устанавливаю..."
     if $IS_TERMUX; then
         pkg install -y git || err "Не удалось установить git. Запусти: pkg install git"
     elif $IS_UBUNTU; then
         apt_install git || err "Установи git вручную: sudo apt install git, затем перезапусти скрипт"
+    elif $IS_ALPINE; then
+        apk_install git || err "Установи git вручную: sudo apk add git, затем перезапусти скрипт"
+    elif $IS_ARCH; then
+        pacman_install git || err "Установи git вручную: sudo pacman -S git, затем перезапусти скрипт"
     fi
     command -v git &>/dev/null && ok "git установлен" \
         || err "git не найден. Установи вручную и перезапусти скрипт."
@@ -117,18 +158,36 @@ if [[ -z "$PYTHON" ]]; then
     if $IS_TERMUX; then
         pkg install python -y; PYTHON="python3"
     elif $IS_UBUNTU; then
-        if command -v add-apt-repository &>/dev/null; then
-            ${SUDO:-} add-apt-repository -y ppa:deadsnakes/ppa 2>/dev/null || true
+        if $IS_REAL_UBUNTU && command -v add-apt-repository &>/dev/null; then
+            ${SUDO:-} add-apt-repository -y ppa:deadsnakes/ppa 2>/dev/null \
+                || warn "Не удалось подключить deadsnakes PPA — пробую стоковые репозитории"
             ${SUDO:-} apt-get update -qq 2>/dev/null || true
+        elif ! $IS_REAL_UBUNTU; then
+            info "Debian-семейство без PPA — ставлю Python из стоковых репозиториев"
         fi
         if apt_install python3.13 python3.13-venv python3-pip 2>/dev/null; then
             PYTHON="python3.13"
+        elif apt_install python3.14 python3.14-venv python3-pip 2>/dev/null; then
+            PYTHON="python3.14"
         elif apt_install python3.12 python3.12-venv python3-pip 2>/dev/null; then
             PYTHON="python3.12"
             warn "Python 3.13 недоступен в репозитории — поставлен 3.12 (минимально совместим)"
-        else
+        elif $IS_REAL_UBUNTU; then
             err "Установи Python 3.13 вручную: sudo add-apt-repository ppa:deadsnakes/ppa && sudo apt install python3.13 python3.13-venv"
+        else
+            err "На этой версии Debian нет Python 3.13+ в стандартных репозиториях (у тебя $(python3 -V 2>&1)).
+    Варианты:
+      1) Обновиться до Debian 13 (trixie) — там python3.13 есть в стоке: sudo apt install python3.13 python3.13-venv
+      2) Поставить через pyenv:  curl https://pyenv.run | bash && pyenv install 3.13
+      3) Docker-образ проекта (Dockerfile в репозитории)
+    PPA deadsnakes на Debian НЕ работает — не используй совет для Ubuntu."
         fi
+    elif $IS_ALPINE; then
+        apk_install python3 py3-pip || err "Установи Python вручную: sudo apk add python3 py3-pip"
+        PYTHON="python3"
+    elif $IS_ARCH; then
+        pacman_install python python-pip || err "Установи Python вручную: sudo pacman -S python"
+        PYTHON="python3"
     else
         err "Установи Python 3.13+ вручную: https://python.org"
     fi
@@ -152,6 +211,15 @@ elif $IS_UBUNTU; then
         && ok "Системные пакеты — готово" \
         || { apt_install python3-dev && ok "Системные пакеты — готово (с python3-dev fallback)"; } \
         || true
+elif $IS_ALPINE; then
+    apk_install git curl build-base python3-dev libffi-dev openssl-dev \
+        jpeg-dev zlib-dev linux-headers cargo rust \
+        && ok "Alpine-пакеты готовы" \
+        || warn "Часть пакетов не встала — сборка cryptg может упасть"
+elif $IS_ARCH; then
+    pacman_install git curl base-devel openssl libffi libjpeg-turbo zlib \
+        && ok "Arch-пакеты готовы" \
+        || warn "Часть пакетов не встала"
 fi
 
 if $IS_UBUNTU; then
@@ -211,10 +279,22 @@ step "Виртуальное окружение"
 VENV_DIR="$INSTALL_DIR/venv"
 if [[ ! -d "$VENV_DIR" ]]; then
     if ! $PYTHON -m venv "$VENV_DIR"; then
-        warn "venv не создался — пробую доустановить python${PYVER:-3.13}-venv..."
-        ${SUDO:-} apt-get install -y "python${PYVER:-3.13}-venv" python3-venv 2>/dev/null || true
-        $PYTHON -m venv "$VENV_DIR" \
-            || err "Не удалось создать venv. Запусти вручную: sudo apt install python3.13-venv"
+        if $IS_ALPINE; then
+            warn "venv не создался — пробую доустановить python3-dev/py3-virtualenv..."
+            apk_install python3-dev py3-virtualenv 2>/dev/null || true
+            $PYTHON -m venv "$VENV_DIR" \
+                || err "Не удалось создать venv. Запусти вручную: sudo apk add python3 py3-pip"
+        elif $IS_ARCH; then
+            warn "venv не создался — пробую доустановить python-virtualenv..."
+            pacman_install python-virtualenv 2>/dev/null || true
+            $PYTHON -m venv "$VENV_DIR" \
+                || err "Не удалось создать venv. Запусти вручную: sudo pacman -S python python-pip"
+        else
+            warn "venv не создался — пробую доустановить python${PYVER:-3.13}-venv..."
+            ${SUDO:-} apt-get install -y "python${PYVER:-3.13}-venv" python3-venv 2>/dev/null || true
+            $PYTHON -m venv "$VENV_DIR" \
+                || err "Не удалось создать venv. Запусти вручную: sudo apt install python3.13-venv"
+        fi
     fi
     ok "venv создан: $VENV_DIR"
 else
@@ -322,6 +402,50 @@ fi
     && ok "Hydrogram установлен" \
     || warn "Hydrogram не установлен (необязательный пакет)"
 
+step "cryptg (ускорение AES-IGE для Telethon)"
+if "$PYTHON_VENV" -c "import cryptg" 2>/dev/null; then
+    ok "cryptg уже установлен"
+else
+    _CRYPTG_OK=false
+    if "$PIP" install --prefer-binary --only-binary=:all: --no-cache-dir \
+           --no-warn-script-location --disable-pip-version-check --quiet "cryptg>=0.6.0" 2>/dev/null; then
+        _CRYPTG_OK=true
+        ok "cryptg установлен (prebuilt wheel)"
+    elif command -v cargo >/dev/null 2>&1; then
+        warn "prebuilt wheel для cryptg нет — пробую собрать через cargo (это долго)"
+        if "$PIP" install --no-cache-dir --no-warn-script-location \
+               --disable-pip-version-check --quiet "cryptg>=0.6.0" 2>/dev/null; then
+            _CRYPTG_OK=true
+            ok "cryptg установлен (собран из исходников через cargo)"
+        fi
+    else
+        warn "cargo не найден — сборка cryptg из исходников невозможна"
+    fi
+    if ! $_CRYPTG_OK; then
+        warn "cryptg не установился — будет использован фолбэк на tgcrypto (AES-IGE патч Kitsune)"
+    fi
+fi
+
+step "uvloop (ускорение event loop)"
+if "$PYTHON_VENV" -c "import uvloop" 2>/dev/null; then
+    ok "uvloop уже установлен"
+else
+    if $IS_TERMUX; then
+        pkg install -y libuv 2>/dev/null || warn "libuv через pkg недоступен"
+    else
+        apt_install libuv1-dev 2>/dev/null || warn "libuv1-dev недоступен — пробую вендорный libuv"
+    fi
+    if UVLOOP_USE_SYSTEM_LIBUV=1 "$PIP" install --prefer-binary --no-cache-dir \
+           --no-warn-script-location --disable-pip-version-check --quiet "uvloop>=0.19.0" 2>/dev/null; then
+        ok "uvloop установлен (system libuv)"
+    elif "$PIP" install --no-cache-dir --no-warn-script-location \
+             --disable-pip-version-check --quiet "uvloop>=0.19.0" 2>/dev/null; then
+        ok "uvloop установлен"
+    else
+        warn "uvloop не установился — бот будет работать на стандартном asyncio"
+    fi
+fi
+
 step "Проверка ключевых модулей"
 "$PYTHON_VENV" -c "import telethon" 2>/dev/null && ok "telethon ✓" || err "telethon не найден — установка не удалась!"
 "$PYTHON_VENV" -c "import aiohttp"  2>/dev/null && ok "aiohttp ✓"  || warn "aiohttp не найден"
@@ -329,13 +453,136 @@ step "Проверка ключевых модулей"
 "$PYTHON_VENV" -c "import pydantic" 2>/dev/null && ok "pydantic ✓" || warn "pydantic не найден"
 "$PYTHON_VENV" -c "import cryptography" 2>/dev/null && ok "cryptography ✓" || warn "cryptography не найдена (fallback активен)"
 "$PYTHON_VENV" -c "import PIL" 2>/dev/null && ok "Pillow ✓" || warn "Pillow не найден"
+"$PYTHON_VENV" -c "import uvloop" 2>/dev/null && ok "uvloop ✓" || warn "uvloop не найден (стандартный asyncio)"
+"$PYTHON_VENV" -c "import cryptg" 2>/dev/null && ok "cryptg ✓" || warn "cryptg не найден (фолбэк на tgcrypto)"
+
+step "Прекомпиляция байткода"
+unset PYTHONDONTWRITEBYTECODE
+"$PYTHON_VENV" -m compileall -q -j 0 "$INSTALL_DIR/kitsune" 2>/dev/null && ok "Байткод скомпилирован" || \
+    warn "Не удалось прекомпилировать байткод — первый запуск будет медленнее"
+"$PYTHON_VENV" -m compileall -q -j 0 "$VENV_DIR/lib" 2>/dev/null && ok "Байткод зависимостей скомпилирован" || \
+    info "Прекомпиляция зависимостей пропущена"
 
 step "Директории и права"
 mkdir -p "$HOME/.kitsune/modules" "$HOME/.kitsune/logs"
-chmod 755 "$HOME/.kitsune" "$HOME/.kitsune/modules" "$HOME/.kitsune/logs"
-[[ -f "$HOME/.kitsune/kitsune.session" ]]     && chmod 644 "$HOME/.kitsune/kitsune.session"     || true
+chmod 700 "$HOME/.kitsune"
+chmod 755 "$HOME/.kitsune/modules" "$HOME/.kitsune/logs"
+[[ -f "$HOME/.kitsune/kitsune.session" ]]     && chmod 600 "$HOME/.kitsune/kitsune.session"     || true
 [[ -f "$HOME/.kitsune/kitsune.session.enc" ]] && chmod 600 "$HOME/.kitsune/kitsune.session.enc" || true
 ok "Директории: ~/.kitsune/"
+
+step "Режим экономии ресурсов (KITSUNE_LOW_POWER)"
+
+LOW_POWER_TRUE_VALUE="1"
+LOW_POWER_FALSE_VALUE="0"
+
+detect_weak_hardware() {
+    if $IS_TERMUX || $IS_USERLAND; then
+        LOW_POWER_REASON="мобильное окружение (Termux/UserLand)"
+        return 0
+    fi
+    local _mem_kb=0
+    if [[ -r /proc/meminfo ]]; then
+        _mem_kb=$(awk '/^MemTotal:/ {print $2; exit}' /proc/meminfo 2>/dev/null || echo 0)
+    fi
+    if [[ -n "$_mem_kb" ]] && [[ "$_mem_kb" =~ ^[0-9]+$ ]] && (( _mem_kb > 0 && _mem_kb < 2097152 )); then
+        LOW_POWER_REASON="мало RAM (< 2 GB)"
+        return 0
+    fi
+    local _cpus=0
+    _cpus=$(nproc 2>/dev/null || echo 0)
+    if [[ "$_cpus" =~ ^[0-9]+$ ]] && (( _cpus > 0 && _cpus <= 2 )); then
+        LOW_POWER_REASON="мало ядер CPU (<= 2)"
+        return 0
+    fi
+    LOW_POWER_REASON="достаточно ресурсов"
+    return 1
+}
+
+LOW_POWER_REASON=""
+LOW_POWER_SOURCE=""
+
+if [[ -n "${KITSUNE_LOW_POWER:-}" ]]; then
+    LOW_POWER_SOURCE="переменная окружения"
+    info "KITSUNE_LOW_POWER уже задан в окружении: ${KITSUNE_LOW_POWER} — не меняю"
+else
+    if detect_weak_hardware; then
+        KITSUNE_LOW_POWER="$LOW_POWER_TRUE_VALUE"
+        LOW_POWER_SOURCE="автоопределение: $LOW_POWER_REASON"
+        info "Обнаружено слабое железо: $LOW_POWER_REASON"
+    else
+        KITSUNE_LOW_POWER="$LOW_POWER_FALSE_VALUE"
+        LOW_POWER_SOURCE="автоопределение: $LOW_POWER_REASON"
+        info "Железо выглядит достаточным ($LOW_POWER_REASON)"
+    fi
+
+    if [[ -t 0 ]] && [[ -z "${KITSUNE_NONINTERACTIVE:-}" ]]; then
+        _default_hint="n"
+        [[ "$KITSUNE_LOW_POWER" == "$LOW_POWER_TRUE_VALUE" ]] && _default_hint="y"
+        echo ""
+        echo -e "${CYAN}Включить режим экономии ресурсов (low power)?${RESET}"
+        echo -e "  ${YELLOW}Он снижает частоту записи в БД, уменьшает число ретраев,"
+        echo -e "  отключает hydrogram и веб-панель — полезно на слабых устройствах.${RESET}"
+        read -r -t 30 -p "  Включить? [y/N] (по умолчанию: $_default_hint) " _lp_answer || _lp_answer=""
+        case "$(echo "${_lp_answer:-}" | tr '[:upper:]' '[:lower:]')" in
+            y|yes|1|true|on|t)
+                KITSUNE_LOW_POWER="$LOW_POWER_TRUE_VALUE"
+                LOW_POWER_SOURCE="выбор пользователя"
+                ;;
+            n|no|0|false|off|f)
+                KITSUNE_LOW_POWER="$LOW_POWER_FALSE_VALUE"
+                LOW_POWER_SOURCE="выбор пользователя"
+                ;;
+            *)
+                info "Оставляю значение по умолчанию: $KITSUNE_LOW_POWER"
+                ;;
+        esac
+    else
+        info "Неинтерактивный режим — оставляю автоопределённое значение"
+    fi
+fi
+
+export KITSUNE_LOW_POWER
+ok "KITSUNE_LOW_POWER=$KITSUNE_LOW_POWER ($LOW_POWER_SOURCE)"
+
+persist_low_power_rc() {
+    local _rc="$1"
+    local _line="export KITSUNE_LOW_POWER=\"$KITSUNE_LOW_POWER\""
+    [[ -e "$_rc" ]] || touch "$_rc" 2>/dev/null || return 1
+    if grep -q '^[[:space:]]*export[[:space:]]\+KITSUNE_LOW_POWER=' "$_rc" 2>/dev/null; then
+        sed -i "s|^[[:space:]]*export[[:space:]]\+KITSUNE_LOW_POWER=.*|$_line|" "$_rc" \
+            && ok "KITSUNE_LOW_POWER обновлён в $_rc" \
+            || warn "Не удалось обновить KITSUNE_LOW_POWER в $_rc"
+    else
+        {
+            echo ""
+            echo "# Kitsune: режим экономии ресурсов (добавлено установщиком)"
+            echo "$_line"
+        } >> "$_rc" && ok "KITSUNE_LOW_POWER добавлен в $_rc" \
+            || warn "Не удалось записать KITSUNE_LOW_POWER в $_rc"
+    fi
+}
+
+for _RC in "$HOME/.bashrc" "$HOME/.profile"; do
+    persist_low_power_rc "$_RC" || true
+done
+
+case "$(echo "$KITSUNE_LOW_POWER" | tr '[:upper:]' '[:lower:]')" in
+    1|true|yes|on|y|t)
+        touch "$INSTALL_DIR/config.toml" 2>/dev/null || true
+        if [[ -f "$INSTALL_DIR/config.toml" ]]; then
+            if grep -q '^[[:space:]]*low_power[[:space:]]*=' "$INSTALL_DIR/config.toml" 2>/dev/null; then
+                info "low_power уже задан в config.toml — не меняю"
+            else
+                echo 'low_power = true' >> "$INSTALL_DIR/config.toml"
+                ok "Режим экономии ресурсов записан в config.toml (low_power = true)"
+            fi
+        fi
+        ;;
+    *)
+        info "low_power в config.toml не пишу (KITSUNE_LOW_POWER=$KITSUNE_LOW_POWER)"
+        ;;
+esac
 
 step "Настройка PATH"
 _PATH_LINE='export PATH="$HOME/.local/bin:$PATH"'
@@ -355,18 +602,31 @@ if $IS_TERMUX; then
         cat > "$HOME/.bash_profile" << PROFILE
 clear
 echo -e "\033[1;35mKitsune Userbot\033[0m"
+export KITSUNE_LOW_POWER="$KITSUNE_LOW_POWER"
 cd "$INSTALL_DIR" && "$PYTHON_VENV" -m kitsune
 PROFILE
-        ok "Автозапуск настроен (~/.bash_profile)"
+        ok "Автозапуск настроен (~/.bash_profile), KITSUNE_LOW_POWER=$KITSUNE_LOW_POWER"
     fi
 elif $IS_USERLAND; then
     cat > "$HOME/start_kitsune.sh" << ULSCRIPT
+mkdir -p "\$HOME/tmp"
+export TMPDIR="\$HOME/tmp"
+export KITSUNE_LOW_POWER="$KITSUNE_LOW_POWER"
 cd "$INSTALL_DIR"
 exec "$PYTHON_VENV" -m kitsune
 ULSCRIPT
     chmod +x "$HOME/start_kitsune.sh"
-    ok "Скрипт запуска создан: ~/start_kitsune.sh"
-elif $IS_UBUNTU && [[ -z "${NO_AUTOSTART:-}" ]] && [[ -d "/etc/systemd/system" ]]; then
+    ok "Скрипт запуска создан: ~/start_kitsune.sh (KITSUNE_LOW_POWER=$KITSUNE_LOW_POWER)"
+elif $IS_ALPINE; then
+    cat > "$HOME/start_kitsune.sh" << ALPSCRIPT
+#!/bin/sh
+export KITSUNE_LOW_POWER="$KITSUNE_LOW_POWER"
+cd "$INSTALL_DIR"
+exec "$PYTHON_VENV" -m kitsune
+ALPSCRIPT
+    chmod +x "$HOME/start_kitsune.sh"
+    ok "Скрипт запуска создан: ~/start_kitsune.sh (в Alpine нет systemd — автозапуск не настраивается)"
+elif ( $IS_UBUNTU || $IS_ARCH ) && [[ -z "${NO_AUTOSTART:-}" ]] && [[ -d "/etc/systemd/system" ]]; then
     SERVICE_FILE="/etc/systemd/system/kitsune.service"
     $SUDO tee "$SERVICE_FILE" > /dev/null << SERVICE
 [Unit]
@@ -377,6 +637,7 @@ After=network.target
 Type=simple
 User=$USER
 WorkingDirectory=$INSTALL_DIR
+Environment=KITSUNE_LOW_POWER=$KITSUNE_LOW_POWER
 ExecStart=$PYTHON_VENV -m kitsune
 Restart=on-failure
 RestartSec=5
@@ -386,13 +647,14 @@ WantedBy=multi-user.target
 SERVICE
     $SUDO systemctl daemon-reload 2>/dev/null || true
     $SUDO systemctl enable kitsune 2>/dev/null || true
-    ok "systemd сервис создан"
+    ok "systemd сервис создан (Environment=KITSUNE_LOW_POWER=$KITSUNE_LOW_POWER)"
 fi
 
 echo ""
 echo -e "${MAGENTA}${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
 echo -e "  ${GREEN}${BOLD}🦊 Kitsune успешно установлен!${RESET}"
 echo -e "  ${CYAN}Директория:${RESET} $INSTALL_DIR"
+echo -e "  ${CYAN}KITSUNE_LOW_POWER:${RESET} $KITSUNE_LOW_POWER  ${YELLOW}($LOW_POWER_SOURCE)${RESET}"
 echo -e "${MAGENTA}${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
 echo ""
 

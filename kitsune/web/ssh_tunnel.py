@@ -75,12 +75,36 @@ class SSHTunnel:
                 cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
+                stdin=asyncio.subprocess.DEVNULL,
+
+
+                start_new_session=True,
             )
         except Exception as exc:
             logger.warning("SSHTunnel: не удалось запустить процесс: %s", exc)
             return
         regex = re.compile(url_pattern)
-        assert self._process.stdout is not None
+        if self._process.stdout is None:
+            logger.warning("SSHTunnel: процесс запущен без stdout-пайпа, чтение вывода невозможно")
+
+
+            await self._kill_process()
+            return
+        try:
+            await self._read_output(regex)
+        except asyncio.CancelledError:
+
+            await self._kill_process()
+            raise
+        if self._stopped:
+
+
+            await self._kill_process()
+            return
+        await self._process.wait()
+        logger.info("SSHTunnel: процесс завершился (код %s)", self._process.returncode)
+
+    async def _read_output(self, regex: typing.Pattern[str]) -> None:
         async for raw_line in self._process.stdout:
             if self._stopped:
                 break
@@ -102,12 +126,11 @@ class SSHTunnel:
                         self._change_url_callback(url)
                     except Exception:
                         logger.debug("SSHTunnel: ошибка в change_url_callback", exc_info=True)
-        await self._process.wait()
-        logger.info("SSHTunnel: процесс завершился (код %s)", self._process.returncode)
+
     async def _kill_process(self) -> None:
-        if self._process and self._process.returncode is None:
-            try:
-                self._process.kill()
-                await self._process.wait()
-            except Exception:
-                pass
+        proc = self._process
+        if proc is None or proc.returncode is not None:
+            return
+        from ..utils.proc import kill_process_tree
+
+        await kill_process_tree(proc)

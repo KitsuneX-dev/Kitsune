@@ -9,7 +9,8 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-DATA_DIR = Path.home() / ".kitsune"
+from ..paths import data_dir as _kdd
+DATA_DIR = _kdd()
 
 _HYDRO_LOCK_FILE = DATA_DIR / ".hydrogram.lock"
 _hydro_lock_fd: int | None = None
@@ -24,7 +25,7 @@ def _acquire_hydro_lock() -> bool:
     except ImportError:
         return True
     try:
-        fd = os.open(str(_HYDRO_LOCK_FILE), os.O_CREAT | os.O_RDWR, 0o644)
+        fd = os.open(str(_HYDRO_LOCK_FILE), os.O_CREAT | os.O_RDWR, 0o600)
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError:
@@ -71,13 +72,44 @@ def _purge_bad_hydro_session(session_file: Path, reason: str) -> None:
         logger.debug("main: _purge_bad_hydro_session failed", exc_info=True)
 
 
+_CONNECTION_MODES: dict[str, str] = {
+    "full": "ConnectionTcpFull",
+    "abridged": "ConnectionTcpAbridged",
+    "intermediate": "ConnectionTcpIntermediate",
+    "obfuscated": "ConnectionTcpObfuscated",
+    "http": "ConnectionHttp",
+}
+
+
+def resolve_connection_mode(cfg: dict[str, Any]) -> Any:
+    from telethon import network as _tl_network
+
+    mode = str(cfg.get("connection_mode", "full") or "full").strip().lower()
+    cls_name = _CONNECTION_MODES.get(mode)
+    if cls_name is None:
+        logger.warning(
+            "main: неизвестный connection_mode '%s' — использую 'full'. Доступны: %s",
+            mode, ", ".join(sorted(_CONNECTION_MODES)),
+        )
+        cls_name = _CONNECTION_MODES["full"]
+    cls = getattr(_tl_network, cls_name, None)
+    if cls is None:
+        logger.warning(
+            "main: %s недоступен в этой версии Telethon — использую ConnectionTcpFull",
+            cls_name,
+        )
+        cls = getattr(_tl_network, "ConnectionTcpFull")
+    elif mode != "full":
+        logger.info("main: connection_mode='%s' → %s", mode, cls_name)
+    return cls
+
+
 def build_proxy(cfg: dict[str, Any]) -> tuple[Any, Any]:
-    from telethon.network.connection import ConnectionTcpFull
     from ..rkn_bypass import ensure_python_socks as _ensure_python_socks
 
     proxy_cfg = cfg.get("proxy") or {}
-    proxy = None
-    connection = ConnectionTcpFull
+    proxy: tuple[Any, ...] | None = None
+    connection = resolve_connection_mode(cfg)
     if not (isinstance(proxy_cfg, dict) and proxy_cfg.get("host") and proxy_cfg.get("port")):
         return proxy, connection
     ptype = str(proxy_cfg.get("type", "MTPROTO")).upper()
@@ -130,7 +162,7 @@ async def verify_proxy(cfg: dict[str, Any]) -> bool:
         test_connection as _proxy_tcp_check,
         mtproxy_handshake_check as _proxy_hs_check,
     )
-    _phost = proxy_cfg.get("host")
+    _phost = str(proxy_cfg["host"])
     _pport = int(proxy_cfg.get("port") or 443)
     _psecret = str(proxy_cfg.get("secret") or "")
     logger.info(
@@ -244,12 +276,14 @@ async def connect_with_rkn_bypass(
         host, port, secret = proxy_info
         logger.info("main: using MTProto proxy %s:%d for RKN bypass", host, port)
         conn_cls = get_mtproto_connection_class(secret)
+        from ..low_power import retry_policy as _retry_policy
+        _conn_retries, _retry_delay = _retry_policy(cfg)
         new_client = KitsuneTelegramClient(
             str(session_path),
             api_id=api_id,
             api_hash=api_hash,
-            connection_retries=10,
-            retry_delay=3,
+            connection_retries=_conn_retries,
+            retry_delay=_retry_delay,
             auto_reconnect=True,
             flood_sleep_threshold=60,
             device_model="Kitsune Userbot",
@@ -441,14 +475,17 @@ async def start_hydrogram(
         try:
             cfg_now = load_config_fn()
             web_port = int(cfg_now.get("web_port", 8080))
+            web_host = str(cfg_now.get("web_host", "127.0.0.1"))
         except Exception:
             web_port = 8080
+            web_host = "127.0.0.1"
         from .session import hydrogram_web_reauth
         try:
             reauth_ok = await hydrogram_web_reauth(
                 save_config_fn=save_config_fn,
                 get_config_fn=load_config_fn,
                 web_port=web_port,
+                web_host=web_host,
             )
         except Exception:
             logger.exception(
@@ -570,8 +607,10 @@ async def keepalive(client: Any) -> None:
     PING_INTERVAL_S = 60
     fail_streak_started: float | None = None
     attempts: int = 0
+    _deg_flags: Any | None = None
     try:
-        from .reliability import flags as _deg_flags
+        from .reliability import flags as _reliability_flags
+        _deg_flags = _reliability_flags
     except Exception:
         _deg_flags = None
     while True:

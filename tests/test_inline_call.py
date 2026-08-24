@@ -83,8 +83,7 @@ def test_on_callback_sets_from_user_id():
     async def handler(call, *args, **kwargs):
         captured["call"] = call
 
-                                                                   
-                                                         
+
     cb_id = "cb12345"
     manager._callbacks[cb_id] = (handler, (), manager._client.tg_id, False, {})
 
@@ -110,7 +109,7 @@ def test_on_callback_from_user_id_none_when_no_user():
         captured["call"] = call
 
     cb_id = "cbnouser"
-                                                                          
+
     manager._callbacks[cb_id] = (handler, (), manager._client.tg_id, True, {})
 
     cbq = _FakeCallbackQuery(

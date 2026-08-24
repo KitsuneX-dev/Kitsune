@@ -25,3 +25,4 @@ distro>=1.8.0
 deep-translator>=1.11.0
 
 orjson>=3.9.0
+uvloop>=0.19.0

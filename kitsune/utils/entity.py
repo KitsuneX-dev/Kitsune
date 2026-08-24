@@ -19,6 +19,18 @@ def get_display_name(entity: typing.Any) -> str:
     return str(uid) if uid else "Unknown"
 def get_entity_id(entity: typing.Any) -> int | None:
     return getattr(entity, "id", None)
+def get_entity_url(entity: typing.Any, openmessage: bool = False) -> str:
+    if entity is None:
+        return ""
+    username = getattr(entity, "username", None)
+    if username:
+        return f"https://t.me/{username}"
+    uid = getattr(entity, "id", None)
+    if uid is None:
+        return ""
+    if openmessage:
+        return f"tg://openmessage?user_id={uid}"
+    return f"tg://user?id={uid}"
 def mention_html(entity: typing.Any, text: str | None = None) -> str:
     uid  = get_entity_id(entity)
     name = text or get_display_name(entity)

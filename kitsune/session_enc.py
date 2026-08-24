@@ -3,29 +3,34 @@ import logging
 import os
 import stat
 import sqlite3
+import time
 from pathlib import Path
 from .crypto import encrypt, decrypt
 
 logger = logging.getLogger(__name__)
 
-DATA_DIR     = Path.home() / ".kitsune"
+_RECOVERY_MAX_LOGGED_ERRORS = 5
+_RECOVERY_ERROR_RATIO_THRESHOLD = 0.10
+
+from .paths import (
+    data_dir as _kdd,
+    harden_dir as _harden_dir,
+    harden_file as _harden_file,
+    PRIVATE_DIR_MODE,
+    PRIVATE_FILE_MODE,
+)
+DATA_DIR     = _kdd()
 SESSION_PATH = DATA_DIR / "kitsune.session"
 ENC_PATH     = DATA_DIR / "kitsune.session.enc"
 
 def _ensure_data_dir() -> None:
-    try:
-        DATA_DIR.mkdir(parents=True, exist_ok=True)
-    except Exception:
-        pass
-    try:
-        os.chmod(DATA_DIR, 0o755)
-    except Exception:
-        pass
+
+    _harden_dir(DATA_DIR)
 def _fix_session_permissions() -> None:
     try:
         if SESSION_PATH.exists():
-            os.chmod(SESSION_PATH, 0o644)
-            logger.info("session_enc: session permissions -> 644")
+            os.chmod(SESSION_PATH, PRIVATE_FILE_MODE)
+            logger.info("session_enc: session permissions -> 600")
     except Exception as e:
         logger.warning("session_enc: could not chmod session file: %s", e)
 def _fix_companion_files() -> None:
@@ -33,7 +38,7 @@ def _fix_companion_files() -> None:
         p = SESSION_PATH.parent / (SESSION_PATH.name + suffix)
         if p.exists():
             try:
-                os.chmod(p, 0o644)
+                os.chmod(p, PRIVATE_FILE_MODE)
             except Exception as e:
                 logger.debug(
                     "session_enc: chmod %s failed: %s", p.name, e,
@@ -69,17 +74,53 @@ def _fix_db_readonly() -> None:
             "file:{}?mode=ro".format(str(SESSION_PATH)), uri=True
         )
         dst = sqlite3.connect(str(tmp_path))
+        total = 0
+        errors = 0
         try:
             for line in src.iterdump():
+                total += 1
                 try:
                     dst.execute(line)
-                except Exception:
-                    pass
+                except Exception as dump_err:
+                    errors += 1
+                    if errors <= _RECOVERY_MAX_LOGGED_ERRORS:
+                        logger.warning(
+                            "session_enc: ошибка восстановления строки #%d: %s",
+                            total, dump_err,
+                        )
             dst.commit()
         finally:
             src.close()
             dst.close()
-        os.chmod(tmp_path, 0o644)
+        ratio = (errors / total) if total else 0.0
+        if errors and ratio > _RECOVERY_ERROR_RATIO_THRESHOLD:
+            try:
+                tmp_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+            corrupt_path = SESSION_PATH.with_name(
+                "{}.corrupt.{}".format(SESSION_PATH.name, int(time.time()))
+            )
+            try:
+                SESSION_PATH.replace(corrupt_path)
+            except Exception as move_err:
+                logger.error(
+                    "session_enc: не удалось сохранить повреждённую БД: %s", move_err,
+                )
+                corrupt_path = SESSION_PATH
+            logger.error(
+                "session_enc: восстановление ПРЕРВАНО — %d из %d операций "
+                "завершились ошибкой (%.0f%%). Повреждённая БД сохранена как %s. "
+                "Требуется повторный вход в аккаунт.",
+                errors, total, ratio * 100, corrupt_path.name,
+            )
+            return
+        if errors:
+            logger.warning(
+                "session_enc: БД восстановлена с %d незначительными ошибками из %d",
+                errors, total,
+            )
+        os.chmod(tmp_path, PRIVATE_FILE_MODE)
         for suffix in ("-wal", "-shm", "-journal"):
             p = SESSION_PATH.parent / (SESSION_PATH.name + suffix)
             try:
@@ -87,7 +128,7 @@ def _fix_db_readonly() -> None:
             except Exception:
                 pass
         tmp_path.replace(SESSION_PATH)
-        os.chmod(SESSION_PATH, 0o644)
+        os.chmod(SESSION_PATH, PRIVATE_FILE_MODE)
         logger.info("session_enc: DB recovered from readonly state")
     except Exception as ex:
         logger.error("session_enc: DB recovery failed: %s", ex)
@@ -96,37 +137,32 @@ def _fix_db_readonly() -> None:
         except Exception:
             pass
 def _fix_all_permissions() -> None:
-    _ensure_data_dir()
+
+
+    before = None
     try:
-        mode = stat.S_IMODE(DATA_DIR.stat().st_mode)
-        if not (mode & stat.S_IWUSR) or not (mode & stat.S_IXUSR):
-            os.chmod(DATA_DIR, 0o755)
-            logger.info("session_enc: fixed DATA_DIR permissions -> 755")
-    except Exception:
+        before = stat.S_IMODE(DATA_DIR.stat().st_mode)
+    except OSError:
         pass
-    if SESSION_PATH.exists():
+    _harden_dir(DATA_DIR)
+    if before is not None and before != PRIVATE_DIR_MODE:
+        logger.info(
+            "session_enc: fixed DATA_DIR permissions -> %o", PRIVATE_DIR_MODE
+        )
+    for path, label in ((SESSION_PATH, "session file"), (ENC_PATH, "enc file")):
+        if not path.exists():
+            continue
         try:
-            mode = stat.S_IMODE(SESSION_PATH.stat().st_mode)
-            if not (mode & stat.S_IWUSR):
-                os.chmod(SESSION_PATH, 0o644)
-                logger.info("session_enc: fixed session file permissions -> 644")
-        except Exception:
-            pass
-    if ENC_PATH.exists():
-        try:
-            mode = stat.S_IMODE(ENC_PATH.stat().st_mode)
-            if not (mode & stat.S_IWUSR):
-                os.chmod(ENC_PATH, 0o600)
-                logger.info("session_enc: fixed enc file permissions -> 600")
-        except Exception:
-            pass
+            mode = stat.S_IMODE(path.stat().st_mode)
+        except OSError:
+            mode = None
+        _harden_file(path)
+        if mode is not None and mode != PRIVATE_FILE_MODE:
+            logger.info(
+                "session_enc: fixed %s permissions -> %o", label, PRIVATE_FILE_MODE
+            )
     for subdir in ["modules", "logs"]:
-        p = DATA_DIR / subdir
-        try:
-            p.mkdir(parents=True, exist_ok=True)
-            os.chmod(p, 0o755)
-        except Exception:
-            pass
+        _harden_dir(DATA_DIR / subdir)
 def encrypt_session_file() -> bool:
     if not SESSION_PATH.exists():
         return False
@@ -143,7 +179,7 @@ def encrypt_session_file() -> bool:
             logger.debug("session_enc: WAL checkpoint skipped — %s", _e)
         raw = SESSION_PATH.read_bytes()
         ENC_PATH.write_bytes(encrypt(raw))
-        os.chmod(ENC_PATH, 0o600)
+        os.chmod(ENC_PATH, PRIVATE_FILE_MODE)
         for suffix in ("", "-wal", "-shm", "-journal"):
             p = SESSION_PATH.parent / (SESSION_PATH.name + suffix)
             try:
@@ -166,7 +202,7 @@ def decrypt_session_file() -> bool:
         _ensure_data_dir()
         raw = decrypt(ENC_PATH.read_bytes())
         SESSION_PATH.write_bytes(raw)
-        os.chmod(SESSION_PATH, 0o644)
+        os.chmod(SESSION_PATH, PRIVATE_FILE_MODE)
         for suffix in ("-wal", "-shm", "-journal"):
             p = SESSION_PATH.parent / (SESSION_PATH.name + suffix)
             try:

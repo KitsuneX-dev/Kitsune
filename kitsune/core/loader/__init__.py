@@ -1,49 +1,59 @@
 from __future__ import annotations
-import ast
 import asyncio
-import hashlib
 import importlib
 import importlib.util
 import inspect
 import logging
-import os
-import shlex
 import sys
 import typing
-import shutil
-from collections import OrderedDict
 from pathlib import Path
 from types import ModuleType
 
 logger = logging.getLogger(__name__)
 
-_AST_CACHE_MAX_SIZE: int = 128
-_PIP_INSTALL_TIMEOUT: float = 300.0
-_PIP_STDERR_TAIL: int = 200
-_LAST_PIP_STDERR: dict[str, str] = {}
-
-_BLOCKED_IMPORTS: frozenset[str] = frozenset({
-    "subprocess", "pty", "ctypes", "multiprocessing",
-    "socket", "pickle", "marshal",
-    "code", "codeop", "compileall", "py_compile",
-    "shelve", "dbm", "zipimport", "zipapp",
-    "runpy", "distutils",
-})
-
-_DANGEROUS_OS_ATTRS: frozenset[str] = frozenset({
-    "system", "popen", "execv", "execve", "execvp", "execvpe",
-    "execl", "execle", "execlp", "execlpe",
-    "spawnl", "spawnle", "spawnlp", "spawnlpe",
-    "spawnv", "spawnve", "spawnvp", "spawnvpe",
-    "fork", "forkpty", "kill",
-})
-
-_BLOCKED_ATTRS: frozenset[str] = frozenset({
-    "__import__", "__loader__", "__builtins__",
-    "system", "popen", "Popen", "call", "run",
-})
 
 _BUILTIN_MODULES_DIR_CACHED: Path | None = None
+
+
+class _SyncSetResult:
+
+    __slots__ = ("_result", "_awaitable")
+
+    def __init__(
+        self,
+        result: bool = True,
+        awaitable: typing.Optional[typing.Awaitable[typing.Any]] = None,
+    ) -> None:
+        self._result = result
+        self._awaitable = awaitable
+
+    def __await__(self) -> typing.Generator[typing.Any, None, bool]:
+        async def _coro() -> bool:
+            if self._awaitable is not None:
+                res = await self._awaitable
+                return bool(res) if res is not None else True
+            return self._result
+        return _coro().__await__()
+
+    def __bool__(self) -> bool:
+        return bool(self._result)
+
+
+def _sync_set(db: typing.Any, owner: str, key: str, value: typing.Any) -> _SyncSetResult:
+    setter = getattr(db, "set_sync", None) or getattr(db, "force_set", None)
+    if setter is not None:
+        result = setter(owner, key, value)
+        return _SyncSetResult(bool(result) if result is not None else True)
+    coro = db.set(owner, key, value)
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+    if loop is not None:
+        task = loop.create_task(coro)
+        return _SyncSetResult(True, awaitable=task)
+    return _SyncSetResult(bool(asyncio.new_event_loop().run_until_complete(coro)))
+
 
 def _get_builtin_modules_dir() -> Path:
     global _BUILTIN_MODULES_DIR_CACHED
@@ -113,6 +123,104 @@ class ModuleLoadError(Exception):
     pass
 class ASTSecurityError(ModuleLoadError):
     pass
+
+
+class LegacyApiError(ModuleLoadError):
+    pass
+
+
+from . import ast_scanner as _ast_scanner  # noqa: E402
+from . import dependency_resolver as _dependency_resolver  # noqa: E402
+from . import disk_cache as _disk_cache  # noqa: E402
+from .ast_scanner import (  # noqa: E402,F401
+    LEGACY_API_BLOCK_MESSAGE,
+    _ALIAS_TRACKED_MODULES,
+    _AST_CACHE_MAX_SIZE,
+    _ASYNC_SUBPROCESS_ATTRS,
+    _ASTScanner,
+    _BLOCKED_ATTRS,
+    _BLOCKED_IMPORTS,
+    _DANGEROUS_OS_ATTRS,
+    _DESTRUCTIVE_ATTRS,
+    _FORMAT_METHODS,
+    _HARD_ESCAPE_ATTRS,
+    _INDIRECT_ATTR_HELPERS,
+    _MODULE_REGISTRY_METHODS,
+    _SANDBOX_ESCAPE_ATTRS,
+    _SENSITIVE_ATTR_NAMES,
+    _SENSITIVE_MODULE_KEYS,
+    _SENSITIVE_PATH_HINTS,
+    _SOFT_ESCAPE_ATTRS,
+    _WILDCARD_BLOCKED_MODULES,
+    _ast_cache,
+    _ast_cache_clear,
+    _scan_ast,
+    _scan_ast_with_cache,
+    detect_legacy_api,
+)
+from .disk_cache import (  # noqa: E402,F401
+    _AST_SCAN_OK_FILENAME,
+    _AST_SCAN_OK_FLUSH_EVERY,
+    _AST_SCAN_OK_MAX_SIZE,
+    _ast_scan_ok_path,
+    _load_ast_scan_cache,
+    _remember_ast_scan_ok,
+    flush_ast_scan_cache,
+)
+from .dependency_resolver import (  # noqa: E402,F401
+    _IMPORT_TO_PIP,
+    _LAST_PIP_STDERR,
+    _PIP_INSTALL_TIMEOUT,
+    _PIP_STDERR_TAIL,
+    _SYSTEM_UTIL_TO_PKG,
+    _build_pip_base_cmd,
+    _ensure_pip_deps,
+    _ensure_system_deps,
+    _extract_missing_package,
+    _is_permission_error,
+    _is_termux,
+    _pip_install,
+    _record_pip_stderr,
+    _run_cmd,
+    _system_install,
+    get_last_pip_stderr,
+)
+
+
+_LOADER_SUBMODULES = (_ast_scanner, _disk_cache, _dependency_resolver)
+
+
+def _detect_legacy_or_raise(source: str, *, origin: str = "<module>") -> None:
+    legacy = detect_legacy_api(source)
+    if not legacy:
+        return
+    logger.warning(
+        "Loader: blocked incompatible legacy (Hikka/Heroku) module %s: %s",
+        origin, legacy,
+    )
+    raise LegacyApiError(LEGACY_API_BLOCK_MESSAGE)
+
+
+class _LoaderPackage(ModuleType):
+
+    def __setattr__(self, name: str, value: typing.Any) -> None:
+        for _mod in _LOADER_SUBMODULES:
+            if hasattr(_mod, name):
+                setattr(_mod, name, value)
+        super().__setattr__(name, value)
+
+    def __getattr__(self, name: str) -> typing.Any:
+        for _mod in _LOADER_SUBMODULES:
+            try:
+                return getattr(_mod, name)
+            except AttributeError:
+                continue
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+sys.modules[__name__].__class__ = _LoaderPackage
+
+
 class ConfigValue:
     def __init__(
         self,
@@ -120,21 +228,36 @@ class ConfigValue:
         default: typing.Any = None,
         doc: str = "",
         validator: typing.Any = None,
+        on_change: typing.Callable[[], typing.Any] | None = None,
     ) -> None:
         self.key = key
         self.default = default
         self.doc = doc
         self.validator = validator
+        self.on_change = on_change
         self.value = default
     def set(self, raw_value: typing.Any) -> None:
         if self.validator is not None:
-            from ..validators import ValidationError
+            from ...validators import ValidationError
             try:
                 self.value = self.validator.validate(raw_value)
             except ValidationError:
                 raise
         else:
             self.value = raw_value
+        if self.on_change is None:
+            return
+        try:
+            result = self.on_change()
+            if inspect.isawaitable(result):
+                import asyncio as _asyncio
+                coro = typing.cast("typing.Coroutine[typing.Any, typing.Any, typing.Any]", result)
+                try:
+                    _asyncio.get_running_loop().create_task(coro)
+                except RuntimeError:
+                    coro.close()
+        except Exception:
+            logger.exception("ConfigValue(%s): on_change raised", self.key)
 class ModuleConfig:
     def __init__(self, *values: ConfigValue) -> None:
         self._config: dict[str, ConfigValue] = {v.key: v for v in values}
@@ -184,7 +307,12 @@ class KitsuneModule:
     def get_args(self, event: "typing.Any") -> str:
         dispatcher = getattr(self.client, "_kitsune_dispatcher", None)
         prefix = dispatcher._prefix if dispatcher else "."
-        text = event.message.raw_text or event.message.text or ""
+        text = (
+            getattr(event.message, "_kitsune_alias_text", None)
+            or event.message.raw_text
+            or event.message.text
+            or ""
+        )
         if text.startswith(prefix):
             remainder = text[len(prefix):].lstrip()
             parts = remainder.split(maxsplit=1)
@@ -195,7 +323,24 @@ class KitsuneModule:
         lang = db.get("kitsune.core", "lang", "ru") if db else "ru"
         strings_key = f"strings_{lang}"
         strings = getattr(self, strings_key, None) or getattr(self, "strings_ru", None) or getattr(self, "strings_en", {})
-        text = strings.get(key, key) if isinstance(strings, dict) else key
+        text: typing.Any = None
+        if isinstance(strings, dict) and key in strings:
+            text = strings[key]
+        if text is None:
+            translator = getattr(getattr(self, "client", None), "_kitsune_translator", None)
+            if translator is not None:
+                try:
+                    translator.set_language(lang)
+                    qual = f"{type(self).__module__}.{type(self).__name__}"
+                    found = translator.get_module_string(qual, key, lang)
+                    if found is None:
+                        found = translator.get_module_string(type(self).__name__, key, lang)
+                    if found is not None:
+                        text = found
+                except Exception:
+                    pass
+        if text is None:
+            text = strings.get(key, key) if isinstance(strings, dict) else key
         dispatcher = getattr(getattr(self, "client", None), "_kitsune_dispatcher", None)
         prefix = dispatcher._prefix if dispatcher else "."
         if prefix != ".":
@@ -217,6 +362,320 @@ class KitsuneModule:
                     self.config[key] = saved
                 except Exception:
                     pass
+    def get_prefix(self, userbot: typing.Optional[str] = None) -> str:
+        loader = getattr(self.client, "_kitsune_loader", None)
+        if loader is not None and hasattr(loader, "get_prefix"):
+            return loader.get_prefix(userbot)
+        dispatcher = getattr(self.client, "_kitsune_dispatcher", None)
+        return dispatcher._prefix if dispatcher else "."
+    def lookup(self, name: str) -> typing.Optional["KitsuneModule"]:
+        loader = getattr(self.client, "_kitsune_loader", None)
+        if loader is None:
+            return None
+        module = loader.get_module(name)
+        if module is not None:
+            return module
+        target = name.lower()
+        for mod in loader.modules.values():
+            if type(mod).__name__.lower() == target:
+                return mod
+        return None
+    def get(self, key: str, default: typing.Any = None) -> typing.Any:
+        return self.db.get(type(self).__name__, key, default)
+    def set(self, key: str, value: typing.Any) -> "_SyncSetResult":
+        return _sync_set(self.db, type(self).__name__, key, value)
+    def pointer(
+        self,
+        key: str,
+        default: typing.Any = None,
+        item_type: typing.Any = None,
+    ) -> typing.Any:
+        return self.db.pointer(type(self).__name__, key, default, item_type)
+    async def invoke(
+        self,
+        command: str,
+        args: typing.Optional[str] = None,
+        peer: typing.Any = None,
+        message: typing.Any = None,
+        edit: bool = False,
+    ) -> typing.Any:
+        dispatcher = getattr(self.client, "_kitsune_dispatcher", None)
+        if dispatcher is None:
+            raise RuntimeError("invoke: dispatcher is not available")
+        entry = dispatcher._commands.get(command.lower())
+        if entry is None:
+            raise ValueError(f"Command {command} not found")
+        if message is None and peer is None:
+            raise ValueError("Either peer or message must be specified")
+        cmd = f"{self.get_prefix()}{command} {args or ''}".strip()
+        if peer is not None:
+            sent = await self.client.send_message(peer, cmd)
+        else:
+            target = typing.cast(typing.Any, message)
+            sent = await target.edit(cmd) if edit else await target.respond(cmd)
+        handler = entry[0]
+        from telethon import events as _tl_events
+        ev = _tl_events.NewMessage.Event(sent)
+        ev._client = self.client
+        await handler(ev)
+        return sent
+    async def animate(
+        self,
+        message: typing.Any,
+        frames: typing.List[str],
+        interval: typing.Union[float, int],
+        *,
+        inline: bool = False,
+    ) -> typing.Any:
+        from ... import utils
+        if interval < 0.1:
+            logger.warning(
+                "animate: interval raised to 0.1s to avoid floodwaits"
+            )
+            interval = 0.1
+        inline_api = getattr(self.client, "_kitsune_inline", None) or getattr(
+            self.client, "inline", None
+        )
+        for frame in frames:
+            is_inline_msg = type(message).__name__ == "InlineMessage"
+            if is_inline_msg and inline:
+                await message.edit(frame)
+            elif inline and inline_api is not None:
+                message = await inline_api.form(
+                    text=frame,
+                    message=message,
+                    reply_markup={"text": "\u0020\u2800", "data": "empty"},
+                )
+            else:
+                message = await utils.answer(message, frame)
+            await asyncio.sleep(interval)
+        return message
+    async def request_join(
+        self,
+        peer: typing.Any,
+        reason: str,
+        assure_joined: typing.Optional[bool] = False,
+    ) -> bool:
+        from ... import utils
+        from telethon.tl.types import Channel
+
+        inline_api = getattr(self.client, "_kitsune_inline", None) or getattr(
+            self.client, "inline", None
+        )
+        if inline_api is None:
+            raise RuntimeError("request_join: inline bot is not available")
+
+        channel = await self.client.get_entity(peer)
+        declined = self.db.get("kitsune.main", "declined_joins", [])
+        if getattr(channel, "id", None) in declined:
+            if assure_joined:
+                raise RuntimeError(
+                    f"You need to join @{getattr(channel, 'username', '?')} "
+                    "in order to use this module"
+                )
+            return False
+        if not isinstance(channel, Channel):
+            raise TypeError("`peer` field must be a channel")
+        if not getattr(channel, "left", True):
+            return True
+
+        event = asyncio.Event()
+        event.status = False  # type: ignore[attr-defined]
+
+        async def _approve(call: typing.Any) -> None:
+            try:
+                from telethon.tl.functions.channels import JoinChannelRequest
+                await self.client(JoinChannelRequest(channel))
+            except Exception:
+                logger.debug("request_join: join failed", exc_info=True)
+            event.status = True  # type: ignore[attr-defined]
+            event.set()
+            try:
+                await call.edit(
+                    f"\u2705 Joined <b>{utils.escape_html(channel.title)}</b>"
+                )
+            except Exception:
+                pass
+
+        async def _decline(call: typing.Any) -> None:
+            await self.db.set(
+                "kitsune.main",
+                "declined_joins",
+                list(set(declined + [channel.id])),
+            )
+            event.status = False  # type: ignore[attr-defined]
+            event.set()
+            try:
+                await call.edit(
+                    f"\u2716\ufe0f Declined joining "
+                    f"<b>{utils.escape_html(channel.title)}</b>"
+                )
+            except Exception:
+                pass
+
+        await inline_api.form(
+            text=(
+                f"\U0001f465 Module <b>{type(self).__name__}</b> requests to join "
+                f"<b>{utils.escape_html(channel.title)}</b>\n\n"
+                f"<b>Reason:</b> {utils.escape_html(reason)}"
+            ),
+            message=self.tg_id,
+            reply_markup=[
+                {"text": "\U0001f4ab Approve", "callback": _approve},
+                {"text": "\u2716\ufe0f Decline", "callback": _decline},
+            ],
+        )
+        await event.wait()
+        if assure_joined and not event.status:  # type: ignore[attr-defined]
+            raise RuntimeError(
+                f"You need to join @{getattr(channel, 'username', '?')} "
+                "in order to use this module"
+            )
+        return bool(event.status)  # type: ignore[attr-defined]
+class StopLoop(Exception):
+    pass
+
+
+async def _loop_stop_placeholder() -> bool:
+    return True
+
+
+class InfiniteLoop:
+
+    def __init__(
+        self,
+        func: typing.Callable,
+        interval: int,
+        autostart: bool,
+        wait_before: bool,
+        stop_clause: typing.Optional[str],
+    ) -> None:
+        self.func = func
+        self.interval = interval
+        self.autostart = autostart
+        self._wait_before = wait_before
+        self._stop_clause = stop_clause
+        self.status = False
+        self._module_instance: typing.Any = None
+        self._instance_ready = asyncio.Event()
+        self._task: typing.Optional["asyncio.Task"] = None
+        self._wait_for_stop = asyncio.Event()
+
+    @property
+    def module_instance(self) -> typing.Any:
+        return self._module_instance
+
+    @module_instance.setter
+    def module_instance(self, value: typing.Any) -> None:
+        self._module_instance = value
+        if value is None:
+            self._instance_ready.clear()
+        else:
+            self._instance_ready.set()
+
+    def _db_owner(self) -> str:
+        name = getattr(self.module_instance, "name", None) or type(
+            self.module_instance
+        ).__name__
+        return f"kitsune.loop.{name.lower()}"
+
+    def _flag_set(self, value: bool) -> None:
+        db = getattr(self.module_instance, "db", None)
+        if db is None or not self._stop_clause:
+            return
+        try:
+            db.set_sync(self._db_owner(), self._stop_clause, value)
+        except Exception:
+            logger.debug("InfiniteLoop: could not set stop_clause flag", exc_info=True)
+
+    def _flag_get(self) -> bool:
+        db = getattr(self.module_instance, "db", None)
+        if db is None or not self._stop_clause:
+            return True
+        try:
+            return bool(db.get(self._db_owner(), self._stop_clause, False))
+        except Exception:
+            return False
+
+    def _on_task_done(self, *_: typing.Any) -> None:
+        self._wait_for_stop.set()
+
+    def start(self, *args: typing.Any, **kwargs: typing.Any) -> None:
+        if self._task is None:
+            logger.debug("Started loop for method %s", self.func)
+            self._task = asyncio.ensure_future(self.actual_loop(*args, **kwargs))
+        else:
+            logger.debug("Attempted to start already running loop %s", self.func)
+
+    def stop(self, *args: typing.Any, **kwargs: typing.Any) -> "asyncio.Future":
+        if self._task:
+            logger.debug("Stopped loop for method %s", self.func)
+            self._wait_for_stop = asyncio.Event()
+            self.status = False
+            task = self._task
+            self._task = None
+            task.add_done_callback(self._on_task_done)
+            task.cancel()
+            return asyncio.ensure_future(self._wait_for_stop.wait())
+        logger.debug("Loop %s is not running", self.func)
+        return asyncio.ensure_future(_loop_stop_placeholder())
+
+    async def actual_loop(self, *args: typing.Any, **kwargs: typing.Any) -> None:
+        await self._instance_ready.wait()
+
+        if isinstance(self._stop_clause, str) and self._stop_clause:
+            self._flag_set(True)
+
+        self.status = True
+
+        try:
+            while self.status:
+                if self._wait_before:
+                    await asyncio.sleep(self.interval)
+
+                if (
+                    isinstance(self._stop_clause, str)
+                    and self._stop_clause
+                    and not self._flag_get()
+                ):
+                    break
+
+                try:
+                    await self.func(self.module_instance, *args, **kwargs)
+                except StopLoop:
+                    break
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    logger.exception("Error running loop %s!", self.func)
+
+                if not self._wait_before:
+                    await asyncio.sleep(self.interval)
+        finally:
+            self.status = False
+            self._wait_for_stop.set()
+
+    def __del__(self) -> None:
+        try:
+            if self._task:
+                self._task.cancel()
+        except Exception:
+            pass
+
+
+def loop(
+    interval: int = 5,
+    autostart: bool = False,
+    wait_before: bool = False,
+    stop_clause: typing.Optional[str] = None,
+) -> typing.Callable:
+
+    def wrapped(func: typing.Callable) -> InfiniteLoop:
+        return InfiniteLoop(func, interval, autostart, wait_before, stop_clause)
+
+    return wrapped
+
+
 def command(
     name: str | None = None,
     *,
@@ -234,13 +693,14 @@ def command(
     if isinstance(required, str) and not required.strip():
         raise ValueError("@command(required=...) string role name must be non-empty")
     def decorator(func: typing.Callable) -> typing.Callable:
-        func._is_command = True
-        func._command_name = name or func.__name__.removesuffix("_cmd")
-        func._required = required
-        func._aliases = aliases or []
-        func._ru_doc = ru_doc
-        func._en_doc = en_doc
-        func._incoming = bool(incoming) or isinstance(required, str)
+        meta = typing.cast(typing.Any, func)
+        meta._is_command = True
+        meta._command_name = name or func.__name__.removesuffix("_cmd")
+        meta._required = required
+        meta._aliases = aliases or []
+        meta._ru_doc = ru_doc
+        meta._en_doc = en_doc
+        meta._incoming = bool(incoming) or isinstance(required, str)
         return func
     return decorator
 def watcher(
@@ -248,8 +708,9 @@ def watcher(
     **tags: typing.Any,
 ) -> typing.Callable:
     def decorator(func: typing.Callable) -> typing.Callable:
-        func._is_watcher = True
-        func._watcher_filter = filter_func
+        meta = typing.cast(typing.Any, func)
+        meta._is_watcher = True
+        meta._watcher_filter = filter_func
         for tag_name, tag_value in tags.items():
             setattr(func, tag_name, tag_value)
         return func
@@ -259,428 +720,12 @@ def inline_handler(
     only_own: bool = False,
 ) -> typing.Callable:
     def decorator(func: typing.Callable) -> typing.Callable:
-        func._is_inline_handler = True
-        func._inline_only_own   = only_own
+        meta = typing.cast(typing.Any, func)
+        meta._is_inline_handler = True
+        meta._inline_only_own   = only_own
         return func
     return decorator
-class _ASTScanner(ast.NodeVisitor):
-    def __init__(self) -> None:
-        self.errors: list[str] = []
 
-    @staticmethod
-    def _is_dynamic_arg(node: ast.AST) -> bool:
-        if isinstance(node, ast.Constant):
-            return False
-        return True
-
-    def visit_Import(self, node: ast.Import) -> None:
-        for alias in node.names:
-            root = alias.name.split(".")[0]
-            if root in _BLOCKED_IMPORTS:
-                self.errors.append(f"Blocked import: {alias.name} (line {node.lineno})")
-        self.generic_visit(node)
-    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
-        if node.module:
-            root = node.module.split(".")[0]
-            if root in _BLOCKED_IMPORTS:
-                self.errors.append(f"Blocked import: {node.module} (line {node.lineno})")
-        self.generic_visit(node)
-    def visit_Call(self, node: ast.Call) -> None:
-
-        if isinstance(node.func, ast.Attribute) and node.func.attr == "import_module":
-            if isinstance(node.func.value, ast.Name) and node.func.value.id == "importlib":
-                if not node.args:
-                    self.errors.append(
-                        f"Blocked importlib.import_module without arguments (line {node.lineno})"
-                    )
-                elif self._is_dynamic_arg(node.args[0]):
-
-                    self.errors.append(
-                        f"Blocked dynamic importlib.import_module call (line {node.lineno})"
-                    )
-                else:
-                    root = str(node.args[0].value).split(".")[0]
-                    if root in _BLOCKED_IMPORTS:
-                        self.errors.append(
-                            f"Blocked importlib.import_module: {node.args[0].value!r} (line {node.lineno})"
-                        )
-        if isinstance(node.func, ast.Name) and node.func.id in ("exec", "eval"):
-            for arg in node.args:
-                if isinstance(arg, ast.Call):
-                    if isinstance(arg.func, ast.Attribute) and arg.func.attr in (
-                        "b64decode", "b32decode", "b16decode", "decode",
-                        "decompress", "decodestring",
-                    ):
-                        self.errors.append(
-                            f"Blocked obfuscated {node.func.id}() with encoded payload (line {node.lineno})"
-                        )
-                    if isinstance(arg.func, ast.Attribute) and isinstance(arg.func.value, ast.Call):
-                        inner = arg.func.value
-                        if isinstance(inner.func, ast.Name) and inner.func.id == "__import__":
-                            self.errors.append(
-                                f"Blocked obfuscated {node.func.id}() via __import__ chain (line {node.lineno})"
-                            )
-
-        if isinstance(node.func, ast.Name) and node.func.id == "__import__":
-            if not node.args:
-                self.errors.append(
-                    f"Blocked __import__ without arguments (line {node.lineno})"
-                )
-            elif self._is_dynamic_arg(node.args[0]):
-
-                self.errors.append(
-                    f"Blocked dynamic __import__ call (line {node.lineno})"
-                )
-            else:
-                root = str(node.args[0].value).split(".")[0]
-                if root in _BLOCKED_IMPORTS:
-                    self.errors.append(
-                        f"Blocked __import__: {node.args[0].value} (line {node.lineno})"
-                    )
-        if isinstance(node.func, ast.Name) and node.func.id == "getattr":
-            if len(node.args) >= 2 and isinstance(node.args[1], ast.Constant):
-                attr = str(node.args[1].value)
-                if attr in _BLOCKED_ATTRS or attr in _DANGEROUS_OS_ATTRS:
-                    self.errors.append(
-                        f"Blocked getattr access to {attr!r} (line {node.lineno})"
-                    )
-        if isinstance(node.func, ast.Name) and node.func.id in ("eval", "exec", "compile"):
-            if not node.args:
-                self.errors.append(
-                    f"Blocked {node.func.id} without arguments (line {node.lineno})"
-                )
-            elif self._is_dynamic_arg(node.args[0]):
-
-                self.errors.append(
-                    f"Blocked dynamic {node.func.id} call (line {node.lineno})"
-                )
-            else:
-                src = str(node.args[0].value)
-                low = src.lower()
-                bad_tokens = list(_BLOCKED_IMPORTS) + ["__import__", "__builtins__", "os.system", "os.popen", "os.exec"]
-                for blocked in bad_tokens:
-                    if blocked in low:
-                        self.errors.append(
-                            f"Blocked {node.func.id}() containing {blocked!r} (line {node.lineno})"
-                        )
-                        break
-        if isinstance(node.func, ast.Attribute):
-            attr_name = node.func.attr
-            base = node.func.value
-            if isinstance(base, ast.Name):
-                if base.id == "os" and attr_name in _DANGEROUS_OS_ATTRS:
-                    self.errors.append(
-                        f"Blocked os.{attr_name}() call (line {node.lineno})"
-                    )
-        self.generic_visit(node)
-    def visit_Attribute(self, node: ast.Attribute) -> None:
-        if node.attr in _BLOCKED_ATTRS:
-            if isinstance(node.value, ast.Name) and node.value.id in _BLOCKED_IMPORTS:
-                self.errors.append(
-                    f"Blocked attribute access: {node.value.id}.{node.attr} (line {node.lineno})"
-                )
-        if isinstance(node.value, ast.Name) and node.value.id == "os" and node.attr in _DANGEROUS_OS_ATTRS:
-            self.errors.append(
-                f"Blocked os.{node.attr} access (line {node.lineno})"
-            )
-        if node.attr in ("__builtins__", "__loader__", "__import__"):
-            self.errors.append(
-                f"Blocked dunder attribute access: {node.attr} (line {node.lineno})"
-            )
-        self.generic_visit(node)
-    def visit_Subscript(self, node: ast.Subscript) -> None:
-        if isinstance(node.value, ast.Name) and node.value.id == "__builtins__":
-            self.errors.append(
-                f"Blocked __builtins__ subscript access (line {node.lineno})"
-            )
-        if isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Name):
-            ns_func = node.value.func.id
-            if ns_func in ("globals", "locals", "vars"):
-                slice_node = node.slice
-                if isinstance(slice_node, ast.Index):
-                    slice_node = slice_node.value
-                if isinstance(slice_node, ast.Constant):
-                    key = str(slice_node.value)
-                    if (
-                        key in _BLOCKED_IMPORTS
-                        or key in _BLOCKED_ATTRS
-                        or key in _DANGEROUS_OS_ATTRS
-                        or key in ("os", "sys", "builtins", "__builtins__", "__import__")
-                    ):
-                        self.errors.append(
-                            f"Blocked {ns_func}()[{key!r}] subscript access (line {node.lineno})"
-                        )
-                else:
-                    self.errors.append(
-                        f"Blocked dynamic {ns_func}()[...] subscript access (line {node.lineno})"
-                    )
-        self.generic_visit(node)
-def _scan_ast(source: str, filename: str = "<module>") -> None:
-    try:
-        tree = ast.parse(source, filename=filename)
-    except SyntaxError as exc:
-        raise ModuleLoadError(f"Syntax error: {exc}") from exc
-    scanner = _ASTScanner()
-    scanner.visit(tree)
-    if scanner.errors:
-        raise ASTSecurityError(
-            "Security scan failed:\n" + "\n".join(f"  • {e}" for e in scanner.errors)
-        )
-_ast_cache: OrderedDict[str, ast.AST] = OrderedDict()
-
-def _scan_ast_with_cache(source: str, filename: str = "<module>") -> None:
-    key = hashlib.sha256(source.encode()).hexdigest()
-    cached = _ast_cache.get(key)
-    if cached is not None:
-        _ast_cache.move_to_end(key)
-        return
-    _scan_ast(source, filename)
-    _ast_cache[key] = ast.parse(source, filename=filename)
-    _ast_cache.move_to_end(key)
-    while len(_ast_cache) > _AST_CACHE_MAX_SIZE:
-        _ast_cache.popitem(last=False)
-
-def _ast_cache_clear() -> None:
-    _ast_cache.clear()
-def _extract_missing_package(exc: ImportError) -> str | None:
-    name = getattr(exc, "name", None)
-    if name:
-        return name.split(".")[0]
-    msg = str(exc)
-    import re
-    m = re.search(r"No module named ['\"]([a-zA-Z0-9_\-\.]+)['\"]", msg)
-    if m:
-        return m.group(1).split(".")[0]
-    return None
-_IMPORT_TO_PIP: dict[str, str] = {
-    "PIL": "Pillow",
-    "matplotlib": "matplotlib",
-    "numpy": "numpy",
-    "spotipy": "spotipy",
-    "mutagen": "mutagen",
-    "pydub": "pydub",
-    "qrcode": "qrcode",
-    "aiofiles": "aiofiles",
-    "fake_useragent": "fake-useragent",
-    "cv2": "opencv-python",
-    "yaml": "PyYAML",
-    "bs4": "beautifulsoup4",
-    "sklearn": "scikit-learn",
-    "dateutil": "python-dateutil",
-    "dotenv": "python-dotenv",
-    "Crypto": "pycryptodome",
-    "nacl": "PyNaCl",
-    "attr": "attrs",
-    "magic": "python-magic",
-    "usb": "pyusb",
-    "serial": "pyserial",
-    "google": "google-genai",
-}
-
-async def _run_cmd(args: list[str], timeout: float | None = None) -> tuple[bool, str]:
-    proc: asyncio.subprocess.Process | None = None
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            *args,
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        if timeout is not None:
-            try:
-                _, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-            except asyncio.TimeoutError:
-                try:
-                    proc.kill()
-                except ProcessLookupError:
-                    pass
-                try:
-                    await asyncio.wait_for(proc.wait(), timeout=5.0)
-                except asyncio.TimeoutError:
-                    pass
-                return False, f"command timed out after {timeout:.0f}s"
-        else:
-            _, stderr = await proc.communicate()
-        return proc.returncode == 0, stderr.decode(errors="replace")
-    except FileNotFoundError:
-        return False, "command not found"
-    except Exception as exc:
-        return False, str(exc)
-
-def _is_permission_error(stderr: str) -> bool:
-    _permission_markers = (
-        "permission denied",
-        "could not open lock file",
-        "are you root",
-        "operation not permitted",
-        "eacces",
-        "eperm",
-    )
-    low = stderr.lower()
-    return any(m in low for m in _permission_markers)
-
-def _build_pip_base_cmd() -> list[str]:
-    override = os.environ.get("KITSUNE_PIP_CMD", "").strip()
-    if override:
-        try:
-            parts = shlex.split(override)
-        except ValueError:
-            parts = []
-        if parts:
-            return parts
-    return [sys.executable, "-m", "pip"]
-
-def _record_pip_stderr(package: str, pip_name: str, stderr: str) -> None:
-    tail = (stderr or "").strip()
-    if len(tail) > _PIP_STDERR_TAIL:
-        tail = tail[-_PIP_STDERR_TAIL:]
-    _LAST_PIP_STDERR[package] = tail
-    if pip_name != package:
-        _LAST_PIP_STDERR[pip_name] = tail
-
-def get_last_pip_stderr(package: str) -> str:
-    return _LAST_PIP_STDERR.get(package, "")
-
-async def _pip_install(package: str) -> bool:
-    pip_name = _IMPORT_TO_PIP.get(package, package)
-    is_termux = "com.termux" in os.environ.get("PREFIX", "") or os.path.isdir("/data/data/com.termux")
-    _NAMESPACE_PKGS = {"google-genai", "google-generativeai", "google-cloud-storage", "google-auth"}
-    base = _build_pip_base_cmd()
-    args = base + ["install", pip_name, "--quiet", "--no-warn-script-location"]
-    if pip_name in _NAMESPACE_PKGS:
-        args.append("--upgrade")
-    if is_termux:
-        args += ["--prefer-binary", "--no-build-isolation"]
-
-    ok, stderr = await _run_cmd(args, timeout=_PIP_INSTALL_TIMEOUT)
-    if ok:
-        logger.info("Loader: pip installed %r successfully", pip_name)
-        _LAST_PIP_STDERR.pop(package, None)
-        _LAST_PIP_STDERR.pop(pip_name, None)
-        importlib.invalidate_caches()
-        return True
-
-    if _is_permission_error(stderr):
-        logger.info("Loader: pip install %r failed with permission error, retrying with sudo", pip_name)
-        ok, stderr = await _run_cmd(["sudo"] + args, timeout=_PIP_INSTALL_TIMEOUT)
-        if ok:
-            logger.info("Loader: pip installed %r successfully (sudo)", pip_name)
-            _LAST_PIP_STDERR.pop(package, None)
-            _LAST_PIP_STDERR.pop(pip_name, None)
-            importlib.invalidate_caches()
-            return True
-        logger.warning("Loader: pip install %r failed even with sudo: %s", pip_name, stderr[:300])
-    else:
-        logger.warning("Loader: pip install %r failed: %s", pip_name, stderr[:300])
-
-    _record_pip_stderr(package, pip_name, stderr)
-    return False
-
-_SYSTEM_UTIL_TO_PKG: dict[str, dict[str, str]] = {
-    "ffmpeg":    {"apt": "ffmpeg",       "termux": "ffmpeg"},
-    "ffprobe":   {"apt": "ffmpeg",       "termux": "ffmpeg"},
-    "convert":   {"apt": "imagemagick",  "termux": "imagemagick"},
-    "wget":      {"apt": "wget",         "termux": "wget"},
-    "curl":      {"apt": "curl",         "termux": "curl"},
-    "yt-dlp":    {"apt": "yt-dlp",       "termux": "yt-dlp"},
-    "gallery-dl":{"apt": "gallery-dl",   "termux": "gallery-dl"},
-}
-
-def _is_termux() -> bool:
-    import os as _os
-    return "com.termux" in _os.environ.get("PREFIX", "") or _os.path.isdir("/data/data/com.termux")
-
-async def _system_install(utility: str) -> bool:
-    pkg_map = _SYSTEM_UTIL_TO_PKG.get(utility)
-    if not pkg_map:
-        logger.warning("Loader: no system package known for utility %r", utility)
-        return False
-
-    if _is_termux():
-
-        cmd = ["termux-pkg", "install", "-y", pkg_map["termux"]]
-        ok, stderr = await _run_cmd(cmd)
-        if ok:
-            logger.info("Loader: system package for %r installed (termux)", utility)
-            return True
-        logger.warning("Loader: termux-pkg install %r failed: %s", utility, stderr[:200])
-        return False
-
-    cmd = ["apt-get", "install", "-y", "--no-install-recommends", pkg_map["apt"]]
-    ok, stderr = await _run_cmd(cmd)
-    if ok:
-        logger.info("Loader: system package for %r installed successfully", utility)
-        return True
-
-    if _is_permission_error(stderr):
-        logger.info(
-            "Loader: apt-get for %r failed with permission error, retrying with sudo", utility
-        )
-        ok, stderr = await _run_cmd(["sudo"] + cmd)
-        if ok:
-            logger.info("Loader: system package for %r installed successfully (sudo)", utility)
-            return True
-        logger.warning(
-            "Loader: apt-get install %r failed even with sudo: %s", utility, stderr[:200]
-        )
-    else:
-        logger.warning("Loader: apt-get install %r failed: %s", utility, stderr[:200])
-
-    return False
-
-async def _ensure_pip_deps(
-    deps: list[str],
-    progress_cb=None,
-    already_installed: set[str] | None = None,
-) -> tuple[list[str], list[str]]:
-    ok: list[str] = []
-    failed: list[str] = []
-    if already_installed is None:
-        already_installed = set()
-    for dep in deps:
-        if dep in already_installed:
-            ok.append(dep)
-            continue
-        pip_name = _IMPORT_TO_PIP.get(dep, dep)
-        if progress_cb:
-            try:
-                await progress_cb(
-                    f"📦 Устанавливаю зависимость <code>{pip_name}</code>..."
-                )
-            except Exception:
-                pass
-        if await _pip_install(dep):
-            ok.append(dep)
-            already_installed.add(dep)
-        else:
-            failed.append(pip_name)
-    return ok, failed
-
-async def _ensure_system_deps(
-    utils: list[str],
-    progress_cb=None,
-) -> tuple[list[str], list[str]]:
-    ok: list[str] = []
-    failed: list[str] = []
-    for util in utils:
-        if shutil.which(util) is not None:
-            ok.append(util)
-            continue
-        if progress_cb:
-            try:
-                await progress_cb(
-                    f"🔧 Устанавливаю системную утилиту <code>{util}</code>..."
-                )
-            except Exception:
-                pass
-        if await _system_install(util):
-            if shutil.which(util) is not None:
-                ok.append(util)
-            else:
-                logger.warning("Loader: %r installed but still not found in PATH", util)
-                failed.append(util)
-        else:
-            failed.append(util)
-    return ok, failed
 
 _INIT_SIGNATURE_CACHE: dict[type, int] = {}
 
@@ -689,7 +734,8 @@ def _module_param_count(mod_class: type) -> int:
     if cached is not None:
         return cached
     try:
-        sig = inspect.signature(mod_class.__init__)
+        init = typing.cast(typing.Any, getattr(mod_class, "__init__", None))
+        sig = inspect.signature(init)
         count = sum(1 for p in sig.parameters if p != "self")
     except (ValueError, TypeError):
         count = 2
@@ -746,19 +792,37 @@ class Loader:
         ]
         await asyncio.gather(*[self._load_one_builtin(p) for p in paths + pkg_paths])
     async def load_all_user(self) -> None:
-        user_dir = Path.home() / ".kitsune" / "modules"
+        from ...paths import data_dir as _kdd
+        user_dir = _kdd() / "modules"
         if not user_dir.exists():
             return
         paths = sorted(user_dir.glob("*.py"))
         await asyncio.gather(*[self._load_one_user(p) for p in paths])
-    async def load_from_url(self, url: str, progress_cb=None) -> KitsuneModule:
+    async def load_from_url(
+        self,
+        url: str,
+        progress_cb=None,
+        on_soft_findings: typing.Callable[
+            [list[str]], typing.Awaitable[bool]
+        ] | None = None,
+    ) -> KitsuneModule:
         import aiohttp
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as resp:
-                resp.raise_for_status()
-                source = await resp.text()
-        _scan_ast_with_cache(source, filename=url)
-        user_dir = Path.home() / ".kitsune" / "modules"
+        from ...net.http_pool import get_shared_session
+        session = get_shared_session()
+        async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+            resp.raise_for_status()
+            source = await resp.text()
+        _detect_legacy_or_raise(source, origin=url)
+        findings = _scan_ast_with_cache(source, filename=url)
+        if findings and on_soft_findings is not None:
+            proceed = await on_soft_findings(findings)
+            if not proceed:
+                raise ModuleLoadError(
+                    "Установка отменена пользователем: "
+                    "обнаружены подозрительные конструкции"
+                )
+        from ...paths import data_dir as _kdd
+        user_dir = _kdd() / "modules"
         user_dir.mkdir(parents=True, exist_ok=True)
         filename = url.rstrip("/").split("/")[-1]
         if not filename.endswith(".py"):
@@ -769,9 +833,24 @@ class Loader:
             path, is_builtin=False, progress_cb=progress_cb,
             already_scanned=True, prefetched_source=source,
         )
-    async def load_from_file(self, path: Path, progress_cb=None) -> KitsuneModule:
+    async def load_from_file(
+        self,
+        path: Path,
+        progress_cb=None,
+        on_soft_findings: typing.Callable[
+            [list[str]], typing.Awaitable[bool]
+        ] | None = None,
+    ) -> KitsuneModule:
         source = path.read_text(encoding="utf-8")
-        _scan_ast_with_cache(source, filename=str(path))
+        _detect_legacy_or_raise(source, origin=str(path))
+        findings = _scan_ast_with_cache(source, filename=str(path))
+        if findings and on_soft_findings is not None:
+            proceed = await on_soft_findings(findings)
+            if not proceed:
+                raise ModuleLoadError(
+                    "Установка отменена пользователем: "
+                    "обнаружены подозрительные конструкции"
+                )
         return await self._load_from_path(
             path, is_builtin=False, progress_cb=progress_cb,
             already_scanned=True, prefetched_source=source,
@@ -813,13 +892,23 @@ class Loader:
                         )
 
     async def unload_module(self, name: str) -> bool:
-        mod = self._modules.get(name.lower())
-        if mod is None:
+        found = self._modules.get(name.lower())
+        if found is None:
             return False
+        mod: KitsuneModule = found
         try:
             await mod.on_unload()
         except Exception:
             logger.exception("Loader: on_unload failed for %s", name)
+        for _, attr in inspect.getmembers(mod):
+            if isinstance(attr, InfiniteLoop):
+                logger.debug("Loader: stopping loop %s in %s", attr.func, name)
+                try:
+                    await asyncio.wait_for(attr.stop(), timeout=5.0)
+                except (asyncio.TimeoutError, Exception):
+                    logger.debug(
+                        "Loader: loop %s did not stop cleanly", attr.func, exc_info=True
+                    )
         for cmd_name in list(self._dispatcher._commands):
             entry = self._dispatcher._commands[cmd_name]
             handler = entry[0]
@@ -828,7 +917,7 @@ class Loader:
                 self._dispatcher.unregister_command(cmd_name)
         self._dispatcher.unregister_watchers_for(mod)
         self._unregister_inline_handlers_for(mod)
-        from ..events import bus
+        from ...events import bus
         bus.unsubscribe_all(mod)
         del self._modules[name.lower()]
         self._purge_sys_modules(mod)
@@ -861,6 +950,8 @@ class Loader:
         else:
             module_name = f"kitsune.modules.{path.stem}"
         source = prefetched_source if prefetched_source is not None else path.read_text(encoding="utf-8")
+        if not is_builtin:
+            _detect_legacy_or_raise(source, origin=str(path))
         if not is_builtin and not already_scanned:
             _scan_ast_with_cache(source, filename=str(path))
         spec = importlib.util.spec_from_file_location(
@@ -1014,10 +1105,11 @@ class Loader:
             except Exception as exc:
                 sys.modules.pop(module_name, None)
                 raise ModuleLoadError(f"Execution failed: {exc}") from exc
-        mod_class = self._find_module_class(py_module)
-        if mod_class is None:
+        found_class = self._find_module_class(py_module)
+        if found_class is None:
             sys.modules.pop(module_name, None)
             raise ModuleLoadError(f"No KitsuneModule subclass found in {path.name}")
+        mod_class = typing.cast("type[KitsuneModule]", found_class)
         if not getattr(mod_class, "name", ""):
             mod_class.name = mod_class.__name__
         if mod_class.requires:
@@ -1028,17 +1120,19 @@ class Loader:
                     f"Missing dependencies: {', '.join(missing)}"
                 )
         param_count = _module_param_count(mod_class)
+        mod: typing.Any
+        factory = typing.cast(typing.Any, mod_class)
         try:
             if param_count >= 2:
-                mod = mod_class(self._client, self._db)
+                mod = factory(self._client, self._db)
             else:
-                mod = mod_class()
+                mod = factory()
                 mod.client = self._client
                 mod._client = self._client
                 mod.db = self._db
                 mod._db = self._db
         except (ValueError, TypeError):
-            mod = mod_class(self._client, self._db)
+            mod = factory(self._client, self._db)
         mod.tg_id = self._client.tg_id
         mod._source_path = str(path)
         mod._py_module_name = module_name
@@ -1050,8 +1144,8 @@ class Loader:
         await mod.on_load()
         self._modules[mod.name.lower()] = mod
         self._register_module(mod)
-        from .._types import ModuleLoadedEvent
-        from ..events import bus
+        from ..._types import ModuleLoadedEvent
+        from ...events import bus
         bus.emit_sync(ModuleLoadedEvent(module_name=mod.name, is_builtin=is_builtin))
         logger.info("Loader: loaded %s v%s (%s)", mod.name, mod.version, path.name)
         return mod
@@ -1094,15 +1188,26 @@ class Loader:
                 return True
         return False
     def _register_module(self, mod: KitsuneModule) -> None:
+        for _, attr in inspect.getmembers(mod):
+            if isinstance(attr, InfiniteLoop):
+                attr.module_instance = mod
+                if attr.autostart:
+                    try:
+                        attr.start()
+                    except Exception:
+                        logger.exception(
+                            "Loader: failed to autostart loop in %s", mod.name
+                        )
         for _, method in inspect.getmembers(mod, predicate=inspect.ismethod):
+            meta = typing.cast(typing.Any, method)
             if getattr(method, "_is_command", False):
-                name = method._command_name
-                required = method._required
+                name = meta._command_name
+                required = meta._required
                 self._dispatcher.register_command(name, method, required, module=mod)
                 for alias in getattr(method, "_aliases", []):
                     self._dispatcher.register_command(alias, method, required, module=mod)
             if getattr(method, "_is_watcher", False):
-                filter_func = method._watcher_filter
+                filter_func = meta._watcher_filter
                 self._dispatcher.register_watcher(method, filter_func, module=mod)
             if getattr(method, "_is_inline_handler", False):
                 _inline = getattr(self._client, "inline", None)

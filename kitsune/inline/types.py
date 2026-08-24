@@ -56,3 +56,71 @@ def markup_from_buttons(
             result_row.append(d)
         result.append(result_row)
     return result
+class InlineMessage:
+
+    def __init__(
+        self,
+        manager: typing.Any,
+        unit_id: str,
+        inline_message_id: str = "",
+        telethon_msg: typing.Any = None,
+    ) -> None:
+        self.inline_manager = manager
+        self.unit_id = unit_id
+        self.inline_message_id = inline_message_id
+        self._telethon_msg = telethon_msg
+
+    @property
+    def unit(self) -> dict:
+        return self.inline_manager._units.get(self.unit_id, {})
+
+    @property
+    def form(self) -> dict:
+        unit = self.unit
+        return {"id": self.unit_id, **unit} if unit else {}
+
+    @property
+    def chat_id(self) -> int | None:
+        unit = self.unit
+        return (
+            unit.get("chat")
+            or unit.get("chat_id")
+            or getattr(self._telethon_msg, "chat_id", None)
+        )
+
+    @property
+    def message_id(self) -> int | None:
+        return self.unit.get("message_id") or getattr(self._telethon_msg, "id", None)
+
+    @property
+    def id(self) -> int | None:
+        return self.message_id
+    async def edit(
+        self,
+        text: str | None = None,
+        reply_markup: typing.Any = None,
+        **kwargs: typing.Any,
+    ) -> typing.Any:
+        return await self.inline_manager._edit_unit(
+            text=text,
+            reply_markup=reply_markup,
+            unit_id=self.unit_id,
+            inline_message_id=self.inline_message_id,
+            **kwargs,
+        )
+    async def delete(self) -> bool:
+        return await self.inline_manager._delete_unit_message(unit_id=self.unit_id)
+    async def unload(self) -> bool:
+        return await self.inline_manager._unload_unit(self.unit_id)
+    def __getattr__(self, item: str) -> typing.Any:
+        msg = self.__dict__.get("_telethon_msg")
+        if msg is not None and hasattr(msg, item):
+            return getattr(msg, item)
+        raise AttributeError(item)
+    def __bool__(self) -> bool:
+        return True
+    def __repr__(self) -> str:
+        return (
+            f"InlineMessage(unit_id={self.unit_id!r},"
+            f" inline_message_id={self.inline_message_id!r})"
+        )

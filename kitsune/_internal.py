@@ -76,8 +76,114 @@ def die(code: int = 0) -> typing.NoReturn:
         except Exception:
             pass
     sys.exit(code)
-def restart(*extra_args: str) -> typing.NoReturn:
+_RESTART_DONE = False
+
+
+async def graceful_restart(
+    client: typing.Any = None,
+    db: typing.Any = None,
+    *,
+    web: typing.Any = None,
+    accounts: typing.Any = None,
+    extra_tasks: typing.Iterable[asyncio.Task] | None = None,
+    timeout: float = 45.0,
+) -> None:
+    global _RESTART_DONE
+    if _RESTART_DONE:
+        logger.debug("graceful_restart: завершение уже выполнено, пропускаю")
+        return
+    _RESTART_DONE = True
+
+    if db is None and client is not None:
+        db = getattr(client, "_kitsune_db", None)
+    if web is None and client is not None:
+        web = getattr(client, "_kitsune_web", None)
+    if accounts is None and client is not None:
+        accounts = getattr(client, "_kitsune_accounts", None)
+
+    logger.info("graceful_restart: корректное завершение перед перезапуском...")
+
+    if db is not None and hasattr(db, "force_save"):
+        try:
+            await asyncio.wait_for(db.force_save(), timeout=10.0)
+        except Exception:
+            logger.exception("graceful_restart: force_save не удался")
+
+    if web is not None:
+        try:
+            await asyncio.wait_for(web.stop(), timeout=10.0)
+            logger.debug("graceful_restart: веб-сервер остановлен")
+        except Exception:
+            logger.exception("graceful_restart: остановка веб-сервера не удалась")
+
+    if accounts is not None and client is not None:
+        if getattr(client, "_kitsune_accounts", None) is None:
+            try:
+                client._kitsune_accounts = accounts
+            except Exception:
+                logger.debug("graceful_restart: не удалось привязать менеджер твинков")
+
+    if client is not None:
+        try:
+            from .core.lifecycle import shutdown as _lifecycle_shutdown
+            await asyncio.wait_for(_lifecycle_shutdown(client, db), timeout=timeout)
+        except Exception:
+            logger.exception("graceful_restart: lifecycle.shutdown не завершился штатно")
+    else:
+        if accounts is not None:
+            try:
+                await asyncio.wait_for(accounts.shutdown_all(), timeout=25.0)
+            except Exception:
+                logger.exception("graceful_restart: остановка твинков не удалась")
+        try:
+            from .core.lifecycle import _cancel_background_tasks
+            await _cancel_background_tasks()
+        except Exception:
+            logger.exception("graceful_restart: отмена фоновых задач не удалась")
+
+    if extra_tasks:
+        pending = [t for t in extra_tasks if t is not None and not t.done()]
+        for task in pending:
+            task.cancel()
+        if pending:
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*pending, return_exceptions=True), timeout=5.0
+                )
+            except Exception:
+                logger.debug("graceful_restart: часть задач не отменилась в срок")
+
+    logger.info("graceful_restart: завершение выполнено, можно замещать процесс")
+
+
+def _graceful_restart_blocking(
+    client: typing.Any = None,
+    db: typing.Any = None,
+    **kwargs: typing.Any,
+) -> None:
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        try:
+            asyncio.run(graceful_restart(client, db, **kwargs))
+        except Exception:
+            logger.exception("_internal.restart: корректное завершение не удалось")
+        return
+    if not _RESTART_DONE:
+        logger.warning(
+            "_internal.restart: вызван из работающего event loop — "
+            "перед вызовом ожидается await graceful_restart()"
+        )
+
+
+def restart(
+    *extra_args: str,
+    client: typing.Any = None,
+    db: typing.Any = None,
+    **shutdown_kwargs: typing.Any,
+) -> typing.NoReturn:
     logger.info("_internal.restart: перезапуск...")
+    _graceful_restart_blocking(client, db, **shutdown_kwargs)
     module_path = os.path.relpath(
         os.path.abspath(os.path.dirname(os.path.abspath(__file__)))
     )

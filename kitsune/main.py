@@ -5,38 +5,50 @@ import contextlib
 import json
 import logging
 import os
-import stat
 from pathlib import Path
 from typing import Any
 
 try:
     import uvloop as _uvloop
-    _uvloop.install()
     _HAVE_UVLOOP = True
 except ImportError:
     _HAVE_UVLOOP = False
+
+
+_runner = _uvloop.run if _HAVE_UVLOOP else asyncio.run
 
 from . import install_patches
 
 install_patches()
 
+from .paths import (
+    data_dir as _kitsune_data_dir,
+    config_path as _kitsune_config_path,
+    is_secondary as _kitsune_is_secondary,
+    in_docker as _kitsune_in_docker,
+    harden_dir as _kitsune_harden_dir,
+    DOCKER_DATA_DIR as _KITSUNE_DOCKER_DATA_DIR,
+)
+
 BASE_DIR = (
-    "/data"
-    if "DOCKER" in os.environ
+    _KITSUNE_DOCKER_DATA_DIR
+    if _kitsune_in_docker()
     else os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 )
 
 BASE_PATH = Path(BASE_DIR)
 
-CONFIG_PATH = BASE_PATH / "config.toml"
+DATA_DIR = _kitsune_data_dir()
 
-DATA_DIR = Path.home() / ".kitsune"
+if _kitsune_is_secondary():
+    CONFIG_PATH = _kitsune_config_path(DATA_DIR)
+else:
+    CONFIG_PATH = _kitsune_config_path(BASE_PATH)
 
 try:
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    _mode = stat.S_IMODE(DATA_DIR.stat().st_mode)
-    if not (_mode & stat.S_IWUSR):
-        os.chmod(DATA_DIR, 0o755)
+
+
+    _kitsune_harden_dir(DATA_DIR)
 except Exception:
     pass
 
@@ -100,12 +112,36 @@ def set_config_key(key: str, value: Any) -> None:
     _save_config(data)
 
 
+def _apply_low_power(args: argparse.Namespace) -> argparse.Namespace:
+    from . import low_power
+
+    try:
+        cfg = _load_raw_config()
+    except Exception:
+        cfg = {}
+    low_power.set_enabled(low_power.resolve(cfg))
+    if not low_power.enabled():
+        return args
+    disabled = []
+    if not getattr(args, "no_hydrogram", False) and low_power.disable_hydrogram(cfg):
+        args.no_hydrogram = True
+        disabled.append("hydrogram")
+    if not getattr(args, "no_web", False) and low_power.disable_web(cfg):
+        args.no_web = True
+        disabled.append("web")
+    logger.info(
+        "main: low_power mode enabled (disabled: %s)",
+        ", ".join(disabled) if disabled else "nothing",
+    )
+    return args
+
+
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Kitsune Userbot")
     p.add_argument("--no-web", action="store_true", help="Disable web interface")
     p.add_argument("--no-hydrogram", action="store_true", help="Disable Hydrogram secondary client")
     p.add_argument("--debug", action="store_true", help="Enable DEBUG logging")
-    return p.parse_args()
+    return _apply_low_power(p.parse_args())
 
 
 def main() -> None:
@@ -115,14 +151,10 @@ def main() -> None:
     if args.debug:
         logging.getLogger().setLevel(logging.DEBUG)
     try:
-        asyncio.run(startup(args, _load_raw_config, _save_config, _HAVE_UVLOOP))
+        _runner(startup(args, _load_raw_config, _save_config, _HAVE_UVLOOP))
     except KeyboardInterrupt:
         pass
     finally:
-                                                                      
-                                                                     
-                                                                         
-                                                                           
-                                                                  
-                                                                            
+
+
         os._exit(0)

@@ -8,10 +8,6 @@ from unittest.mock import MagicMock
 import pytest
 
 
-# --------------------------------------------------------------------------- #
-# Проблема 1, пункт 1: маппинг импорта `google` → pip-пакет `google-genai`.
-# --------------------------------------------------------------------------- #
-
 def test_import_to_pip_maps_google_to_new_sdk():
     from kitsune.core.loader import _IMPORT_TO_PIP
     assert _IMPORT_TO_PIP["google"] == "google-genai"
@@ -36,8 +32,6 @@ async def test_pip_install_google_uses_new_sdk_name(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_pip_install_google_genai_is_namespace_pkg(monkeypatch):
-    """google-genai должен ставиться как namespace-пакет (с --upgrade),
-    при этом старый google-generativeai остаётся в списке ради совместимости."""
     from kitsune.core import loader as ld
     captured = {}
 
@@ -50,10 +44,6 @@ async def test_pip_install_google_genai_is_namespace_pkg(monkeypatch):
     assert "--upgrade" in captured["args"]
 
 
-# --------------------------------------------------------------------------- #
-# Хелпер для сборки диспетчера с моками.
-# --------------------------------------------------------------------------- #
-
 def _make_dispatcher():
     from kitsune.core.dispatcher import CommandDispatcher
     client = MagicMock()
@@ -61,11 +51,6 @@ def _make_dispatcher():
     security = MagicMock()
     return CommandDispatcher(client, db, security, prefix=".")
 
-
-# --------------------------------------------------------------------------- #
-# Проблема 2, пункт 3: снятие watcher'а по владельцу-модулю,
-# в т.ч. для несвязанной функции без __self__.
-# --------------------------------------------------------------------------- #
 
 def test_unregister_watcher_by_owner_bound_method():
     disp = _make_dispatcher()
@@ -82,8 +67,6 @@ def test_unregister_watcher_by_owner_bound_method():
 
 
 def test_unregister_watcher_by_owner_unbound_function():
-    """Watcher, зарегистрированный как обычная функция/замыкание (без
-    __self__), всё равно должен сниматься по явно указанному владельцу."""
     disp = _make_dispatcher()
 
     class FakeModule:
@@ -130,8 +113,6 @@ def test_unregister_watcher_keeps_other_modules():
 
 
 def test_unregister_watcher_falls_back_to_self():
-    """Обратная совместимость: register_watcher без явного module по-прежнему
-    определяет владельца через __self__ и снимается по нему."""
     disp = _make_dispatcher()
 
     class FakeModule:
@@ -145,12 +126,7 @@ def test_unregister_watcher_falls_back_to_self():
     assert len(disp._watchers) == 0
 
 
-# --------------------------------------------------------------------------- #
-# Интеграционные тесты выгрузки: sys.modules и inline-хендлеры.
-# --------------------------------------------------------------------------- #
-
 class _FakeInline:
-    """Минимальный инлайн-менеджер, повторяющий контракт inline/core.py."""
 
     def __init__(self):
         self._inline_handlers = []
@@ -233,8 +209,6 @@ async def test_unload_purges_submodules(tmp_path, monkeypatch):
 
 
 def test_inline_manager_unregister_matches_rebound_method():
-    """unregister_inline_handler в inline/core.py должен снимать хендлер, даже
-    если передан не тот же самый bound-method объект (getmembers создаёт новый)."""
     from kitsune.inline import core as inline_core
 
     mgr = inline_core.InlineManager.__new__(inline_core.InlineManager)
@@ -273,10 +247,6 @@ async def test_unload_unregisters_inline_handlers(tmp_path):
     await loader.unload_module("inlinemod")
     assert len(inline._inline_handlers) == 0
 
-
-# --------------------------------------------------------------------------- #
-# Проблема 1, пункт 2: venv-осознанное окружение для .sh / терминала.
-# --------------------------------------------------------------------------- #
 
 def test_venv_aware_env_puts_sys_executable_dir_first_in_path():
     from kitsune.modules.terminal import _venv_aware_env

@@ -4,6 +4,9 @@ import os
 import typing
 from urllib.parse import urlparse
 
+if typing.TYPE_CHECKING:
+    from .types import InlineMessage
+
 logger = logging.getLogger(__name__)
 
 class ListGalleryHelper:
@@ -83,14 +86,20 @@ class Gallery:
             m = await self._invoke_unit(unit_id, message)
         except Exception:
             logger.exception("gallery: ошибка отправки inline unit")
-            del self._units[unit_id]
+            self._units.pop(unit_id, None)
             return False
-        await self._units[unit_id]["future"].wait()
-        del self._units[unit_id]["future"]
-        if hasattr(m, "id"):
+        if unit_id not in self._units:
+            return False
+        try:
+            await asyncio.wait_for(self._units[unit_id]["future"].wait(), timeout=30)
+        except asyncio.TimeoutError:
+            logger.warning("gallery: таймаут ожидания inline-ответа для unit %s", unit_id)
+        self._units[unit_id].pop("future", None)
+        if getattr(m, "id", None):
             self._units[unit_id]["message_id"] = m.id
-        if hasattr(m, "chat_id"):
-            self._units[unit_id]["chat"] = m.chat_id
+        chat = getattr(m, "chat_id", None) or getattr(m, "peer_id", None)
+        if chat is not None:
+            self._units[unit_id]["chat"] = chat
         if status_message:
             try:
                 await status_message.delete()
@@ -279,15 +288,17 @@ class Gallery:
                         "caption": caption,
                         "parse_mode": "HTML",
                         "reply_markup": self._gallery_markup(unit["uid"]),
-                        "thumb_url": "https://img.icons8.com/fluency/344/loading.png",
+                        "thumbnail_url": photo_url,
                     }
                     if is_gif:
                         result = InlineQueryResultGif(gif_url=photo_url, **common)
                     else:
                         result = InlineQueryResultPhoto(photo_url=photo_url, **common)
                     await inline_query.answer([result], cache_time=0)
-                    if "future" in unit:
-                        unit["future"].set()
                 except Exception:
                     logger.exception("gallery: ошибка ответа на inline query")
+                finally:
+                    fut = unit.get("future")
+                    if fut is not None:
+                        fut.set()
                 return

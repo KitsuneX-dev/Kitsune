@@ -1,638 +1,402 @@
-# Разработка модулей для Kitsune
+# Как писать модули для Kitsune
 
-Полная документация по API модулей. Разделы расположены в порядке изучения — от базового к сложному.
+Простое руководство по написанию собственных модулей. Без лишней теории — только
+то, что реально нужно, чтобы твой модуль заработал в версии 1.4.4.
 
----
-
-## Содержание
-
-1. [Расположение модулей](#расположение-модулей)
-2. [Минимальный модуль](#минимальный-модуль)
-3. [Атрибуты класса](#атрибуты-класса)
-4. [Команды — декоратор @command](#команды--декоратор-command)
-5. [Уровни доступа](#уровни-доступа)
-6. [Кастомные роли](#кастомные-роли)
-7. [Входящие команды — incoming=True](#входящие-команды--incomingtrue)
-8. [Watchers](#watchers)
-9. [База данных](#база-данных)
-10. [Конфиг модуля](#конфиг-модуля)
-11. [Локализация](#локализация)
-12. [Хуки on_load и on_unload](#хуки-on_load-и-on_unload)
-13. [EventBus](#eventbus)
-14. [Зависимости между модулями](#зависимости-между-модулями)
-15. [Автоустановка зависимостей](#автоустановка-зависимостей)
-16. [Ограничения безопасности](#ограничения-безопасности)
-17. [Доступные атрибуты модуля](#доступные-атрибуты-модуля)
-18. [Примеры](#примеры)
+Сначала прочитай первые три раздела, этого уже хватит для простого модуля.
+Остальное — по мере надобности.
 
 ---
 
-## Расположение модулей
+## Куда класть модуль
 
-Пользовательские модули хранятся в `~/.kitsune/modules/`. Способы добавления:
+Два способа:
 
-- Поместить `.py` файл непосредственно в директорию
-- Установить через `.loadmod` — по URL или из локального файла
-- Создать пакет — директорию с файлом `__init__.py` внутри
+1. **Через Telegram** — команды `.loadmod` (ответь на `.py`-файл) или `.dlmod`
+   (по ссылке или имени модуля из репозитория).
+2. **Вручную** — положи файл `мой_модуль.py` в папку `~/.kitsune/modules/`.
+   Можно и папку с файлом `__init__.py` внутри, если модуль большой.
 
-При запуске Kitsune загружает всё содержимое этой директории. Обязательное условие — файл должен содержать класс-наследник `KitsuneModule`. Файлы без такого класса игнорируются без ошибок.
+Kitsune при запуске подхватывает всё, что лежит в этой папке. Единственное
+обязательное условие — в файле должен быть класс-наследник `KitsuneModule`.
+Файл без такого класса просто пропускается, ошибок не будет.
 
 ---
 
-## Минимальный модуль
+## Самый простой модуль
 
 ```python
 from kitsune.core.loader import KitsuneModule, command
 from kitsune.core.security import OWNER
 
 class HelloModule(KitsuneModule):
-    name        = "hello"
-    description = "Простой тестовый модуль"
-    author      = "вы"
-    version     = "1.0.0"
+    name = "hello"
+    description = "Приветствие"
+    author = "ты"
+    version = "1.0.0"
 
     @command("hello", required=OWNER)
-    async def hello_cmd(self, event) -> None:
+    async def hello_cmd(self, event):
         await event.reply("Привет от Kitsune! 👋")
 ```
 
-Сохраните в `~/.kitsune/modules/hello.py` и загрузите через `.loadmod`.
+Что тут важно:
+
+- класс наследуется от `KitsuneModule`;
+- `name` — короткое и уникальное имя, по нему модуль виден в `.help`;
+- `@command("hello")` — создаёт команду `.hello`;
+- `required=OWNER` — команду можешь вызывать только ты.
+
+Сохрани файл и загрузи через `.loadmod`.
 
 ---
 
 ## Атрибуты класса
 
-| Атрибут | Тип | Обязателен | Описание |
-|---|---|---|---|
-| `name` | `str` | да | Уникальный идентификатор модуля |
-| `description` | `str` | желательно | Отображается в `.help` |
-| `author` | `str` | нет | Информационное поле |
-| `version` | `str` | нет | Любой формат, принято `"1.0.0"` |
-| `icon` | `str` | нет | Эмодзи-иконка, по умолчанию `📦` |
-| `category` | `str` | нет | Категория в `.help`, по умолчанию `"other"` |
-| `requires` | `list[str]` | нет | Имена модулей, которые должны быть загружены раньше |
-| `role_db_owner` | `str` | нет | Переопределяет пространство имён БД для кастомных ролей |
+Можно задать прямо в классе:
 
-Если `name` не задан — используется имя класса.
+| Атрибут | Зачем | Обязателен? |
+|---|---|---|
+| `name` | Имя модуля, должно быть уникальным | да |
+| `description` | Описание, показывается в `.help` | желательно |
+| `author` | Автор | нет |
+| `version` | Версия, например `"1.0.0"` | нет |
+| `icon` | Эмодзи-иконка, по умолчанию 📦 | нет |
+| `category` | Группа в `.help`, по умолчанию `"other"` | нет |
+| `requires` | Имена модулей, которые должны быть загружены раньше | нет |
+| `role_db_owner` | Хранилище для кастомных ролей (см. ниже) | нет |
+| `pip_requires` | Питоновские библиотеки для автоустановки | нет |
+| `system_requires` | Системные утилиты (например `"ffmpeg"`) | нет |
+
+Если `name` не написать, Kitsune возьмёт имя класса.
 
 ---
 
-## Команды — декоратор @command
+## Команды
+
+Команда делается декоратором `@command`:
 
 ```python
-from kitsune.core.loader import command
-from kitsune.core.security import OWNER, SUDO
-
-@command("say", required=OWNER, aliases=["echo"])
-async def say_cmd(self, event) -> None:
+@command("repeat", required=OWNER, aliases=["r"])
+async def repeat_cmd(self, event):
     text = self.get_args(event)
     if not text:
-        await event.reply("Укажите текст")
+        await event.reply("Напиши текст после команды")
         return
     await event.reply(text)
 ```
 
-**Параметры декоратора:**
-
-| Параметр | Тип | По умолчанию | Описание |
-|---|---|---|---|
-| `name` | `str` | имя метода без `_cmd` | Имя команды без префикса |
-| `required` | `int` или `str` | `0` | Уровень доступа |
-| `aliases` | `list[str]` | `None` | Дополнительные псевдонимы команды |
-| `incoming` | `bool` | `False` | Реагировать на команды от других пользователей |
-
-**`self.get_args(event)`** возвращает всё, что идёт после команды, с уже отрезанным префиксом и именем команды.
+- **Первый аргумент** — имя команды без точки. Если не указать, возьмётся имя
+  метода без окончания `_cmd`.
+- **`required`** — кто может вызывать. Почти всегда ставь `OWNER`.
+- **`aliases`** — дополнительные имена, тут `.r` тоже сработает.
+- **`get_args(event)`** — всё, что написано после имени команды.
 
 ---
 
-## Уровни доступа
+## Кто может вызывать команду
 
-Импортируются из `kitsune.core.security`:
+Уровни доступа лежат в `kitsune.core.security`:
+
+| Константа | Кто |
+|---|---|
+| `OWNER` | Владелец юзербота (ты) |
+| `SUDO` | Доверенные, добавленные через `.sudoadd` |
+| `SUPPORT` | Уровень поддержки |
+| `GROUP_OWNER` | Создатель чата |
+| `GROUP_ADMIN` | Администратор чата |
+| `GROUP_MEMBER` | Любой участник чата |
+| `PM` | Личные сообщения |
+| `EVERYONE` | Вообще все |
+
+Можно комбинировать через `|`:
 
 ```python
-from kitsune.core.security import OWNER, SUDO, SUPPORT, EVERYONE, GROUP_ADMIN
+@command("kick", required=OWNER | SUDO)
 ```
 
-| Константа | Кто имеет доступ |
-|---|---|
-| `OWNER` | Только владелец. По умолчанию для всех встроенных команд |
-| `SUDO` | Доверенные пользователи, добавленные через `.sudoadd` |
-| `SUPPORT` | Пользователи уровня поддержки |
-| `GROUP_ADMIN` | Любой администратор группы |
-| `GROUP_OWNER` | Создатель группы |
-| `EVERYONE` | Все пользователи, включая незнакомцев |
-| `PM` | Только в личных сообщениях |
-
-Уровни можно комбинировать через `|`:
+По умолчанию Kitsune реагирует только на **твои** сообщения. Чтобы команду мог
+вызвать кто-то ещё, добавь `incoming=True`:
 
 ```python
-@command("modcmd", required=OWNER | SUDO)
+@command("ping", required=SUDO, incoming=True)
+async def ping_cmd(self, event):
+    await event.reply("🏓 Понг!")
 ```
 
 ---
 
 ## Кастомные роли
 
-Кастомные роли позволяют открыть доступ к конкретным командам без выдачи глобального sudo. Роль задаётся строкой в `required=`.
+Иногда не хочется давать человеку весь sudo, а нужен доступ только к паре
+команд. Для этого есть текстовые роли — просто напиши строку в `required`:
 
 ```python
-RP_USER = "rp_user"
+GAMER = "gamer"
 
-class RPModule(KitsuneModule):
-    name = "rpmod"
+class GameModule(KitsuneModule):
+    name = "gamemod"
 
-    @command("hug", required=RP_USER)
-    async def hug_cmd(self, event) -> None:
-        ...
+    @command("play", required=GAMER)
+    async def play_cmd(self, event):
+        await event.reply("Играем! 🎮")
 
-    @command("rpadd", required=OWNER)
-    async def rpadd_cmd(self, event) -> None:
-        target = await self.client.get_entity(event.message.mentioned_users[0])
-        users = self.db.get(self.name, "rp_user_users", [])
-        if target.id not in users:
-            users.append(target.id)
-            await self.db.set(self.name, "rp_user_users", users)
-        await event.reply(f"✅ {target.first_name} получил доступ к RP-командам")
-
-    @command("rpdel", required=OWNER)
-    async def rpdel_cmd(self, event) -> None:
-        target = await self.client.get_entity(event.message.mentioned_users[0])
-        users = [u for u in self.db.get(self.name, "rp_user_users", []) if u != target.id]
-        await self.db.set(self.name, "rp_user_users", users)
-        await event.reply(f"✅ Доступ у {target.first_name} отозван")
+    @command("gameradd", required=OWNER)
+    async def gameradd_cmd(self, event):
+        reply = await event.message.get_reply_message()
+        if not reply or not reply.sender_id:
+            await event.reply("Ответь на сообщение нужного пользователя")
+            return
+        uid = reply.sender_id
+        users = self.db.get(self.name, "gamer_users", [])
+        if uid not in users:
+            users.append(uid)
+            await self.db.set(self.name, "gamer_users", users)
+        await event.reply("✅ Доступ выдан")
 ```
 
-**Как работает изнутри:**
+Тут `self.name` — это `"gamemod"`, поэтому список пользователей роли `gamer`
+хранится под ключом `gamemod.gamer_users`. Именно так Kitsune сам ищет роли, так
+что ничего дополнительно настраивать не надо.
 
-Диспетчер ищет список пользователей в БД по ключу:
-
-```
-<module_db_owner>.<role_name>_users
-```
-
-По умолчанию `module_db_owner` совпадает с `module.name`. Для роли `"rp_user"` в модуле `rpmod` ключ будет `rpmod.rp_user_users`.
-
-Именно поэтому `rpadd_cmd` обращается к:
-
-```python
-self.db.get(self.name, "rp_user_users", [])
-#           ^^^^^^^^^ — module_db_owner
-#                        ^^^^^^^^^^^^^^ — <role_name>_users
-```
-
-Чтобы несколько модулей разделяли один список ролей — переопределите `role_db_owner`:
-
-```python
-class RPModule(KitsuneModule):
-    name          = "rpmod"
-    role_db_owner = "shared_rp"
-```
-
-> Команды со строковым значением `required` автоматически получают `incoming=True` — без этого никто кроме владельца не смог бы их вызвать. Явно писать `incoming=True` не требуется, но допустимо.
+Если хочешь, чтобы одна роль была общей для нескольких модулей, задай
+`role_db_owner = "общее_имя"` — тогда роли будут лежать в этом общем хранилище.
 
 ---
 
-## Входящие команды — incoming=True
+## Watchers — реакция без команды
 
-По умолчанию Kitsune реагирует только на исходящие сообщения владельца. Чтобы команду мог вызвать другой пользователь (sudo, co-owner или участник кастомной роли) — добавьте `incoming=True`:
-
-```python
-@command("ping", required=SUDO, incoming=True)
-async def ping_cmd(self, event) -> None:
-    await event.reply("🏓 Pong!")
-```
-
-Диспетчер проверяет права отправителя через `SecurityManager`. При отказе — сообщение молча игнорируется.
-
-**Когда указывать `incoming=True` явно:**
-- `required=SUDO` или `required=OWNER` — чтобы они могли вызывать команду
-- `required=EVERYONE` — команда доступна всем в чате
-
-**Когда не нужно:**
-- `required="role_name"` — `incoming=True` включается автоматически
-
----
-
-## Watchers
-
-Watchers реагируют на сообщения без команды — срабатывают на каждое подходящее сообщение.
+Watcher срабатывает на сообщения, в которых нет команды:
 
 ```python
 from kitsune.core.loader import watcher
 
 @watcher()
-async def on_message(self, event) -> None:
+async def hello_watcher(self, event):
     text = event.message.raw_text or ""
-    if "купить подписку" in text.lower():
-        await event.reply("Нет.")
+    if "привет" in text.lower():
+        await event.reply("Привет! 👋")
 ```
 
-Можно передать фильтр-функцию:
-
-```python
-def only_groups(event) -> bool:
-    return event.is_group
-
-@watcher(filter_func=only_groups)
-async def group_watcher(self, event) -> None:
-    ...
-```
-
-> Watcher без фильтра срабатывает на каждое сообщение. Не выполняйте в нём тяжёлых операций.
+Watcher без условия будет срабатывать на **каждое** сообщение, поэтому внутри
+всегда проверяй текст сам и не делай ничего тяжёлого.
 
 ---
 
 ## База данных
 
-В каждом модуле доступен `self.db` — хранилище ключ-значение, разбитое по пространствам имён.
+У модуля есть `self.db` — простое хранилище «ключ → значение», которое переживает
+перезапуск:
 
 ```python
-# Сохранить (async)
-await self.db.set("mymodule", "counter", 42)
+# прочитать (третий аргумент — значение по умолчанию)
+count = self.db.get(self.name, "count", 0)
 
-# Сохранить (sync — для on_load и других синхронных контекстов)
-self.db.set_sync("mymodule", "counter", 42)
-
-# Прочитать (третий аргумент — значение по умолчанию)
-counter = self.db.get("mymodule", "counter", 0)
+# записать
+await self.db.set(self.name, "count", count + 1)
 ```
 
-Данные сохраняются между перезапусками. Рекомендуется использовать `self.name` как пространство имён — это исключает конфликты с другими модулями.
+- Первый аргумент — «владелец» записи. Удобно использовать `self.name`, чтобы не
+  пересечься с другими модулями.
+- Значения можно хранить любые простые: строку, число, true/false, список, словарь.
 
-**Допустимые типы значений:** любые JSON-совместимые — `str`, `int`, `float`, `bool`, `list`, `dict`.
+```python
+class CounterModule(KitsuneModule):
+    name = "counter"
+
+    @command("count", required=OWNER)
+    async def count_cmd(self, event):
+        n = self.db.get(self.name, "count", 0) + 1
+        await self.db.set(self.name, "count", n)
+        await event.reply("Счётчик: " + str(n))
+```
 
 ---
 
-## Конфиг модуля
+## Настройки модуля
 
-Чтобы пользователь мог настраивать параметры модуля через `.config` — объявите `self.config` в `__init__`:
+Если хочешь, чтобы пользователь менял что-то через `.config`, опиши настройки:
 
 ```python
-from kitsune.core.loader import ModuleConfig, ConfigValue
+from kitsune.core.loader import KitsuneModule, command, ModuleConfig, ConfigValue
+from kitsune.core.security import OWNER
 from kitsune.validators import Boolean, Integer, String
 
-class MyModule(KitsuneModule):
-    name = "mymod"
+class GreetModule(KitsuneModule):
+    name = "greetmod"
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.config = ModuleConfig(
-            ConfigValue(
-                "enabled",
-                default=True,
-                doc="Включить или отключить модуль",
-                validator=Boolean(),
-            ),
-            ConfigValue(
-                "max_count",
-                default=10,
-                doc="Максимальное количество повторений (1–100)",
-                validator=Integer(minimum=1, maximum=100),
-            ),
-            ConfigValue(
-                "prefix_text",
-                default="",
-                doc="Текст, добавляемый в начало каждого ответа",
-                validator=String(max_len=50),
-            ),
+            ConfigValue("name", default="друг", doc="Кого приветствовать",
+                        validator=String(max_len=50)),
+            ConfigValue("times", default=1, doc="Сколько раз поздороваться",
+                        validator=Integer(minimum=1, maximum=5)),
+            ConfigValue("silent", default=False, doc="Не отвечать совсем",
+                        validator=Boolean()),
         )
+
+    @command("hello", required=OWNER)
+    async def hello_cmd(self, event):
+        if self.config["silent"]:
+            return
+        times = self.config["times"]
+        name = self.config["name"]
+        await event.reply(("Привет, " + name + "! 👋\n") * times)
 ```
 
-Читать значение:
+Значения читаются через `self.config["ключ"]`, а сами настройки сохраняются в БД
+автоматически.
 
-```python
-if self.config["enabled"]:
-    count = self.config["max_count"]
-```
+Что можно использовать как `validator` (из `kitsune.validators`):
 
-Kitsune автоматически восстанавливает сохранённые значения из БД при загрузке модуля.
-
-**Доступные валидаторы** из `kitsune.validators`:
-
-| Валидатор | Описание |
-|---|---|
-| `Boolean()` | true/false, yes/no, 1/0 |
-| `Integer(minimum=..., maximum=...)` | Целое число с опциональными границами |
-| `Float(...)` | Дробное число |
-| `String(min_len=..., max_len=..., regex=...)` | Строка с опциональными ограничениями |
-| `Choice(choices=[...])` | Одно значение из фиксированного списка |
-| `MultiChoice(choices=[...])` | Несколько значений из фиксированного списка |
-| `Link()` | URL |
-| `TelegramID()` | Telegram ID пользователя или канала |
-| `Hidden()` | Строка, не отображается в `.config` — для токенов и секретов |
-| `RegExp(pattern)` | Строка по регулярному выражению |
-| `Series(...)` | Список однотипных значений |
-| `Union(validators=[...])` | Принимает одно из нескольких типов |
+- `Boolean()` — да/нет, true/false, 1/0, on/off
+- `Integer(minimum=..., maximum=...)` — целое число
+- `Float(minimum=..., maximum=...)` — дробное число
+- `String(min_len=..., max_len=...)` — строка
+- `Choice([...])` — одно значение из списка
+- `MultiChoice([...])` — несколько значений из списка
+- `Link()` — ссылка http/https
+- `TelegramID()` — ID пользователя или чата
+- `Hidden()` — секрет, который не видно в `.config` (токены и пароли)
+- `RegExp("образец")` — строка, подходящая под регулярное выражение
+- `Series(...)` — список однотипных значений
+- `Union(...)` — любое из нескольких проверяемых значений
 
 ---
 
 ## Локализация
 
-Храните строки в классе — Kitsune выберет нужный язык автоматически:
+Храни тексты отдельно для языков, а выводи через `self.strings`:
+
+```python
+class HelloModule(KitsuneModule):
+    name = "hello"
+
+    strings_ru = {"hello": "Привет, {name}!"}
+    strings_en = {"hello": "Hello, {name}!"}
+
+    @command("hello", required=OWNER)
+    async def hello_cmd(self, event):
+        await event.reply(self.strings("hello", name="друг"))
+```
+
+Kitsune сам возьмёт нужный язык, а `{name}` подставится из аргументов. Если языка
+нет — откат на русский, потом на английский.
+
+---
+
+## on_load и on_unload
+
+`on_load` вызывается один раз после загрузки модуля, `on_unload` — перед выгрузкой:
+
+```python
+import asyncio
+
+async def on_load(self):
+    self._task = asyncio.create_task(self._loop())
+
+async def on_unload(self):
+    self._task.cancel()
+
+async def _loop(self):
+    while True:
+        await asyncio.sleep(60)
+        # что-то раз в минуту
+```
+
+Правило простое: всё, что запустил в `on_load`, погаси в `on_unload`. Иначе после
+перезагрузки модуля останутся висеть фоновые задачи.
+
+---
+
+## Зависимости
+
+Если модулю нужен другой модуль — укажи явно, и Kitsune выдаст понятную ошибку,
+а не молча упадёт:
 
 ```python
 class MyModule(KitsuneModule):
     name = "mymod"
-
-    strings_ru = {
-        "done":  "✅ Готово",
-        "error": "❌ Ошибка: {msg}",
-    }
-
-    strings_en = {
-        "done":  "✅ Done",
-        "error": "❌ Error: {msg}",
-    }
-
-    @command("test", required=OWNER)
-    async def test_cmd(self, event) -> None:
-        await event.reply(self.strings("done"))
-        # С подстановкой:
-        # await event.reply(self.strings("error", msg="что-то пошло не так"))
+    requires = ["ping"]
 ```
 
-Если строки для текущего языка отсутствуют — fallback на `strings_ru`, затем на `strings_en`. Если не найдено ничего — возвращается ключ как есть.
-
----
-
-## Хуки on_load и on_unload
+Если нужна сторонняя библиотека — просто импортируй её как обычно. Загрузчик
+попробует поставить её через pip сам:
 
 ```python
-async def on_load(self) -> None:
-    # Вызывается один раз после загрузки модуля.
-    # Подходит для инициализации и запуска фоновых задач.
-    self._task = asyncio.create_task(self._background_loop())
-
-async def on_unload(self) -> None:
-    # Вызывается перед выгрузкой модуля.
-    # Здесь необходимо отменить задачи и закрыть соединения.
-    if hasattr(self, "_task"):
-        self._task.cancel()
+import PIL  # поставится как Pillow, если её нет
 ```
 
-> Если модуль запускает фоновые задачи — **обязательно** отменяйте их в `on_unload`. Задачи, которые не были отменены, продолжат работать после выгрузки модуля.
-
----
-
-## EventBus
-
-Kitsune предоставляет внутреннюю шину событий для взаимодействия между модулями:
-
-```python
-from kitsune.events import bus
-from kitsune._types import ModuleLoadedEvent
-
-async def on_load(self) -> None:
-    bus.subscribe(ModuleLoadedEvent, self._on_module_loaded)
-
-async def on_unload(self) -> None:
-    bus.unsubscribe(ModuleLoadedEvent, self._on_module_loaded)
-    # Или отписать все обработчики модуля сразу:
-    # bus.unsubscribe_all(self)
-
-async def _on_module_loaded(self, event: ModuleLoadedEvent) -> None:
-    print(f"Загружен модуль: {event.module_name}")
-```
-
-**Доступные события** из `kitsune._types`:
-
-| Событие | Поля | Описание |
-|---|---|---|
-| `ModuleLoadedEvent` | `module_name`, `is_builtin` | Модуль загружен |
-| `ModuleUnloadedEvent` | `module_name` | Модуль выгружен |
-| `ConfigChangedEvent` | `module_name`, `key`, `old_value`, `new_value` | Изменилось значение конфига |
-| `PrefixChangedEvent` | `old_prefix`, `new_prefix` | Изменился префикс команд |
-| `SecurityChangedEvent` | `action`, `user_id`, `role` | Изменились права пользователя |
-
-> Если подписались в `on_load` — **обязательно** отпишитесь в `on_unload`. При повторной загрузке модуля будут зарегистрированы дублирующиеся обработчики.
-
----
-
-## Зависимости между модулями
-
-Если ваш модуль требует наличия другого — укажите это явно:
+Для известных библиотек маппинг уже есть (`PIL` → `Pillow`, `cv2` →
+`opencv-python`, `yaml` → `PyYAML` и т.д.). Если чего-то с системного уровня
+(например `ffmpeg`), укажи его отдельно:
 
 ```python
 class MyModule(KitsuneModule):
-    name     = "mymod"
-    requires = ["ping", "someothermodule"]
+    name = "mymod"
+    system_requires = ["ffmpeg"]
 ```
-
-Если указанные модули не загружены — загрузчик откажет в загрузке вашего с понятным сообщением об ошибке. Это предпочтительнее, чем получить `AttributeError` в рантайме.
 
 ---
 
-## Автоустановка зависимостей
+## Безопасность
 
-Если модуль использует стороннюю библиотеку — загрузчик попытается установить её через pip автоматически. Импортируйте как обычно:
+Перед запуском модуля Kitsune прогоняет его код через статический сканер.
+Запомни главное: это **дополнительный защитный слой, а не песочница**. Он не даёт
+стопроцентной гарантии.
+
+Сканер отсекает очевидно вредоносные вещи:
+
+- запуск внешних процессов (`subprocess`, `os.system` и похожее);
+- `eval` / `exec` / `compile` с непонятным содержимым;
+- доступ к внутренностям Python вроде `__subclasses__`, `__globals__`,
+  `__builtins__` и обходные пути через них;
+- чтение чужих сессий и ключей.
+
+Но хитрый код, который прячет свои действия, сканер может пропустить. Поэтому:
+
+- ставь модули только из источников, которым доверяешь;
+- чужие модули сперва читай глазами;
+- не раздавай свою сессию и токены.
+
+Для запросов в интернет можно пользоваться общей сессией:
 
 ```python
-import aiohttp  # входит в зависимости Kitsune, всегда доступен
-import PIL      # загрузчик установит Pillow автоматически при отсутствии
+from kitsune.net import get_shared_session
+
+sess = get_shared_session()
+# не закрывай её сам — это общая сессия на весь бот
 ```
 
-Для распространённых пакетов уже есть маппинг (`PIL` → `Pillow`, `cv2` → `opencv-python`, `yaml` → `PyYAML` и т.д.), остальные устанавливаются по имени модуля. На Termux автоматически добавляются флаги `--prefer-binary --no-build-isolation`.
-
 ---
 
-## Ограничения безопасности
+## Что ещё есть у модуля
 
-Kitsune запускает AST-сканер на каждый модуль перед загрузкой.
-
-**Запрещённые импорты:**
-`subprocess`, `pty`, `ctypes`, `multiprocessing`, `socket`, `pickle`, `marshal`, `shelve`, `dbm`, `runpy`, `distutils` и ряд других.
-
-**Запрещённые вызовы:**
-- `os.system()`, `os.popen()`, `os.fork()`, `os.kill()` и другие опасные методы `os`
-- `eval()`, `exec()`, `compile()` с динамическим или закодированным содержимым
-- `__import__()` с динамическими аргументами
-- `globals()["os"]` и любой динамический ключ, разрешающийся в запрещённое имя
-- Обращение к `__builtins__`, `__loader__`
-
-При обнаружении нарушения модуль не загружается, в лог записывается `ASTSecurityError` с указанием строки.
-
-Для HTTP-запросов используйте `aiohttp`. Файловые операции доступны через стандартный `open()` и `pathlib.Path`.
-
----
-
-## Доступные атрибуты модуля
-
-| Атрибут | Описание |
+| Атрибут/метод | Что это |
 |---|---|
-| `self.client` | Telethon-клиент. Используется для всех обращений к Telegram API |
-| `self.db` | База данных (`.get()` / `.set()` / `.set_sync()`) |
-| `self.config` | Значения конфига модуля (если объявлены) |
-| `self.tg_id` | Telegram ID владельца юзербота |
-| `self.inline` | Inline-движок (для inline-режима) |
-| `self.get_args(event)` | Аргументы строкой — всё после команды |
-| `self.strings(key, **kwargs)` | Локализованная строка с опциональными подстановками |
-| `self.name` | Имя модуля — удобно как пространство имён для БД |
+| `self.client` | Клиент Telegram, через него все обращения к API |
+| `self.db` | База данных: `.get()`, `.set()`, `.set_sync()` |
+| `self.config` | Настройки модуля, если объявлены |
+| `self.tg_id` | Твой Telegram ID |
+| `self.inline` | Движок inline-режима |
+| `self.get_args(event)` | Текст после команды |
+| `self.strings(key, **kwargs)` | Локализованная строка |
+| `self.name` | Имя модуля |
+| `self.lookup(name)` | Найти другой загруженный модуль |
+| `self.get_prefix()` | Текущий префикс команд |
 
 ---
 
-## Примеры
+## Готовые примеры
 
-### Простая команда с аргументами
+Смотри встроенные модули в `kitsune/modules/`:
 
-```python
-from kitsune.core.loader import KitsuneModule, command
-from kitsune.core.security import OWNER
-
-class EchoModule(KitsuneModule):
-    name        = "echo"
-    description = "Повторяет текст"
-
-    @command("echo", required=OWNER, aliases=["say"])
-    async def echo_cmd(self, event) -> None:
-        text = self.get_args(event)
-        if not text:
-            await event.reply("Укажите текст")
-            return
-        await event.edit(text)
-```
-
----
-
-### Модуль с кастомной ролью
-
-```python
-from kitsune.core.loader import KitsuneModule, command
-from kitsune.core.security import OWNER
-
-GREETER = "greeter"
-
-class GreetModule(KitsuneModule):
-    name        = "greet"
-    description = "Приветствие от доверенных пользователей"
-
-    @command("greet", required=GREETER)
-    async def greet_cmd(self, event) -> None:
-        await event.reply("Привет от доверенного пользователя! 👋")
-
-    @command("greetadd", required=OWNER)
-    async def greetadd_cmd(self, event) -> None:
-        reply = await event.get_reply_message()
-        if not reply:
-            await event.reply("Ответьте на сообщение пользователя")
-            return
-        uid = reply.sender_id
-        users = self.db.get(self.name, "greeter_users", [])
-        if uid not in users:
-            users.append(uid)
-            await self.db.set(self.name, "greeter_users", users)
-        await event.reply("✅ Доступ выдан")
-
-    @command("greetdel", required=OWNER)
-    async def greetdel_cmd(self, event) -> None:
-        reply = await event.get_reply_message()
-        if not reply:
-            await event.reply("Ответьте на сообщение пользователя")
-            return
-        uid = reply.sender_id
-        users = [u for u in self.db.get(self.name, "greeter_users", []) if u != uid]
-        await self.db.set(self.name, "greeter_users", users)
-        await event.reply("✅ Доступ отозван")
-```
-
----
-
-### Модуль с конфигом, локализацией и HTTP
-
-```python
-from __future__ import annotations
-import aiohttp
-from kitsune.core.loader import KitsuneModule, command, ModuleConfig, ConfigValue
-from kitsune.core.security import OWNER
-from kitsune.validators import String
-
-class QuoteModule(KitsuneModule):
-    name        = "quote"
-    description = "Случайная цитата"
-    icon        = "💬"
-    category    = "fun"
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.config = ModuleConfig(
-            ConfigValue(
-                "lang",
-                default="ru",
-                doc="Язык цитат: ru или en",
-                validator=String(),
-            ),
-        )
-
-    strings_ru = {
-        "loading": "⏳ Загружаю...",
-        "result":  "💬 <i>{text}</i>\n\n— {author}",
-        "error":   "❌ Не удалось загрузить цитату",
-    }
-
-    strings_en = {
-        "loading": "⏳ Loading...",
-        "result":  "💬 <i>{text}</i>\n\n— {author}",
-        "error":   "❌ Failed to load quote",
-    }
-
-    @command("quote", required=OWNER)
-    async def quote_cmd(self, event) -> None:
-        msg = await event.reply(self.strings("loading"), parse_mode="html")
-        try:
-            async with aiohttp.ClientSession() as s:
-                async with s.get(
-                    "https://api.quotable.io/random",
-                    timeout=aiohttp.ClientTimeout(total=10)
-                ) as r:
-                    data = await r.json()
-            text = self.strings("result", text=data["content"], author=data["author"])
-        except Exception:
-            text = self.strings("error")
-        await msg.edit(text, parse_mode="html")
-```
-
----
-
-### Модуль с фоновой задачей
-
-```python
-import asyncio
-from kitsune.core.loader import KitsuneModule, command
-from kitsune.core.security import OWNER
-
-class WatcherModule(KitsuneModule):
-    name        = "watcher"
-    description = "Пример фоновой задачи"
-
-    async def on_load(self) -> None:
-        self._running = True
-        self._task = asyncio.create_task(self._loop())
-
-    async def on_unload(self) -> None:
-        self._running = False
-        if hasattr(self, "_task"):
-            self._task.cancel()
-
-    async def _loop(self) -> None:
-        while self._running:
-            await asyncio.sleep(60)
-
-    @command("watcherstatus", required=OWNER)
-    async def status_cmd(self, event) -> None:
-        alive = hasattr(self, "_task") and not self._task.done()
-        await event.reply("✅ Задача работает" if alive else "❌ Задача не запущена")
-```
-
----
-
-## Референсные модули
-
-Встроенные модули в `kitsune/modules/` покрывают все типовые сценарии:
-
-| Модуль | Что демонстрирует |
+| Модуль | Что показывает |
 |---|---|
-| `ping.py` | Простейшая команда — хорошая отправная точка |
-| `weather.py` | Конфиг и HTTP-запросы |
-| `backup.py` | Работа с файлами и кастомные роли |
+| `ping.py` | Самая простая команда — начать отсюда |
+| `weather.py` | Настройки и запросы в интернет |
+| `backup.py` | Работа с файлами и ролями |
 | `kitsune_security.py` | Управление правами пользователей |
 
-При отладке проверяйте логи в `~/.kitsune/logs/` или запустите Kitsune с флагом `--debug`.
+Логи для отладки лежат в `~/.kitsune/logs/`.

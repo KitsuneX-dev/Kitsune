@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kitsune"
-version = "1.4.3"
+dynamic = ["version"]
 description = "Kitsune Userbot — fast, stable, modern Telegram userbot"
 readme = "README.md"
 license = { text = "AGPLv3" }
@@ -62,16 +62,27 @@ speedups = [
     "tgcrypto>=1.2.5",
     "uvloop>=0.19.0; sys_platform != 'win32'",
 ]
+test = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "pyyaml>=6.0",
+    "setuptools>=68.0",
+]
 dev = [
     "mypy>=1.10.0",
     "black>=24.4.2",
     "ruff>=0.4.4",
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
+    "pyyaml>=6.0",
+    "setuptools>=68.0",
 ]
 
 [project.scripts]
 kitsune = "kitsune.__main__:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "kitsune.version.__version__" }
 
 [tool.setuptools.packages.find]
 where = ["."]
@@ -85,30 +96,67 @@ target-version = ["py312", "py313"]
 line-length = 100
 target-version = "py312"
 extend-exclude = [
-    "kitsune/web",
     "kitsune/modules/eval.py",
     "kitsune/modules/terminal.py",
 ]
 
 [tool.ruff.lint]
-select = ["E", "F", "W"]
+select = ["E", "F", "W", "B", "ASYNC"]
 ignore = [
-    "E401", "E402", "E501", "E701", "E702", "E711", "E712", "E721", "E722", "E731", "E741",
-    "F401", "F403", "F405", "F541", "F811", "F821", "F841",
-    "W291", "W292", "W293", "W391", "W605",
+    "E401", "E402", "E501", "E701", "E702", "E731",
+    "W291", "W292", "W293", "W391",
+    "E711", "E712", "E721", "E741",
+    "F401", "F403", "F405",
+    "F541",
+    "F841",
+    "ASYNC109",
+    "ASYNC230", "ASYNC240",
 ]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B011", "B017"]
 
 [tool.mypy]
 python_version = "3.12"
 warn_return_any = false
 warn_unused_configs = false
 ignore_missing_imports = true
-ignore_errors = true
-follow_imports = "skip"
+ignore_errors = false
+follow_imports = "normal"
 no_implicit_optional = false
 check_untyped_defs = false
 files = ["kitsune"]
 
+[[tool.mypy.overrides]]
+module = [
+    "kitsune.web.*",
+    "kitsune.modules.*",
+    "kitsune.inline.*",
+    "kitsune.utils.*",
+    "kitsune",
+    "kitsune.__main__",
+    "kitsune._json",
+    "kitsune.account_setup",
+    "kitsune.accounts_manager",
+    "kitsune.configurator",
+    "kitsune.events",
+    "kitsune.hydro_media",
+    "kitsune.log",
+    "kitsune.main",
+    "kitsune.mtproto_faketls",
+    "kitsune.mtproto_replay",
+    "kitsune.qr",
+    "kitsune.qr_login",
+    "kitsune.rkn_bypass",
+    "kitsune.session_enc",
+    "kitsune.tl_cache",
+    "kitsune.translations",
+    "kitsune.validators",
+]
+ignore_errors = true
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
+required_plugins = ["pytest-asyncio"]

@@ -142,9 +142,9 @@ async def test_manager_get_default(manager):
 @pytest.mark.asyncio
 async def test_manager_set_validates_types(manager):
     with pytest.raises(TypeError):
-        await manager.set(123, "k", "v")                 
+        await manager.set(123, "k", "v")
     with pytest.raises(TypeError):
-        await manager.set("o", 456, "v")               
+        await manager.set("o", 456, "v")
 @pytest.mark.asyncio
 async def test_manager_set_rejects_non_serializable(manager):
     class Custom:

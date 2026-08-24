@@ -241,8 +241,8 @@ def make_qr_text(text: str, ec: str = "M") -> str:
 def make_qr_image(text: str, ec: str = "M", scale: int = 10) -> bytes:
     try:
         from PIL import Image, ImageDraw
-    except ImportError:
-        raise ImportError("Для make_qr_image нужен Pillow: pip install Pillow")
+    except ImportError as exc:
+        raise ImportError("Для make_qr_image нужен Pillow: pip install Pillow") from exc
     m      = _make_matrix(text, ec)
     rows   = m.rows()
     n      = m.size

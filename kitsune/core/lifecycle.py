@@ -13,7 +13,8 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-DATA_DIR = Path.home() / ".kitsune"
+from ..paths import data_dir as _kdd
+DATA_DIR = _kdd()
 
 _BG_TASKS: set[asyncio.Task] = set()
 _WATCHDOG_STOP = threading.Event()
@@ -51,7 +52,7 @@ async def setup_kitsune_folder(client: Any, db: Any) -> None:
     except asyncio.CancelledError:
         raise
     except Exception:
-        pass
+        logger.exception("lifecycle: не удалось настроить папку Kitsune")
 
 
 def install_signal_handlers(stop_event: asyncio.Event, loop: asyncio.AbstractEventLoop) -> None:
@@ -70,10 +71,7 @@ def install_signal_handlers(stop_event: asyncio.Event, loop: asyncio.AbstractEve
         with contextlib.suppress(NotImplementedError, OSError, RuntimeError):
             loop.add_signal_handler(sig, _shutdown)
 
-                                                                          
-                                                                               
-                                                                               
-                                                              
+
     def _raw_signal(signum, frame) -> None:
         _shutdown()
 
@@ -152,6 +150,11 @@ async def shutdown(client: Any, db: Any) -> None:
     stop_watchdog()
     from ..session_enc import encrypt_session_file
     from .connection import _release_hydro_lock
+
+    _acc_mgr = getattr(client, "_kitsune_accounts", None)
+    if _acc_mgr is not None:
+        with contextlib.suppress(Exception):
+            await asyncio.wait_for(_acc_mgr.shutdown_all(), timeout=25.0)
 
     if getattr(client, "hydrogram", None):
         with contextlib.suppress(Exception):
@@ -243,7 +246,26 @@ async def shutdown(client: Any, db: Any) -> None:
                 timeout=3.0,
             )
 
+    try:
+        from .loader import flush_ast_scan_cache
+        flush_ast_scan_cache()
+    except Exception:
+        logger.debug("main: AST scan cache flush skipped", exc_info=True)
+
     logger.info("main: goodbye 🦊")
+
+
+    try:
+        from ..net.http_pool import close_shared_session
+        await close_shared_session()
+    except Exception:
+        logger.debug("main: shared HTTP session close skipped", exc_info=True)
+
+    try:
+        from .. import log as _log_mod
+        _log_mod.shutdown()
+    except Exception:
+        pass
 
 
 async def startup(
@@ -266,6 +288,12 @@ async def startup(
     log.init()
     if have_uvloop:
         logger.info("main: uvloop enabled")
+    try:
+        logger.info(
+            "main: event loop = %s", type(asyncio.get_running_loop()).__module__
+        )
+    except RuntimeError:
+        pass
     cfg = load_config_fn()
     api_id: int = int(cfg.get("api_id") or os.environ.get("API_ID", 0))
     api_hash: str = str(cfg.get("api_hash") or os.environ.get("API_HASH", ""))
@@ -280,6 +308,12 @@ async def startup(
     prefix = str(cfg.get("prefix", prefix))
 
     client, me = await ensure_authorized(client, cfg, save_config_fn, load_config_fn)
+    try:
+        from ..mtproto_replay import ensure_replay_protection
+        _replay_status = ensure_replay_protection(client)
+        logger.info("main: MTProto replay-protection: %s", _replay_status)
+    except Exception:
+        logger.debug("main: replay-protection setup skipped", exc_info=True)
     client.tg_id = me.id
     client.tg_me = me
     client._kitsune_bot_ready = asyncio.Event()
@@ -314,6 +348,11 @@ async def startup(
     db_prefix = db.get("kitsune.core", "prefix", None)
     if db_prefix and isinstance(db_prefix, str):
         prefix = db_prefix
+
+    translator = Translator(db)
+    _saved_lang = db.get("kitsune.core", "lang", "ru")
+    translator.set_language(_saved_lang if isinstance(_saved_lang, str) else "ru")
+    client._kitsune_translator = translator
 
     dispatcher = CommandDispatcher(client, db, security, prefix=prefix)
     dispatcher.set_owner(me.id)
@@ -352,16 +391,34 @@ async def startup(
 
     await load_task
 
-    translator = Translator(db)
-    lang = db.get("kitsune.core", "lang", "ru")
-    translator.set_language(lang)
+    try:
+        saved_aliases = db.get("kitsune.core", "aliases", {}) or {}
+        if isinstance(saved_aliases, dict) and saved_aliases:
+            dispatcher.load_aliases(
+                {str(name): str(target) for name, target in saved_aliases.items()}
+            )
+            logger.info("main: restored %d command alias(es)", len(dispatcher.get_aliases()))
+    except Exception:
+        logger.exception("main: failed to restore command aliases")
+
+    try:
+        saved_disabled = db.get("kitsune.core", "disabled_commands", []) or []
+        if isinstance(saved_disabled, (list, tuple)) and saved_disabled:
+            dispatcher.load_disabled_commands([str(cmd) for cmd in saved_disabled])
+            logger.info("main: restored %d disabled command(s)", len(dispatcher.get_disabled_commands()))
+    except Exception:
+        logger.exception("main: failed to restore disabled commands")
+
+    _saved_lang = db.get("kitsune.core", "lang", "ru")
+    translator.set_language(_saved_lang if isinstance(_saved_lang, str) else "ru")
 
     if not args.no_web:
         try:
             from ..web.core import WebCore
             web = WebCore(client, db)
+            client._kitsune_web = web
             spawn(web.start(
-                host=cfg.get("web_host", "0.0.0.0"),
+                host=cfg.get("web_host", "127.0.0.1"),
                 port=int(cfg.get("web_port", 8080)),
             ))
             logger.info(
@@ -377,6 +434,17 @@ async def startup(
     spawn(setup_kitsune_folder(client, db))
     print_banner(me)
     spawn(keepalive(client))
+
+    try:
+        from ..paths import is_secondary
+        if not is_secondary():
+            from ..accounts_manager import get_manager
+            _acc_mgr = get_manager()
+            client._kitsune_accounts = _acc_mgr
+            spawn(_acc_mgr.start_enabled())
+            logger.info("main: менеджер доп.аккаунтов инициализирован")
+    except Exception:
+        logger.exception("main: не удалось инициализировать менеджер доп.аккаунтов")
 
     loop = asyncio.get_running_loop()
     stop_event = asyncio.Event()

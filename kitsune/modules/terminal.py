@@ -16,7 +16,6 @@ _MAX_ERR = 3000
 
 
 def _venv_aware_env() -> dict[str, str]:
-    """Собрать окружение для подпроцесса, осознающее venv бота."""
     env = {
         **os.environ,
         "TERM": "xterm-256color",

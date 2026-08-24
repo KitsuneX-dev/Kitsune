@@ -2,7 +2,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +64,8 @@ class BotSetup:
     def load_token_from_config(self) -> str | None:
         try:
             import toml
-            cfg_path = Path(__file__).parent.parent.parent.parent / "config.toml"
+            from ...paths import effective_config_path
+            cfg_path = effective_config_path()
             if cfg_path.exists():
                 val = toml.loads(cfg_path.read_text(encoding="utf-8")).get("bot_token")
                 return str(val) if val else None
@@ -75,7 +75,8 @@ class BotSetup:
     def save_token_to_config(self, token: str) -> None:
         try:
             import toml
-            cfg_path = Path(__file__).parent.parent.parent.parent / "config.toml"
+            from ...paths import effective_config_path
+            cfg_path = effective_config_path()
             if cfg_path.exists():
                 cfg = toml.loads(cfg_path.read_text(encoding="utf-8"))
                 cfg["bot_token"] = token
@@ -130,7 +131,7 @@ class BotSetup:
         return None, None
     async def _bot_already_has_avatar(self, uname: str) -> bool:
         try:
-            from ...assets import _DB_NS as _ASSETS_NS                
+            from ...assets import _DB_NS as _ASSETS_NS
         except Exception:
             _ASSETS_NS = "kitsune.assets"
         flag_key = f"bot_photo_{uname.lower()}"
@@ -155,7 +156,7 @@ class BotSetup:
         return False
     async def _set_bot_avatar(self, uname: str) -> None:
         try:
-            from ...assets import BOT_AVATAR, _DB_NS                
+            from ...assets import BOT_AVATAR, _DB_NS
         except Exception as imp_exc:
             logger.warning("BotSetup: аватарка бота не установлена: %s", imp_exc)
             return

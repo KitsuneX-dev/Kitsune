@@ -6,6 +6,16 @@ import re
 import time
 from ..core.loader import KitsuneModule, command, ModuleConfig, ConfigValue
 from ..core.security import OWNER
+from ..utils.platform import (
+    get_cpu_model_cores,
+    get_hostname,
+    get_kernel_release,
+    get_named_platform_label,
+    get_os_pretty_name,
+    get_run_environment,
+    get_username,
+)
+from ..utils.tg_html import parse_html_with_tg_emoji
 
 
 try:
@@ -94,13 +104,15 @@ class PingModule(KitsuneModule):
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
+        self._start_time = time.time()
         self.config = ModuleConfig(
             ConfigValue(
                 "custom_message",
                 default=None,
                 doc=(
                     "Кастомный текст сообщения ping. "
-                    "Ключевые слова: {ms}, {uptime}, {version}, {prefix}, {platform}, {cpu}, {ram}. "
+                    "Ключевые слова: {ms}, {uptime}, {version}, {prefix}, {platform}, "
+                    "{cpu_usage}, {ram}, {os}, {kernel}, {hostname}, {user}, {cpu}, {env}. "
                     "Поддерживает premium-эмодзи: <emoji id=XXXXXXXXX>⭐</emoji> "
                     "или {emoji:XXXXXXXXX:⭐}. "
                     "Оставь пустым для стандартного вида."
@@ -134,18 +146,32 @@ class PingModule(KitsuneModule):
         ),
     }
 
-    _start_time: float = time.time()
+    _start_time: float
 
     async def on_load(self) -> None:
-        PingModule._start_time = time.time()
-        await self.db.set("kitsune.ping", "start_time", PingModule._start_time)
+        self._start_time = time.time()
+        await self.db.set("kitsune.ping", "start_time", self._start_time)
 
     def _get_platform(self) -> str:
-        import platform as pf, os
-        if os.environ.get("TERMUX_VERSION") or os.path.isdir("/data/data/com.termux"):
-            return "📱 Termux"
-        s = pf.system()
-        return {"Linux": "🐧 Linux", "Windows": "🪟 Windows", "Darwin": "🍎 macOS"}.get(s, s)
+        return get_named_platform_label(termux_suffix=False)
+
+    def _get_os(self) -> str:
+        return get_os_pretty_name()
+
+    def _get_kernel(self) -> str:
+        return get_kernel_release()
+
+    def _get_hostname(self) -> str:
+        return get_hostname()
+
+    def _get_user(self) -> str:
+        return get_username()
+
+    def _get_cpu(self) -> str:
+        return get_cpu_model_cores()
+
+    def _get_env(self) -> str:
+        return get_run_environment()
 
     def _get_cpu_ram(self) -> tuple[str, str]:
         try:
@@ -165,52 +191,7 @@ class PingModule(KitsuneModule):
 
     @staticmethod
     def _parse_html_with_tg_emoji(html_text: str):
-        from telethon.extensions import html as tl_html
-        from telethon.tl.types import MessageEntityCustomEmoji
-        tg_pattern = re.compile(
-            r'<tg-emoji\s+emoji-id=["\'](\d+)["\']>(.*?)</tg-emoji>',
-            re.DOTALL,
-        )
-        if not tg_pattern.search(html_text):
-            return tl_html.parse(html_text)
-        result_text     = ""
-        result_entities = []
-        cursor          = 0
-        pos_in_html     = 0
-        for m in tg_pattern.finditer(html_text):
-            before_html = html_text[pos_in_html:m.start()]
-            if before_html:
-                plain_before, ents_before = tl_html.parse(before_html)
-                for e in (ents_before or []):
-                    e.offset += cursor
-                result_text     += plain_before
-                result_entities += list(ents_before or [])
-                cursor          += len(plain_before)
-            emoji_id   = m.group(1)
-            inner_html = m.group(2)
-            inner_plain, inner_ents = tl_html.parse(inner_html)
-            for e in (inner_ents or []):
-                e.offset += cursor
-            result_entities.append(
-                MessageEntityCustomEmoji(
-                    offset=cursor,
-                    length=len(inner_plain),
-                    document_id=int(emoji_id),
-                )
-            )
-            result_entities += list(inner_ents or [])
-            result_text     += inner_plain
-            cursor          += len(inner_plain)
-            pos_in_html      = m.end()
-        tail_html = html_text[pos_in_html:]
-        if tail_html:
-            plain_tail, ents_tail = tl_html.parse(tail_html)
-            for e in (ents_tail or []):
-                e.offset += cursor
-            result_text     += plain_tail
-            result_entities += list(ents_tail or [])
-        result_entities.sort(key=lambda e: e.offset)
-        return result_text, result_entities
+        return parse_html_with_tg_emoji(html_text)
 
     async def _send_media_with_caption(self, peer, media_url, caption, entities):
         return await self.client.send_file(
@@ -249,7 +230,7 @@ class PingModule(KitsuneModule):
         if custom:
             dispatcher = getattr(self.client, "_kitsune_dispatcher", None)
             prefix = dispatcher._prefix if dispatcher else "."
-            cpu, ram = self._get_cpu_ram()
+            cpu_usage, ram = self._get_cpu_ram()
             try:
                 text = custom.format(
                     ms=latency_int,
@@ -257,8 +238,14 @@ class PingModule(KitsuneModule):
                     version=__version_str__,
                     prefix=prefix,
                     platform=self._get_platform(),
-                    cpu=cpu,
+                    cpu=self._get_cpu(),
+                    cpu_usage=cpu_usage,
                     ram=ram,
+                    os=self._get_os(),
+                    kernel=self._get_kernel(),
+                    hostname=self._get_hostname(),
+                    user=self._get_user(),
+                    env=self._get_env(),
                 )
             except KeyError:
                 text = custom
@@ -310,7 +297,7 @@ class PingModule(KitsuneModule):
                     try:
                         await msg.delete()
                     except Exception:
-                        pass
+                        logger.debug("ping: не удалось удалить временное сообщение", exc_info=True)
                     return
                 except (WebpageCurlFailedError, WebpageMediaEmptyError) as e:
                     logger.warning(

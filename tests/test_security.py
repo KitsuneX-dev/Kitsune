@@ -9,14 +9,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 
-class _FakeDB:
-    def __init__(self):
-        self._d = {}
-    def get(self, owner, key, default=None):
-        return self._d.get(owner, {}).get(key, default)
-    async def set(self, owner, key, value):
-        self._d.setdefault(owner, {})[key] = value
-        return True
+from conftest import FakeDB
 def _msg(sender_id=None, chat_id=None):
     return SimpleNamespace(sender_id=sender_id, chat_id=chat_id)
 def _client(me_id=1000):
@@ -25,11 +18,12 @@ def _client(me_id=1000):
     c.tg_id = None
     c.get_me = AsyncMock(return_value=SimpleNamespace(id=me_id))
     c.get_permissions = AsyncMock()
+    c.get_perms_cached = None
     return c
 @pytest_asyncio.fixture
 async def manager():
     from kitsune.core.security import SecurityManager
-    db = _FakeDB()
+    db = FakeDB()
     cl = _client(me_id=1000)
     mgr = SecurityManager(cl, db)
     await mgr.init()
@@ -260,7 +254,7 @@ async def test_cache_expires_after_ttl(manager, monkeypatch):
 @pytest.mark.asyncio
 async def test_init_loads_me():
     from kitsune.core.security import SecurityManager
-    db = _FakeDB()
+    db = FakeDB()
     cl = _client(me_id=42)
     mgr = SecurityManager(cl, db)
     assert mgr._me is None
@@ -270,7 +264,7 @@ async def test_init_loads_me():
 @pytest.mark.asyncio
 async def test_check_lazy_inits_me():
     from kitsune.core.security import SecurityManager, OWNER
-    db = _FakeDB()
+    db = FakeDB()
     cl = _client(me_id=42)
     mgr = SecurityManager(cl, db)
     assert mgr._me is None
@@ -286,7 +280,7 @@ async def test_check_with_combined_required(manager):
 @pytest.mark.asyncio
 async def test_persistent_sudo_across_instances(tmp_path):
     from kitsune.core.security import SecurityManager, SUDO
-    db = _FakeDB()
+    db = FakeDB()
     cl = _client(me_id=1)
     mgr1 = SecurityManager(cl, db)
     await mgr1.init()

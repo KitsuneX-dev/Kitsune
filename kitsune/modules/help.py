@@ -198,19 +198,42 @@ class HelpModule(KitsuneModule):
             header += f"\n<i>ℹ️ {mod.description}</i>"
         cmd_lines = []
         lang = self.db.get("kitsune.core", "lang", "ru") if self.db else "ru"
+        dispatcher = getattr(self.client, "_kitsune_dispatcher", None)
+        alias_map: dict[str, list[str]] = {}
+        if dispatcher is not None:
+            for alias, target in dispatcher.get_aliases().items():
+                alias_map.setdefault(target.split(maxsplit=1)[0].lower(), []).append(alias)
         for attr in sorted(dir(mod)):
             m = getattr(mod, attr, None)
             if not (callable(m) and getattr(m, "_is_command", False)):
                 continue
             cmd_name = m._command_name
             localized = getattr(m, f"_{lang}_doc", None)
+            if not localized:
+                translator = getattr(getattr(self, "client", None), "_kitsune_translator", None)
+                if translator is not None:
+                    try:
+                        translator.set_language(lang)
+                        qual = f"{type(mod).__module__}.{type(mod).__name__}"
+                        localized = (
+                            translator.get_module_string(qual, f"_cmd_doc_{cmd_name}", lang)
+                            or translator.get_module_string(type(mod).__name__, f"_cmd_doc_{cmd_name}", lang)
+                        )
+                    except Exception:
+                        localized = None
             doc = (localized or inspect.getdoc(m) or "").strip()
             if "—" in doc:
                 doc = doc.split("—", 1)[-1].strip()
             elif doc.lower().startswith(f"{prefix}{cmd_name}") or doc.lower().startswith(f".{cmd_name}"):
                 doc = ""
+            aliases = alias_map.get(cmd_name.lower(), [])
+            alias_str = (
+                " " + " ".join(f"<code>{prefix}{a}</code>" for a in sorted(aliases))
+                if aliases else ""
+            )
             cmd_lines.append(
                 f"{self.config['command_emoji']} <code>{prefix}{cmd_name}</code>"
+                + alias_str
                 + (f" — {doc}" if doc else "")
             )
         body = header

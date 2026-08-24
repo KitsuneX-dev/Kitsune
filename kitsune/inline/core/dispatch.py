@@ -1,301 +1,95 @@
+
 from __future__ import annotations
+
 import asyncio
-import logging
-import re
+import contextlib
+import time
 import typing
 import uuid
-import time
 
-logger = logging.getLogger(__name__)
-
-_TG_EMOJI_VALID = re.compile(
-    r'<tg-emoji\s+emoji-id\s*=\s*["\']?(\d+)["\']?\s*>(.*?)</tg-emoji>',
-    re.DOTALL | re.IGNORECASE,
+from ..types import InlineCall
+from .common import (
+    AIOGRAM_AVAILABLE,
+    _INPUT_MARKER,
+    _UNIT_TTL,
+    logger,
+    warn_no_aiogram_once,
 )
-_TG_EMOJI_ANY_OPEN = re.compile(r'<tg-emoji\b[^>]*>', re.IGNORECASE)
-_TG_EMOJI_ANY_CLOSE = re.compile(r'</tg-emoji\s*>', re.IGNORECASE)
+from .markup import _InlineTarget
+from .sanitize import _sanitize_tg_html, _strip_all_html, _strip_tg_emoji
 
-_TG_ALLOWED_TAGS = {
-    "b", "strong", "i", "em", "u", "ins", "s", "strike", "del",
-    "span", "tg-spoiler", "a", "code", "pre", "blockquote", "tg-emoji",
-    "br",
-}
-_TG_VOID_TAGS = {"br"}
-_HTML_TAG_RE = re.compile(r'<(/?)([a-zA-Z][a-zA-Z0-9-]*)\b([^>]*)>')
-
-def _normalize_tg_emoji(text: str) -> str:
-    if not text or "tg-emoji" not in text.lower():
-        return text
-    def _fix(m: re.Match) -> str:
-        emoji_id = m.group(1)
-        inner = m.group(2)
-        return f'<tg-emoji emoji-id="{emoji_id}">{inner}</tg-emoji>'
-    return _TG_EMOJI_VALID.sub(_fix, text)
-
-def _strip_tg_emoji(text: str) -> str:
-    if not text or "tg-emoji" not in text.lower():
-        return text
-    text = _TG_EMOJI_ANY_OPEN.sub("", text)
-    text = _TG_EMOJI_ANY_CLOSE.sub("", text)
-    return text
-
-def _sanitize_tg_html(text: str) -> str:
-    if not text or "<" not in text:
-        return text
-    text = _normalize_tg_emoji(text)
-    parts: list[str] = []
-    stack: list[tuple[str, str]] = []
-    pos = 0
-    for m in _HTML_TAG_RE.finditer(text):
-        parts.append(text[pos:m.start()])
-        pos = m.end()
-        is_close = m.group(1) == "/"
-        tag = m.group(2).lower()
-        attrs = m.group(3) or ""
-        if tag not in _TG_ALLOWED_TAGS:
-            continue
-        if tag in _TG_VOID_TAGS:
-            if not is_close:
-                parts.append(f"<{tag}>")
-            continue
-        if not is_close:
-            parts.append(f"<{tag}{attrs}>")
-            stack.append((tag, attrs))
-            continue
-        if not stack:
-            continue
-        if stack[-1][0] == tag:
-            stack.pop()
-            parts.append(f"</{tag}>")
-            continue
-        idx = None
-        for i in range(len(stack) - 1, -1, -1):
-            if stack[i][0] == tag:
-                idx = i
-                break
-        if idx is None:
-            continue
-        reopen: list[tuple[str, str]] = []
-        while len(stack) > idx + 1:
-            top_tag, top_attrs = stack.pop()
-            parts.append(f"</{top_tag}>")
-            reopen.append((top_tag, top_attrs))
-        stack.pop()
-        parts.append(f"</{tag}>")
-        for r_tag, r_attrs in reversed(reopen):
-            parts.append(f"<{r_tag}{r_attrs}>")
-            stack.append((r_tag, r_attrs))
-    parts.append(text[pos:])
-    while stack:
-        top_tag, _ = stack.pop()
-        parts.append(f"</{top_tag}>")
-    result = "".join(parts)
-    prev = None
-    empty_pair = re.compile(r'<([a-zA-Z][a-zA-Z0-9-]*)\b[^>]*>\s*</\1>')
-    while prev != result:
-        prev = result
-        result = empty_pair.sub("", result)
-    return result
-
-def _strip_all_html(text: str) -> str:
-    if not text or "<" not in text:
-        return text
-    return _HTML_TAG_RE.sub("", text)
-
-try:
-    from aiogram import Bot, Dispatcher, Router
-    from aiogram.client.default import DefaultBotProperties
-    from aiogram.enums import ParseMode
-    from aiogram.types import (
-        CallbackQuery,
-        ChosenInlineResult,
+if AIOGRAM_AVAILABLE:
+    from .common import (
         InlineKeyboardButton,
         InlineKeyboardMarkup,
-        InlineQuery,
         InlineQueryResultArticle,
         InlineQueryResultGif,
         InlineQueryResultVideo,
         InputTextMessageContent,
-        Message as AiogramMessage,
     )
-    AIOGRAM_AVAILABLE = True
-except ImportError:
-    AIOGRAM_AVAILABLE = False
-from .types import InlineCall
 
-_UNIT_TTL = 60 * 60 * 24
-_INPUT_MARKER = "\u2063\u2060\u2063"
+if typing.TYPE_CHECKING:  # pragma: no cover
+    from .common import AiogramMessage, ChosenInlineResult, InlineQuery
 
-class InlineManager:
-    def __init__(self, client: typing.Any, db: typing.Any, token: str) -> None:
-        self._client        = client
-        self._db            = db
-        self._token         = token
-        self._bot:          typing.Any = None
-        self._dp:           typing.Any = None
-        self._router:       typing.Any = None
-        self._callbacks:    dict[str, tuple] = {}
-        self._units:        dict[str, dict]  = {}
-        self._bot_username: str | None       = None
-        self._bot_id:       int | None       = None
-        self._inline_handlers: list[tuple[typing.Callable, bool]] = []
-        self._started       = False
-    async def start(self) -> None:
-        if not AIOGRAM_AVAILABLE:
-            return
-        if self._started:
-            return
-        try:
-            from ..rkn_bypass import make_aiogram_bot
-            self._bot = make_aiogram_bot(self._token, parse_mode="HTML")
-        except Exception as _exc:
-            logger.debug("InlineManager: make_aiogram_bot fallback (%s)", _exc)
-            self._bot = Bot(
-                token=self._token,
-                default=DefaultBotProperties(parse_mode=ParseMode.HTML),
-            )
-        self._dp     = Dispatcher()
-        self._router = Router()
-        self._dp.include_router(self._router)
-        self._router.callback_query.register(self._on_callback)
-        self._router.inline_query.register(self._on_inline_query)
-        self._router.chosen_inline_result.register(self._on_chosen_inline)
-        self._router.message.register(self._on_message)
-        self._started = True
-        asyncio.ensure_future(self._dp.start_polling(self._bot, handle_signals=False))
-        asyncio.ensure_future(self._cleaner())
-        await asyncio.sleep(3)
-        try:
-            me = await self._bot.get_me()
-            self._bot_username = me.username
-            self._bot_id = me.id
-        except Exception:
-            pass
-        logger.info("InlineManager: started")
-    async def stop(self) -> None:
-        if self._bot and self._started:
-            await self._dp.stop_polling()
-            await self._bot.session.close()
-            self._started = False
-    async def _cleaner(self) -> None:
-        while True:
-            await asyncio.sleep(300)
-            now = time.time()
-            for uid in list(self._units.keys()):
-                if self._units[uid].get("ttl", now + 1) < now:
-                    del self._units[uid]
-    def generate_markup(self, buttons: list) -> "InlineKeyboardMarkup | None":
-        if not AIOGRAM_AVAILABLE:
-            return None
-        keyboard: list[list[InlineKeyboardButton]] = []
-        def _row(r):
-            return r if isinstance(r, list) else [r]
-        for row in buttons:
-            for btn in _row(row):
-                if isinstance(btn, dict) and "input" in btn and "_switch_query" not in btn:
-                    btn["_switch_query"] = str(uuid.uuid4())[:10]
-        for row in buttons:
-            kb_row: list[InlineKeyboardButton] = []
-            for btn in _row(row):
-                if not isinstance(btn, dict):
-                    continue
-                text = btn.get("text", "?")
-                if url := btn.get("url"):
-                    kb_row.append(InlineKeyboardButton(text=text, url=url))
-                elif "input" in btn:
-                    kb_row.append(InlineKeyboardButton(
-                        text=text,
-                        switch_inline_query_current_chat=btn["_switch_query"] + " ",
-                    ))
-                elif "callback" in btn:
-                    cb_id = str(uuid.uuid4())[:12]
-                    self._callbacks[cb_id] = (
-                        btn["callback"],
-                        btn.get("args", ()),
-                        self._client.tg_id,
-                        btn.get("disable_security", False),
-                        btn.get("kwargs", {}),
-                    )
-                    kb_row.append(InlineKeyboardButton(text=text, callback_data=cb_id))
-                elif raw := btn.get("data"):
-                    kb_row.append(InlineKeyboardButton(text=text, callback_data=raw))
-            if kb_row:
-                keyboard.append(kb_row)
-        return InlineKeyboardMarkup(inline_keyboard=keyboard)
-    def _register_callback(
+class _DispatchMixin:
+    async def _delete_unit_message(
         self,
-        func,
-        *,
-        args: tuple = (),
-        kwargs: dict | None = None,
-    ) -> str:
-        cb_id = str(uuid.uuid4())[:12]
-        self._callbacks[cb_id] = (func, args, kwargs or {})
-        return cb_id
-    def register_inline_handler(self, func: typing.Callable) -> None:
-        only_own = bool(getattr(func, "_inline_only_own", False))
-        entry    = (func, only_own)
-        if entry not in self._inline_handlers:
-            self._inline_handlers.append(entry)
-            logger.debug("InlineManager: registered inline_handler %r", func)
-    def unregister_inline_handler(self, func: typing.Callable) -> None:
-        def _same(h: typing.Callable) -> bool:
-            if h is func:
-                return True
-            h_self = getattr(h, "__self__", None)
-            f_self = getattr(func, "__self__", None)
-            if h_self is not None and h_self is f_self:
-                return getattr(h, "__func__", None) is getattr(func, "__func__", None)
-            return False
-
-        self._inline_handlers = [
-            (h, o) for h, o in self._inline_handlers if not _same(h)
-        ]
-        logger.debug("InlineManager: unregistered inline_handler %r", func)
-    async def form(
-        self,
-        text: str,
-        message: typing.Any,
-        reply_markup: list | None = None,
-        video: str | None = None,
-        gif: str | None = None,
-    ) -> typing.Any:
-        media_url = gif or video
-        media_type = None
-        if media_url:
+        call: typing.Any = None,
+        unit_id: str | None = None,
+    ) -> None:
+        unit = self._units.get(unit_id or "", {})
+        chat_id = unit.get("chat") or unit.get("chat_id")
+        message_id = unit.get("message_id")
+        deleted = False
+        if chat_id and message_id:
             try:
-                import os
-                from urllib.parse import urlparse
-                ext = os.path.splitext(urlparse(media_url).path)[1].lower()
-                media_type = "gif" if ext in (".gif", ".mp4") else "video"
+                await self._client.delete_messages(chat_id, [message_id])
+                deleted = True
             except Exception:
-                media_type = "video"
-        text = _sanitize_tg_html(text)
-        unit_id = str(uuid.uuid4())[:16]
-        future: asyncio.Future = asyncio.get_event_loop().create_future()
-        origin_chat_id = getattr(message, "chat_id", None) or getattr(message, "peer_id", None)
-        self._units[unit_id] = {
-            "text":    text,
-            "buttons": reply_markup or [],
-            "ttl":     time.time() + _UNIT_TTL,
-            "future":  future,
-            "inline_message_id": "",
-            "chat_id": origin_chat_id,
-            **({media_type: media_url} if media_url and media_type else {}),
-        }
-        sent = await self._invoke_unit(unit_id, message)
-        if sent is not None and unit_id in self._units:
-            self._units[unit_id]["telethon_msg"] = sent
-            sent_chat = getattr(sent, "chat_id", None) or getattr(sent, "peer_id", None)
-            if sent_chat is not None:
-                self._units[unit_id]["chat_id"] = sent_chat
-        try:
-            await asyncio.wait_for(asyncio.shield(future), timeout=30)
-        except asyncio.TimeoutError:
-            logger.warning("form: timeout waiting for inline_message_id for unit %s", unit_id)
-        if "future" in self._units.get(unit_id, {}):
-            del self._units[unit_id]["future"]
-        return sent
+                logger.debug("_delete_unit_message: Telethon delete failed", exc_info=True)
+        if not deleted and self._bot:
+            iid = getattr(call, "inline_message_id", None)
+            try:
+                if iid:
+                    await self._bot.edit_message_text(
+                        inline_message_id=iid,
+                        text="🗑 <i>Закрыто</i>",
+                        parse_mode="HTML",
+                    )
+                    deleted = True
+                elif getattr(call, "chat_id", None) and getattr(call, "message_id", None):
+                    await self._bot.delete_message(
+                        chat_id=call.chat_id, message_id=call.message_id,
+                    )
+                    deleted = True
+            except Exception:
+                logger.debug("_delete_unit_message: bot fallback failed", exc_info=True)
+        if call is not None:
+            with contextlib.suppress(Exception):
+                await call.answer("")
+    async def _edit_unit(
+        self,
+        text: str | None = None,
+        reply_markup: typing.Any = None,
+        *,
+        unit_id: str | None = None,
+        inline_message_id: str | None = None,
+        **kwargs: typing.Any,
+    ) -> typing.Any:
+        unit = self._units.get(unit_id or "", {})
+        iid = inline_message_id or unit.get("inline_message_id") or ""
+        if text is not None:
+            safe = _sanitize_tg_html(text)
+            if unit:
+                unit["text"] = safe
+        else:
+            safe = unit.get("text", "") or ""
+        if reply_markup is not None and unit:
+            unit["buttons"] = self._normalize_form_markup(reply_markup)
+        buttons = unit.get("buttons", []) if unit else (reply_markup or [])
+        target = _InlineTarget(iid)
+        await self.edit(target, safe, buttons, inline_message_id=iid or None)
+        return True
     async def edit(
         self,
         call_or_msg: typing.Any,
@@ -303,7 +97,13 @@ class InlineManager:
         reply_markup: list | None = None,
         inline_message_id: str | None = None,
     ) -> None:
-        if not AIOGRAM_AVAILABLE or not self._bot:
+        if not AIOGRAM_AVAILABLE:
+            warn_no_aiogram_once(
+                "InlineManager.edit()",
+                "inline messages cannot be edited, edit() is a no-op",
+            )
+            return
+        if not self._bot:
             return
         text = _sanitize_tg_html(text)
         markup = self.generate_markup(reply_markup or [])
@@ -532,7 +332,7 @@ class InlineManager:
     async def _handle_inline_query(self, query: "InlineQuery") -> None:
         q = query.query.strip()
 
-                                                             
+
         if self._inline_handlers:
             from_uid = getattr(query.from_user, "id", None)
             for handler, only_own in list(self._inline_handlers):
@@ -547,6 +347,25 @@ class InlineManager:
                         "InlineManager: inline_handler %r failed (query=%r)",
                         handler, q,
                     )
+
+        try:
+            if await self._handle_query_gallery(query):
+                return
+        except Exception:
+            logger.exception("InlineManager: _handle_query_gallery failed")
+
+        unit_by_id = self._units.get(q)
+        if unit_by_id is not None:
+            u_type = unit_by_id.get("type")
+            if u_type == "gallery":
+                await self._gallery_inline_handler(query)
+                return
+            if u_type == "list":
+                await self._list_inline_handler(query, q)
+                return
+            if u_type == "form":
+                await self._form_inline_handler(query)
+                return
 
         for unit in self._units.values():
             for row in unit.get("buttons", []):
@@ -724,16 +543,20 @@ class InlineManager:
         if not q:
             return
         for unit_id, unit in self._units.items():
-            if (
-                unit_id == q
-                and "future" in unit
-                and isinstance(unit["future"], asyncio.Future)
-                and not unit["future"].done()
-            ):
-                unit["inline_message_id"] = result.inline_message_id
-                unit["future"].set_result(result.inline_message_id)
-                logger.debug("form: saved inline_message_id=%s for unit %s", result.inline_message_id, unit_id)
-                return
+            if unit_id != q or "future" not in unit:
+                continue
+            fut = unit["future"]
+            unit["inline_message_id"] = result.inline_message_id
+            if isinstance(fut, asyncio.Event):
+                fut.set()
+            elif isinstance(fut, asyncio.Future) and not fut.done():
+                fut.set_result(result.inline_message_id)
+            else:
+                continue
+            logger.debug(
+                "unit %s: saved inline_message_id=%s", unit_id, result.inline_message_id,
+            )
+            return
         first_word = q.split()[0]
         value = q.split(maxsplit=1)[1] if len(q.split()) > 1 else ""
         for unit_id, unit in self._units.copy().items():
@@ -787,31 +610,7 @@ class InlineManager:
     async def _noop_answer(self, *a, **kw):
         pass
     async def _on_message(self, message: "AiogramMessage") -> None:
-        pass
-    async def _on_callback(self, call: "CallbackQuery") -> None:
-        if call.data == "__noop__":
-            await call.answer()
-            return
-        entry = self._callbacks.get(call.data)
-        if entry is None:
-            await call.answer("⚠️ Устаревшая кнопка.", show_alert=True)
-            return
-        handler, args, owner_id, disable_security, kwargs = entry
-        if not disable_security and call.from_user.id != owner_id:
-            await call.answer("🚫 Нет доступа.", show_alert=True)
-            return
-        wrapped = InlineCall(
-            id=call.id,
-            chat_id=call.message.chat.id if call.message else 0,
-            message_id=call.message.message_id if call.message else 0,
-            data=call.data,
-            _answer=call.answer,
-            _edit=call.message.edit_text if call.message else None,
-            from_user_id=call.from_user.id if call.from_user else None,
-        )
-        wrapped.inline_message_id = call.inline_message_id or ""
         try:
-            await handler(wrapped, *args, **kwargs)
+            await self._handle_pm_message(message)
         except Exception:
-            logger.exception("InlineManager callback error (data=%s)", call.data)
-            await call.answer("❌ Ошибка.", show_alert=True)
+            logger.exception("InlineManager._on_message failed")

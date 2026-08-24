@@ -18,7 +18,7 @@ async def interactive_login(client: Any) -> None:
         PhoneNumberInvalidError,
         SessionPasswordNeededError,
     )
-    phone = input("📱 Phone number (international format): ").strip()
+    phone = (await asyncio.to_thread(input, "📱 Phone number (international format): ")).strip()
     try:
         await client.send_code_request(phone)
     except FloodWaitError as exc:
@@ -27,12 +27,12 @@ async def interactive_login(client: Any) -> None:
     except PhoneNumberInvalidError:
         print("❌ Invalid phone number.")
         sys.exit(1)
-    code = input("🔑 Telegram code: ").strip()
+    code = (await asyncio.to_thread(input, "🔑 Telegram code: ")).strip()
     try:
         await client.sign_in(phone, code)
     except SessionPasswordNeededError:
         from getpass import getpass
-        pwd = getpass("🔐 Two-factor password: ")
+        pwd = await asyncio.to_thread(getpass, "🔐 Two-factor password: ")
         try:
             await client.sign_in(password=pwd)
         except PasswordHashInvalidError:
@@ -50,6 +50,7 @@ async def hydrogram_web_reauth(
     save_config_fn,
     get_config_fn,
     web_port: int,
+    web_host: str = "127.0.0.1",
 ) -> bool:
     try:
         from ..web.setup import SetupServer
@@ -62,7 +63,7 @@ async def hydrogram_web_reauth(
         hydrogram_only=True,
     )
     try:
-        await setup.start(host="0.0.0.0", port=web_port)
+        await setup.start(host=web_host, port=web_port)
     except Exception:
         logger.exception(
             "main: web setup (hydrogram_only) failed to start on port %d", web_port,
@@ -98,7 +99,8 @@ async def run_web_setup(
     from ..qr_login import ask_login_method, run_console_qr_login
     use_qr = ask_login_method()
     if use_qr:
-        session_path = Path.home() / ".kitsune" / "kitsune"
+        from ..paths import data_dir as _kdd
+        session_path = _kdd() / "kitsune"
         session_path.parent.mkdir(parents=True, exist_ok=True)
         return await run_console_qr_login(
             cfg, save_config_fn, get_config_fn, session_path,
@@ -106,7 +108,8 @@ async def run_web_setup(
     from ..web.setup import SetupServer
     web_port = int(cfg.get("web_port", 8080))
     setup = SetupServer(save_config_fn=save_config_fn, get_config_fn=get_config_fn)
-    await setup.start(host="0.0.0.0", port=web_port)
+    web_host = str(cfg.get("web_host", "127.0.0.1"))
+    await setup.start(host=web_host, port=web_port)
     await setup.wait_done()
     return setup.get_client()
 

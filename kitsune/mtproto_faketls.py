@@ -4,8 +4,10 @@ import base64
 import hashlib
 import hmac
 import logging
+import os
 import random
 import re
+import secrets
 import socket
 import time
 from cryptography.hazmat.backends import default_backend
@@ -62,8 +64,8 @@ def _create_aes_ctr(key: bytes, iv: int):
 class _MyRandom(random.Random):
     def __init__(self):
         super().__init__()
-        key = bytes([random.randrange(256) for _ in range(32)])
-        iv = random.randrange(256**16)
+        key = os.urandom(32)
+        iv = secrets.randbits(128)
         self.encryptor = _create_aes_ctr(key, iv)
         self.buffer = bytearray()
     def getrandbits(self, k):

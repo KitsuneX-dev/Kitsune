@@ -1,5 +1,6 @@
 from __future__ import annotations
 import asyncio
+import contextlib
 import logging
 import webbrowser
 from typing import Any, Callable
@@ -504,6 +505,29 @@ input::placeholder { color: var(--mu); }
 <script src="/static/fx.js" defer></script>
 
 <script>
+// Токен доступа к мастеру: из ?token=... либо из cookie kitsune_token.
+// Все запросы к /api/ уходят с Authorization: Bearer <token>.
+const _KTOKEN=(function(){
+  const u=new URL(location.href);
+  const q=u.searchParams.get('token');
+  if(q){
+    u.searchParams.delete('token');
+    history.replaceState(null,'',u.pathname+u.search+u.hash);
+    return q;
+  }
+  const m=document.cookie.match(/(?:^|;\s*)kitsune_token=([^;]+)/);
+  return m?decodeURIComponent(m[1]):'';
+})();
+(function(){
+  const _origFetch=window.fetch.bind(window);
+  window.fetch=function(input,init){
+    init=init||{};
+    const headers=new Headers(init.headers||{});
+    if(_KTOKEN&&!headers.has('Authorization'))headers.set('Authorization','Bearer '+_KTOKEN);
+    init.headers=headers;
+    return _origFetch(input,init);
+  };
+})();
 let HYDRO_ONLY = false;     // режим повторной регистрации только Hydrogram
 let SAVED_PHONE = '';        // номер с шага 1 (подставится в шаге 5)
 
@@ -531,12 +555,47 @@ const STAGE_MAP = {
   8: {stage:'done', label:'Готово'},
 };
 
+// Восстановление после F5: код уже отправлен на сервере → не начинаем с нуля,
+// иначе повторный ввод номера может привести к FloodWait от Telegram.
+async function restoreState(){
+  try{
+    const st = await (await fetch('/api/state')).json();
+    if(!st) return false;
+    if(st.stage!=='code_sent' && st.stage!=='sending') return false;
+    const hydro = (st.backend === 'hydrogram');
+    if(st.phone){
+      SAVED_PHONE = st.phone;
+      const f = document.getElementById(hydro ? 'phone2' : 'phone1');
+      if(f) f.value = st.phone;
+    }
+    buildDots();
+    const step = hydro ? 6 : 2;
+    const btnId = hydro ? 'btn6' : 'btn2';
+    const btnText = hydro ? 'Войти (Hydrogram) →' : 'Войти (Telethon) →';
+    show(step);
+    if(st.stage==='code_sent'){
+      setBtn(btnId,btnText,false);
+    } else {
+      setBtn(btnId,'Ждём код от Telegram…',true);
+      pollCodeState(step,btnId,btnText);
+    }
+    return true;
+  }catch(e){ return false; }
+}
+
 // Спрашиваем у бэка режим, ещё до взаимодействия с пользователем.
 (async()=>{
   try{
     const r = await fetch('/api/mode');
     const j = await r.json();
     HYDRO_ONLY = !!(j && j.hydrogram_only);
+    if(await restoreState()){
+      if(HYDRO_ONLY){
+        document.getElementById('setup_title').textContent = 'Kitsune · повторная регистрация';
+        document.getElementById('setup_sub').textContent = 'Только Hydrogram (Telethon уже настроен)';
+      }
+      return;
+    }
     if(HYDRO_ONLY){
       // В режиме hydrogram_only сразу показываем шаг 5 (телефон Hydrogram).
       document.getElementById('setup_title').textContent = 'Kitsune · повторная регистрация';
@@ -638,8 +697,35 @@ function setBtn(id,text,disabled){
 }
 
 async function post(url,data){
-  const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
-  return r.json();
+  try{
+    const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+    try{
+      return await r.json();
+    }catch(e){
+      return {ok:false, error:'Некорректный ответ сервера (HTTP '+r.status+')'};
+    }
+  }catch(e){
+    return {ok:false, error:'Нет связи с сервером. Проверь, что Kitsune запущен, и повтори.'};
+  }
+}
+
+// Поллинг состояния асинхронной отправки кода — вместо ожидания
+// одного долгого HTTP-запроса (см. /api/state на беке).
+let _POLL_TIMER = null;
+function pollCodeState(step,btnId,btnText){
+  if(_POLL_TIMER){ clearInterval(_POLL_TIMER); _POLL_TIMER=null; }
+  _POLL_TIMER=setInterval(async()=>{
+    try{
+      const st=await (await fetch('/api/state')).json();
+      if(st.stage==='code_sent'){
+        clearInterval(_POLL_TIMER); _POLL_TIMER=null;
+        setBtn(btnId,btnText,false); showErr(step,'');
+      } else if(st.stage==='error'){
+        clearInterval(_POLL_TIMER); _POLL_TIMER=null;
+        setBtn(btnId,btnText,false); showErr(step,st.error||'Ошибка');
+      }
+    }catch(e){ /* временный обрыв сети — просто продолжаем опрос */ }
+  },1500);
 }
 
 // ============================================================
@@ -657,14 +743,17 @@ async function sendCode1(){
 
   setBtn('btn1','Отправляем код Telegram…',true);
   const res=await post('/api/sendcode',{api_id:parseInt(api_id), api_hash, phone, stage:'telethon'});
-  setBtn('btn1','Получить код Telegram →',false);
 
-  if(res.ok){
-    showErr(1,'');
-    show(2);
-  } else {
+  if(!res.ok){
+    setBtn('btn1','Получить код Telegram →',false);
     showErr(1,res.error||'Ошибка');
+    return;
   }
+  setBtn('btn1','Получить код Telegram →',false);
+  showErr(1,'');
+  show(2);
+  setBtn('btn2','Ждём код от Telegram…',true);
+  pollCodeState(2,'btn2','Войти (Telethon) →');
 }
 
 async function signIn1(){
@@ -728,14 +817,17 @@ async function sendCode2(){
 
   setBtn('btn5','Отправляем код Telegram…',true);
   const res=await post('/api/sendcode',{phone, stage:'hydrogram'});
-  setBtn('btn5','Получить код для Hydrogram →',false);
 
-  if(res.ok){
-    showErr(5,'');
-    show(6);
-  } else {
+  if(!res.ok){
+    setBtn('btn5','Получить код для Hydrogram →',false);
     showErr(5,res.error||'Ошибка');
+    return;
   }
+  setBtn('btn5','Получить код для Hydrogram →',false);
+  showErr(5,'');
+  show(6);
+  setBtn('btn6','Ждём код от Telegram…',true);
+  pollCodeState(6,'btn6','Войти (Hydrogram) →');
 }
 
 async function signIn2(){
@@ -785,6 +877,7 @@ class SetupServer:
         save_config_fn: Callable,
         get_config_fn: Callable,
         hydrogram_only: bool = False,
+        data_dir_override: Path | None = None,
     ) -> None:
         self._save_config = save_config_fn
         self._get_config = get_config_fn
@@ -795,25 +888,95 @@ class SetupServer:
         self._last_password: str | None = None
         self._done = asyncio.Event()
         self._runner: Any = None
+        self._setup_token: str = ""
+        self._limiter: Any = None
         self._hydrogram_only: bool = bool(hydrogram_only)
         self._telethon_success: bool = False
         self._hydrogram_success: bool = False
         self._hydro_client: Any = None
         self._hydro_phone: str | None = None
         self._hydro_phone_code_hash: str | None = None
-    async def start(self, host: str = "0.0.0.0", port: int = 8080) -> None:
-        app = web.Application()
+
+        self._code_stage: str = "idle"
+        self._code_error: str | None = None
+        self._code_task: Any = None
+        self._code_backend: str | None = None
+        self._data_dir_override: Path | None = (
+            Path(data_dir_override) if data_dir_override else None
+        )
+
+
+        self._bg_tasks: set[asyncio.Task] = set()
+
+    def _spawn(self, coro) -> asyncio.Task:
+        task = asyncio.ensure_future(coro)
+        self._bg_tasks.add(task)
+        task.add_done_callback(self._bg_tasks.discard)
+        return task
+
+    async def _cancel_bg_tasks_and_wait(self) -> None:
+        tasks = [t for t in list(self._bg_tasks) if not t.done()]
+        if not tasks:
+            return
+        for t in tasks:
+            t.cancel()
+        with contextlib.suppress(Exception):
+            await asyncio.wait_for(
+                asyncio.gather(*tasks, return_exceptions=True),
+                timeout=5.0,
+            )
+
+    def _cancel_code_task(self) -> None:
+        task = self._code_task
+        if task is not None and not task.done():
+            task.cancel()
+        self._code_task = None
+
+    def _ddir(self) -> Path:
+        if self._data_dir_override is not None:
+            return self._data_dir_override
+        from ..paths import data_dir as _kdd
+        return _kdd()
+    async def start(self, host: str = "127.0.0.1", port: int = 8080) -> None:
+        from . import auth as _auth
+
+        exposed = host not in ("127.0.0.1", "::1", "localhost")
+        self._setup_token = _auth.generate_token()
+        self._limiter = _auth.RateLimiter()
+
+        middleware = _auth.build_auth_middleware(
+            get_token=lambda: self._setup_token,
+            limiter=self._limiter,
+            public_paths=frozenset({"/health"}),
+        )
+        app = web.Application(middlewares=[middleware])
         app.router.add_get("/", self._index)
+        app.router.add_get("/health", self._health)
         app.router.add_post("/api/sendcode", self._api_sendcode)
         app.router.add_post("/api/signin", self._api_signin)
         app.router.add_post("/api/2fa", self._api_2fa)
         app.router.add_get("/api/mode", self._api_mode)
+        app.router.add_get("/api/state", self._api_state)
         app.router.add_get("/static/{filename}", self._static)
         self._runner = web.AppRunner(app)
         await self._runner.setup()
         site = web.TCPSite(self._runner, host, port)
         await site.start()
-        url = f"http://127.0.0.1:{port}"
+
+
+        try:
+
+
+            self._spawn(self._ensure_proxy_deps())
+        except Exception:
+            pass
+        if exposed:
+            logger.warning(
+                "SetupServer: мастер настройки слушает %s — доступен из сети! "
+                "Вход защищён одноразовым токеном (см. ссылку в консоли).",
+                host,
+            )
+        url = f"http://127.0.0.1:{port}/?token={self._setup_token}"
         import os as _os
         is_termux = bool(_os.environ.get("PREFIX", "").find("com.termux") != -1)
         lan_url = url
@@ -823,7 +986,7 @@ class SetupServer:
                 with _socket.socket(_socket.AF_INET, _socket.SOCK_DGRAM) as _s:
                     _s.connect(("8.8.8.8", 80))
                     _lan_ip = _s.getsockname()[0]
-                lan_url = f"http://{_lan_ip}:{port}"
+                lan_url = f"http://{_lan_ip}:{port}/?token={self._setup_token}"
             except Exception:
                 pass
         print(f"\n{'━' * 42}")
@@ -841,6 +1004,9 @@ class SetupServer:
                 pass
     async def wait_done(self) -> None:
         await self._done.wait()
+
+        self._cancel_code_task()
+        await self._cancel_bg_tasks_and_wait()
         if self._hydro_client is not None:
             try:
                 await self._hydro_client.disconnect()
@@ -867,6 +1033,9 @@ class SetupServer:
         return web.FileResponse(path)
     async def _index(self, _: web.Request) -> web.Response:
         return web.Response(text=_HTML, content_type="text/html")
+    async def _health(self, _: web.Request) -> web.Response:
+        return web.json_response({"ok": True, "stage": "setup"})
+
     async def _api_mode(self, _: web.Request) -> web.Response:
         cfg = self._get_config() or {}
         return web.json_response({
@@ -874,6 +1043,20 @@ class SetupServer:
             "api_id": cfg.get("api_id") if self._hydrogram_only else None,
             "api_hash": cfg.get("api_hash") if self._hydrogram_only else None,
             "phone": cfg.get("phone") if self._hydrogram_only else None,
+        })
+
+    async def _api_state(self, _: web.Request) -> web.Response:
+        if self._code_backend == "hydrogram":
+            _phone = self._hydro_phone
+        else:
+            _phone = self._phone
+        return web.json_response({
+            "stage": self._code_stage,
+            "error": self._code_error,
+            "backend": self._code_backend,
+            "telethon_done": bool(self._telethon_success),
+            "hydrogram_done": bool(self._hydrogram_success),
+            "phone": _phone if self._code_stage != "idle" else None,
         })
     async def _api_sendcode(self, request: web.Request) -> web.Response:
         try:
@@ -908,6 +1091,48 @@ class SetupServer:
         if stage == "hydrogram":
             return await self._api_2fa_hydrogram(data)
         return await self._api_2fa_telethon(data)
+    async def _ensure_proxy_deps(self) -> None:
+        try:
+            cfg = self._get_config() or {}
+        except Exception:
+            return
+        proxy_cfg = cfg.get("proxy") or {}
+        if not (proxy_cfg.get("host") and proxy_cfg.get("port")):
+            return
+        try:
+            import python_socks  # noqa: F401
+            return
+        except ImportError:
+            pass
+        logger.info("setup: python-socks отсутствует, ставлю заранее в фоне…")
+        try:
+            import sys as _sys
+            from ..utils.proc import run_cmd as _run_cmd
+
+
+            _rc, _out, _pip_err = await _run_cmd(
+                [
+                    _sys.executable, "-m", "pip", "install", "--quiet",
+                    "--disable-pip-version-check", "--no-warn-script-location",
+                    "python-socks[asyncio]>=2.4.4",
+                ],
+                timeout=300,
+            )
+            if _rc != 0:
+                raise RuntimeError(
+                    (_pip_err or b"").decode(errors="replace").strip()
+                    or f"pip завершился с кодом {_rc}"
+                )
+            import importlib
+            importlib.invalidate_caches()
+            logger.info("setup: python-socks[asyncio] установлен (фоновая предустановка)")
+        except Exception as _exc:
+            logger.error(
+                "setup: не удалось предустановить python-socks: %s. "
+                "Прокси будет отключён — поставь вручную: "
+                "pip install 'python-socks[asyncio]>=2.4.4'", _exc,
+            )
+
     async def _build_proxy(self, cfg: dict) -> tuple[Any, dict]:
         proxy_cfg = cfg.get("proxy") or {}
         proxy = None
@@ -916,31 +1141,16 @@ class SetupServer:
             return proxy, extra
         ptype = str(proxy_cfg.get("type", "SOCKS5")).upper()
         try:
-            import python_socks              
+            import python_socks
             _has_python_socks = True
         except ImportError:
+
+
             _has_python_socks = False
             logger.warning(
-                "setup: python-socks не установлен — Telethon проигнорирует прокси. "
-                "Пытаюсь установить автоматически…"
+                "setup: python-socks не установлен — прокси недоступен, Telethon его "
+                "проигнорирует. Установи вручную: pip install 'python-socks[asyncio]>=2.4.4'"
             )
-            try:
-                import sys as _sys, subprocess as _sp
-                _sp.check_call(
-                    [_sys.executable, "-m", "pip", "install", "--quiet",
-                     "--disable-pip-version-check", "--no-warn-script-location",
-                     "python-socks[asyncio]>=2.4.4"]
-                )
-                import importlib
-                importlib.invalidate_caches()
-                import python_socks              
-                _has_python_socks = True
-                logger.info("setup: python-socks[asyncio] установлен в рантайме")
-            except Exception as _exc:
-                logger.error(
-                    "setup: не удалось установить python-socks: %s. "
-                    "Прокси будет отключён.", _exc,
-                )
         if not _has_python_socks:
             return proxy, extra
         if ptype == "MTPROTO":
@@ -996,7 +1206,7 @@ class SetupServer:
             from ..tl_cache import KitsuneTelegramClient
             from telethon.sessions import MemorySession
             from pathlib import Path
-            DATA_DIR = Path.home() / ".kitsune"
+            DATA_DIR = self._ddir()
             DATA_DIR.mkdir(parents=True, exist_ok=True)
             proxy, extra = await self._build_proxy(cfg)
             self._client = KitsuneTelegramClient(
@@ -1011,17 +1221,46 @@ class SetupServer:
                 lang_code="en",
                 system_lang_code="en-US",
                 proxy=proxy,
+                flood_sleep_threshold=60,
                 **extra,
             )
-            await asyncio.wait_for(self._client.connect(), timeout=30)
-            result = await self._client.send_code_request(self._phone)
-            self._phone_hash = result.phone_code_hash
-            return web.json_response({"ok": True})
+            self._code_stage = "sending"
+            self._code_error = None
+            self._code_backend = "telethon"
+
+            async def _bg_sendcode() -> None:
+                try:
+                    await asyncio.wait_for(self._client.connect(), timeout=30)
+                    result = await asyncio.wait_for(
+                        self._client.send_code_request(self._phone), timeout=60
+                    )
+                    self._phone_hash = result.phone_code_hash
+                    self._code_stage = "code_sent"
+                except asyncio.TimeoutError:
+                    self._client = None
+                    self._code_stage = "error"
+                    self._code_error = (
+                        "Не удалось подключиться к Telegram. Проверь интернет-соединение."
+                    )
+                except Exception as exc:
+                    logger.exception("setup: фоновая отправка кода не удалась")
+                    self._code_stage = "error"
+                    self._code_error = str(exc)
+
+            self._cancel_code_task()
+            self._code_task = self._spawn(_bg_sendcode())
+            return web.json_response({"ok": True, "pending": True})
         except asyncio.TimeoutError:
             self._client = None
+            self._code_stage = "error"
+            self._code_error = (
+                "Не удалось подключиться к Telegram. Проверь интернет-соединение."
+            )
             return self._err("Не удалось подключиться к Telegram. Проверь интернет-соединение.")
         except Exception as exc:
             logger.exception("setup: /api/sendcode (telethon) error")
+            self._code_stage = "error"
+            self._code_error = str(exc)
             return self._err(str(exc))
     async def _api_signin_telethon(self, data: dict) -> web.Response:
         try:
@@ -1074,7 +1313,7 @@ class SetupServer:
     async def _save_telethon_session(self, me: Any) -> None:
         from telethon.sessions import SQLiteSession
         from pathlib import Path
-        DATA_DIR = Path.home() / ".kitsune"
+        DATA_DIR = self._ddir()
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         session_file = DATA_DIR / "kitsune.session"
         for _suf in ("", "-wal", "-shm", "-journal"):
@@ -1095,9 +1334,9 @@ class SetupServer:
         try:
             import os as _os
             if session_file.exists():
-                _os.chmod(session_file, 0o644)
-        except Exception:
-            pass
+                _os.chmod(session_file, 0o600)
+        except Exception as _e:
+            logger.debug("setup: chmod session file не поддерживается — %s", _e)
         self._client.session = session
         self._client.tg_id = me.id
         self._client.tg_me = me
@@ -1117,7 +1356,7 @@ class SetupServer:
                     "Сначала пройди регистрацию Telethon."
                 )
             from pathlib import Path as _Path
-            DATA_DIR = _Path.home() / ".kitsune"
+            DATA_DIR = self._ddir()
             DATA_DIR.mkdir(parents=True, exist_ok=True)
             hydro_session_file = DATA_DIR / "kitsune_hydro.session"
             for _suf in ("", "-journal", ".wal", ".shm"):
@@ -1170,16 +1409,43 @@ class SetupServer:
                     pass
                 self._hydro_client = None
             self._hydro_client = HydroClient(**kwargs)
-            await self._hydro_client.connect()
-            sent = await asyncio.wait_for(
-                self._hydro_client.send_code(self._hydro_phone), timeout=30.0,
-            )
-            self._hydro_phone_code_hash = sent.phone_code_hash
-            return web.json_response({"ok": True})
+            try:
+                self._hydro_client.flood_sleep_threshold = 60
+            except Exception:
+                pass
+            self._code_stage = "sending"
+            self._code_error = None
+            self._code_backend = "hydrogram"
+
+            async def _bg_sendcode_hydro() -> None:
+                try:
+                    await asyncio.wait_for(self._hydro_client.connect(), timeout=30)
+                    sent = await asyncio.wait_for(
+                        self._hydro_client.send_code(self._hydro_phone), timeout=60,
+                    )
+                    self._hydro_phone_code_hash = sent.phone_code_hash
+                    self._code_stage = "code_sent"
+                except asyncio.TimeoutError:
+                    self._code_stage = "error"
+                    self._code_error = (
+                        "Не удалось подключиться к Telegram (timeout). Проверь связь."
+                    )
+                except Exception as exc:
+                    logger.exception("setup: фоновая отправка кода (hydrogram) не удалась")
+                    self._code_stage = "error"
+                    self._code_error = str(exc)
+
+            self._cancel_code_task()
+            self._code_task = self._spawn(_bg_sendcode_hydro())
+            return web.json_response({"ok": True, "pending": True})
         except asyncio.TimeoutError:
+            self._code_stage = "error"
+            self._code_error = "Не удалось подключиться к Telegram (timeout). Проверь связь."
             return self._err("Не удалось подключиться к Telegram (timeout). Проверь связь.")
         except Exception as exc:
             logger.exception("setup: /api/sendcode (hydrogram) error")
+            self._code_stage = "error"
+            self._code_error = str(exc)
             return self._err(str(exc))
     async def _api_signin_hydrogram(self, data: dict) -> web.Response:
         try:
@@ -1199,7 +1465,7 @@ class SetupServer:
                     SessionPasswordNeeded as _HydroSessionPasswordNeeded,
                 )
             except Exception:
-                _HydroSessionPasswordNeeded = Exception                            
+                _HydroSessionPasswordNeeded = Exception
             try:
                 me = await self._hydro_client.sign_in(
                     self._hydro_phone,
@@ -1232,7 +1498,7 @@ class SetupServer:
                     PasswordHashInvalid as _HydroPasswordHashInvalid,
                 )
             except Exception:
-                _HydroPasswordHashInvalid = Exception                            
+                _HydroPasswordHashInvalid = Exception
             try:
                 me = await self._hydro_client.check_password(password)
             except _HydroPasswordHashInvalid:

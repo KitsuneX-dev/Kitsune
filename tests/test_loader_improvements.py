@@ -282,3 +282,780 @@ async def test_loader_includes_pip_stderr_in_error(tmp_path, monkeypatch):
         await loader.load_from_file(mod_file)
     msg = str(exc.value)
     assert "could not resolve" in msg or "pip stderr" in msg
+
+
+def test_scan_ast_blocks_from_os_import_system():
+    from kitsune.core.loader import _scan_ast, ASTSecurityError
+    with pytest.raises(ASTSecurityError) as exc:
+        _scan_ast("from os import system\nsystem('ls')")
+    assert "system" in str(exc.value)
+
+
+def test_scan_ast_blocks_os_alias_system():
+    from kitsune.core.loader import _scan_ast, ASTSecurityError
+    with pytest.raises(ASTSecurityError):
+        _scan_ast("import os as p\np.system('ls')")
+
+
+def test_scan_ast_blocks_dunder_import_assigned_to_variable():
+    from kitsune.core.loader import _scan_ast, ASTSecurityError
+    with pytest.raises(ASTSecurityError):
+        _scan_ast("m = __import__('os')\nm.popen('id')")
+
+
+def test_scan_ast_blocks_import_module_assigned_to_variable():
+    from kitsune.core.loader import _scan_ast, ASTSecurityError
+    with pytest.raises(ASTSecurityError):
+        _scan_ast("import importlib\nm = importlib.import_module('os')\nm.system('ls')")
+
+
+def test_scan_ast_blocks_os_dict_access():
+    from kitsune.core.loader import _scan_ast, ASTSecurityError
+    with pytest.raises(ASTSecurityError):
+        _scan_ast("import os\nos.__dict__['system']('ls')")
+
+
+def test_scan_ast_blocks_getattr_with_computed_attr_on_os():
+    from kitsune.core.loader import _scan_ast, ASTSecurityError
+    with pytest.raises(ASTSecurityError):
+        _scan_ast("import os\ngetattr(os, 'sys' + 'tem')('ls')")
+
+
+def test_scan_ast_blocks_shutil_rmtree():
+    from kitsune.core.loader import _scan_ast, ASTSecurityError
+    with pytest.raises(ASTSecurityError):
+        _scan_ast("import shutil\nshutil.rmtree('/tmp/x')")
+
+
+def test_scan_ast_blocks_shutil_rmtree_via_alias():
+    from kitsune.core.loader import _scan_ast, ASTSecurityError
+    with pytest.raises(ASTSecurityError):
+        _scan_ast("import shutil as sh\nsh.rmtree('/tmp/x')")
+
+
+def test_scan_ast_blocks_os_remove_and_unlink():
+    from kitsune.core.loader import _scan_ast, ASTSecurityError
+    with pytest.raises(ASTSecurityError):
+        _scan_ast("import os\nos.remove('/tmp/x')")
+    with pytest.raises(ASTSecurityError):
+        _scan_ast("import os\nos.unlink('/tmp/x')")
+
+
+def test_scan_ast_blocks_from_shutil_import_rmtree():
+    from kitsune.core.loader import _scan_ast, ASTSecurityError
+    with pytest.raises(ASTSecurityError):
+        _scan_ast("from shutil import rmtree")
+
+
+def test_scan_ast_warns_on_sensitive_open_without_blocking():
+    import ast
+    from kitsune.core import loader as ld
+    for src in (
+        "f = open('/home/u/kitsune.session')",
+        "f = open('data/kitsune.key')",
+        "f = open('config.toml')",
+        "name = 'x'\nf = open(f'{name}/config.toml')",
+    ):
+        ld._scan_ast(src)
+        scanner = ld._ASTScanner()
+        scanner.visit(ast.parse(src))
+        assert scanner.warnings
+        assert not scanner.errors
+
+
+def test_scan_ast_allows_plain_open_and_safe_shutil():
+    import ast
+    from kitsune.core import loader as ld
+    src = "import shutil\nshutil.copy('a', 'b')\nwith open('/tmp/data.txt') as f:\n    pass\n"
+    ld._scan_ast(src)
+    scanner = ld._ASTScanner()
+    scanner.visit(ast.parse(src))
+    assert not scanner.warnings
+
+
+def test_scan_ast_allows_variable_named_like_os():
+    from kitsune.core.loader import _scan_ast
+    _scan_ast("os_name = 'linux'\nprint(os_name)")
+
+
+def test_scan_ast_blocks_asyncio_create_subprocess_shell():
+    from kitsune.core.loader import _scan_ast, ASTSecurityError
+    with pytest.raises(ASTSecurityError) as exc:
+        _scan_ast("import asyncio\nasyncio.create_subprocess_shell('echo')")
+    assert "asyncio subprocess spawn" in str(exc.value)
+
+
+def test_scan_ast_blocks_asyncio_create_subprocess_exec():
+    from kitsune.core.loader import _scan_ast, ASTSecurityError
+    with pytest.raises(ASTSecurityError) as exc:
+        _scan_ast("import asyncio\nasyncio.create_subprocess_exec('ping', 'test')")
+    assert "asyncio subprocess spawn" in str(exc.value)
+
+
+def test_scan_ast_blocks_loop_subprocess_shell_and_exec():
+    from kitsune.core.loader import _scan_ast, ASTSecurityError
+    for src in (
+        "loop.subprocess_shell(proto, 'echo')",
+        "loop.subprocess_exec(proto, 'echo', 'test')",
+        "anything.subprocess_shell('echo')",
+    ):
+        with pytest.raises(ASTSecurityError) as exc:
+            _scan_ast(src)
+        assert "asyncio subprocess spawn" in str(exc.value)
+
+
+def test_scan_ast_allows_similar_named_method():
+    from kitsune.core.loader import _scan_ast
+    _scan_ast("my_object.subprocess_helper()")
+    _scan_ast("import asyncio\nasyncio.sleep(1)")
+    _scan_ast("obj.create_subprocess_shell_wrapper()")
+
+
+def test_scan_ast_blocks_from_import_asyncio_create_subprocess_shell():
+    from kitsune.core.loader import _scan_ast, ASTSecurityError
+    with pytest.raises(ASTSecurityError) as exc:
+        _scan_ast(
+            "from asyncio import create_subprocess_shell\n"
+            "create_subprocess_shell('echo')"
+        )
+    assert "from-import of asyncio.create_subprocess_shell" in str(exc.value)
+
+
+def test_scan_ast_blocks_from_import_asyncio_create_subprocess_exec():
+    from kitsune.core.loader import _scan_ast, ASTSecurityError
+    with pytest.raises(ASTSecurityError) as exc:
+        _scan_ast(
+            "from asyncio import create_subprocess_exec\n"
+            "create_subprocess_exec('echo', 'test')"
+        )
+    assert "from-import of asyncio.create_subprocess_exec" in str(exc.value)
+
+
+def test_scan_ast_blocks_from_import_asyncio_subprocess_aliased():
+    from kitsune.core.loader import _scan_ast, ASTSecurityError
+    for src in (
+        "from asyncio import create_subprocess_shell as run_it",
+        "from asyncio import subprocess_shell",
+        "from asyncio import subprocess_exec",
+    ):
+        with pytest.raises(ASTSecurityError) as exc:
+            _scan_ast(src)
+        assert "from-import of asyncio." in str(exc.value)
+
+
+def test_scan_ast_allows_legit_from_import_asyncio():
+    from kitsune.core.loader import _scan_ast
+    _scan_ast("from asyncio import gather, sleep, Event")
+    _scan_ast("from asyncio import sleep as nap\nnap(1)")
+
+
+def test_scan_ast_blocks_getattr_asyncio_create_subprocess_shell():
+    from kitsune.core.loader import _scan_ast, ASTSecurityError
+    with pytest.raises(ASTSecurityError) as exc:
+        _scan_ast(
+            "import asyncio\n"
+            "fn = getattr(asyncio, 'create_subprocess_shell')\n"
+            "fn('echo')"
+        )
+    assert "getattr access to 'create_subprocess_shell'" in str(exc.value)
+
+
+def test_scan_ast_blocks_getattr_asyncio_subprocess_exec():
+    from kitsune.core.loader import _scan_ast, ASTSecurityError
+    with pytest.raises(ASTSecurityError) as exc:
+        _scan_ast(
+            "import asyncio\n"
+            "fn = getattr(asyncio, 'subprocess_exec')\n"
+            "fn('echo', 'test')"
+        )
+    assert "getattr access to 'subprocess_exec'" in str(exc.value)
+
+
+def test_scan_ast_allows_getattr_non_subprocess_names():
+    from kitsune.core.loader import _scan_ast
+    _scan_ast("getattr(some_object, 'create_subprocess_shell_wrapper')")
+    _scan_ast("import asyncio\ngetattr(asyncio, 'sleep')")
+
+
+def test_scan_ast_blocks_dunder_import_inline_chain():
+    from kitsune.core.loader import _scan_ast, ASTSecurityError
+    with pytest.raises(ASTSecurityError) as exc:
+        _scan_ast("__import__('os').system('echo')")
+    assert "os.system" in str(exc.value)
+
+
+def test_scan_ast_blocks_import_module_inline_chain():
+    from kitsune.core.loader import _scan_ast, ASTSecurityError
+    with pytest.raises(ASTSecurityError) as exc:
+        _scan_ast("import importlib\nimportlib.import_module('os').system('echo')")
+    assert "os.system" in str(exc.value)
+
+
+def test_scan_ast_blocks_inline_chain_destructive():
+    from kitsune.core.loader import _scan_ast, ASTSecurityError
+    with pytest.raises(ASTSecurityError):
+        _scan_ast("__import__('shutil').rmtree('/tmp/x')")
+    with pytest.raises(ASTSecurityError):
+        _scan_ast("__import__('os').remove('/tmp/x')")
+
+
+def test_scan_ast_blocks_sys_modules_literal_lookup():
+    from kitsune.core.loader import _scan_ast, ASTSecurityError
+    with pytest.raises(ASTSecurityError) as exc:
+        _scan_ast("import sys\nsys.modules['os'].system('echo')")
+    assert "module registry access to 'os'" in str(exc.value)
+
+
+def test_scan_ast_blocks_sys_modules_via_module_alias():
+    from kitsune.core.loader import _scan_ast, ASTSecurityError
+    with pytest.raises(ASTSecurityError) as exc:
+        _scan_ast("import sys as s\ns.modules['os'].system('echo')")
+    assert "module registry access to 'os'" in str(exc.value)
+
+
+def test_scan_ast_blocks_sys_modules_via_registry_binding():
+    from kitsune.core.loader import _scan_ast, ASTSecurityError
+    with pytest.raises(ASTSecurityError) as exc:
+        _scan_ast("import sys\nreg = sys.modules\nreg['subprocess'].Popen('echo')")
+    assert "module registry access to 'subprocess'" in str(exc.value)
+
+
+def test_scan_ast_blocks_sys_modules_get_with_literal_key():
+    from kitsune.core.loader import _scan_ast, ASTSecurityError
+    for src in (
+        "import sys\nsys.modules.get('subprocess')",
+        "import sys\nsys.modules.pop('os')",
+        "import sys\nsys.modules.setdefault('ctypes', None)",
+    ):
+        with pytest.raises(ASTSecurityError) as exc:
+            _scan_ast(src)
+        assert "module registry lookup" in str(exc.value)
+
+
+def test_scan_ast_blocks_sys_modules_with_folded_key():
+    from kitsune.core.loader import _scan_ast, ASTSecurityError
+    with pytest.raises(ASTSecurityError) as exc:
+        _scan_ast("import sys\nsys.modules['o' + 's'].system('echo')")
+    assert "module registry access to 'os'" in str(exc.value)
+
+
+def test_scan_ast_allows_sys_modules_with_computed_key():
+    from kitsune.core.loader import _scan_ast
+    _scan_ast(
+        "import sys\n"
+        "def f(module_name, py_module):\n"
+        "    mod = sys.modules.get(module_name)\n"
+        "    other = sys.modules[module_name]\n"
+        "    sys.modules[module_name] = py_module\n"
+        "    sys.modules.pop(module_name, None)\n"
+        "    return mod, other\n"
+    )
+
+
+def test_scan_ast_allows_sys_modules_non_sensitive_literal():
+    from kitsune.core.loader import _scan_ast
+    _scan_ast("import sys\nmod = sys.modules.get('kitsune.log')")
+
+
+def test_scan_ast_blocks_bare_import_module_call():
+    from kitsune.core.loader import _scan_ast, ASTSecurityError
+    with pytest.raises(ASTSecurityError) as exc:
+        _scan_ast("from importlib import import_module\nimport_module('subprocess')")
+    assert "import_module" in str(exc.value)
+
+
+def test_scan_ast_blocks_aliased_import_module_call():
+    from kitsune.core.loader import _scan_ast, ASTSecurityError
+    with pytest.raises(ASTSecurityError) as exc:
+        _scan_ast("from importlib import import_module as im\nim('ctypes')")
+    assert "import_module" in str(exc.value)
+
+
+def test_scan_ast_blocks_dunder_import_bound_to_variable():
+    from kitsune.core.loader import _scan_ast, ASTSecurityError
+    with pytest.raises(ASTSecurityError) as exc:
+        _scan_ast("f = __import__\nf('subprocess')")
+    assert "subprocess" in str(exc.value)
+
+
+def test_scan_ast_blocks_bare_import_module_dynamic_arg():
+    from kitsune.core.loader import _scan_ast, ASTSecurityError
+    with pytest.raises(ASTSecurityError) as exc:
+        _scan_ast("from importlib import import_module\ndef f(name):\n    return import_module(name)")
+    assert "dynamic" in str(exc.value)
+
+
+def test_scan_ast_allows_import_module_with_safe_literal():
+    from kitsune.core.loader import _scan_ast
+    _scan_ast("from importlib import import_module\nmod = import_module('json')")
+
+
+def test_scan_ast_blocks_operator_attrgetter_sensitive_name():
+    from kitsune.core.loader import _scan_ast, ASTSecurityError
+    with pytest.raises(ASTSecurityError) as exc:
+        _scan_ast("import operator\nimport os\noperator.attrgetter('system')(os)('echo')")
+    assert "operator.attrgetter() access to 'system'" in str(exc.value)
+
+
+def test_scan_ast_blocks_operator_methodcaller_sensitive_name():
+    from kitsune.core.loader import _scan_ast, ASTSecurityError
+    with pytest.raises(ASTSecurityError) as exc:
+        _scan_ast("import operator\nimport os\noperator.methodcaller('system', 'echo')(os)")
+    assert "operator.methodcaller() access to 'system'" in str(exc.value)
+
+
+def test_scan_ast_blocks_attr_helper_via_from_import():
+    from kitsune.core.loader import _scan_ast, ASTSecurityError
+    for src, expected in (
+        ("from operator import attrgetter\nattrgetter('popen')(os)", "attrgetter"),
+        ("from operator import methodcaller\nmethodcaller('kill')(os)", "methodcaller"),
+        ("from operator import attrgetter as ag\nag('execv')(os)", "attrgetter"),
+    ):
+        with pytest.raises(ASTSecurityError) as exc:
+            _scan_ast(src)
+        assert expected in str(exc.value)
+
+
+def test_scan_ast_blocks_attr_helper_via_assignment_binding():
+    from kitsune.core.loader import _scan_ast, ASTSecurityError
+    with pytest.raises(ASTSecurityError) as exc:
+        _scan_ast("import operator\nag = operator.attrgetter\nimport os\nag('system')(os)")
+    assert "operator.attrgetter() access to 'system'" in str(exc.value)
+
+
+def test_scan_ast_blocks_attr_helper_via_module_alias():
+    from kitsune.core.loader import _scan_ast, ASTSecurityError
+    with pytest.raises(ASTSecurityError) as exc:
+        _scan_ast("import operator as op\nimport os\nop.attrgetter('fork')(os)")
+    assert "operator.attrgetter() access to 'fork'" in str(exc.value)
+
+
+def test_scan_ast_blocks_attr_helper_with_dynamic_argument():
+    from kitsune.core.loader import _scan_ast, ASTSecurityError
+    for src in (
+        "from operator import attrgetter\ndef f(name):\n    return attrgetter(name)",
+        "import operator\ndef f(name):\n    return operator.methodcaller(name, 'x')",
+    ):
+        with pytest.raises(ASTSecurityError) as exc:
+            _scan_ast(src)
+        assert "dynamic operator." in str(exc.value)
+
+
+def test_scan_ast_blocks_attr_helper_without_arguments():
+    from kitsune.core.loader import _scan_ast, ASTSecurityError
+    with pytest.raises(ASTSecurityError) as exc:
+        _scan_ast("import operator\noperator.attrgetter()")
+    assert "without arguments" in str(exc.value)
+
+
+def test_scan_ast_blocks_attr_helper_destructive_and_async_names():
+    from kitsune.core.loader import _scan_ast, ASTSecurityError
+    for src, expected in (
+        ("import operator\nimport shutil\noperator.attrgetter('rmtree')(shutil)", "'rmtree'"),
+        ("import operator\nimport asyncio\n"
+         "operator.attrgetter('create_subprocess_shell')(asyncio)", "'create_subprocess_shell'"),
+        ("import operator\noperator.attrgetter('__import__')(builtins)", "'__import__'"),
+    ):
+        with pytest.raises(ASTSecurityError) as exc:
+            _scan_ast(src)
+        assert expected in str(exc.value)
+
+
+def test_scan_ast_blocks_attr_helper_with_folded_argument():
+    from kitsune.core.loader import _scan_ast, ASTSecurityError
+    with pytest.raises(ASTSecurityError) as exc:
+        _scan_ast("import operator\noperator.attrgetter('sys' + 'tem')(os)")
+    assert "operator.attrgetter() access to 'system'" in str(exc.value)
+
+
+def test_scan_ast_allows_operator_helpers_with_safe_names():
+    from kitsune.core.loader import _scan_ast
+    _scan_ast("import operator\nkey = operator.attrgetter('name')")
+    _scan_ast("from operator import methodcaller\nf = methodcaller('strip')")
+    _scan_ast("import operator\nkey = operator.attrgetter('user.first_name')")
+    _scan_ast("import operator\nkey = operator.itemgetter(0)")
+    _scan_ast(
+        "import operator\n"
+        "from functools import reduce\n"
+        "total = reduce(operator.add, [1, 2, 3])\n"
+    )
+
+
+def test_scan_ast_blocks_wildcard_import_from_sensitive_modules():
+    from kitsune.core.loader import _scan_ast, ASTSecurityError
+    for module in ("os", "asyncio", "shutil", "sys", "importlib", "builtins", "os.path"):
+        with pytest.raises(ASTSecurityError) as exc:
+            _scan_ast(f"from {module} import *")
+        assert f"wildcard import from {module}" in str(exc.value)
+
+
+def test_scan_ast_blocks_wildcard_import_from_blocked_modules():
+    from kitsune.core.loader import _scan_ast, ASTSecurityError
+    for module in ("subprocess", "ctypes", "socket", "pickle"):
+        with pytest.raises(ASTSecurityError) as exc:
+            _scan_ast(f"from {module} import *")
+        assert module in str(exc.value)
+
+
+def test_scan_ast_allows_wildcard_import_from_safe_modules():
+    from kitsune.core.loader import _scan_ast
+    _scan_ast("from typing import *")
+    _scan_ast("from .helpers import *")
+    _scan_ast("from . import *")
+
+
+def test_scan_ast_control_group_stays_clean():
+    from kitsune.core.loader import _scan_ast
+    for src in (
+        "import os\np = os.path.join('a', 'b')",
+        "import os\nv = os.getenv('HOME')",
+        "import os\nos.makedirs('/tmp/x', exist_ok=True)",
+        "import shutil\nshutil.copy('a', 'b')",
+        "from pathlib import Path\np = Path('/tmp')",
+        "import importlib.util\n"
+        "spec = importlib.util.spec_from_file_location('m', '/tmp/m.py')",
+        "import importlib\ndef f(mod):\n    importlib.reload(mod)",
+        "from os import path, getenv",
+        "from typing import Any, Optional",
+        "def f(obj, name):\n    return getattr(obj, name, None)",
+        "import asyncio\nasync def f():\n    await asyncio.sleep(1)",
+    ):
+        _scan_ast(src)
+
+
+@pytest.mark.parametrize("src", [
+
+    "().__class__.__base__.__subclasses__()",
+    "x = ().__class__.__base__",
+    "x = (1, 2).__class__.__bases__",
+
+    "''.__class__.__mro__[1].__subclasses__()",
+    "x = ''.__class__.__mro__",
+    "x = type('').__mro__[1].__subclasses__()",
+
+    "def f(): pass\nf.__globals__['__builtins__']",
+    "def f(): pass\ng = f.__globals__",
+    "def f(): pass\nx = f.__globals__['os']",
+    "def f(): pass\nx = f.func_globals",
+
+    "def f(): pass\nx = f.__code__",
+    "def f(): pass\nx = f.func_code",
+    "def f(): pass\nx = f.__closure__",
+    "def f(obj): return obj.__getattribute__('x')",
+    "def f(obj): return obj.__reduce__()",
+    "def f(obj): return obj.__reduce_ex__(2)",
+])
+def test_scan_ast_blocks_sandbox_escape_attribute(src):
+    from kitsune.core.loader import _scan_ast, ASTSecurityError
+    with pytest.raises(ASTSecurityError) as exc:
+        _scan_ast(src)
+    assert "sandbox escape attribute" in str(exc.value)
+
+
+@pytest.mark.parametrize("src,attr", [
+    ("x = ().__class__", "__class__"),
+    ("x = mod.__class__.__name__", "__class__"),
+    ("def f(obj): return obj.__self__", "__self__"),
+    ("def f(obj): return obj.__func__", "__func__"),
+])
+def test_scan_ast_soft_findings_for_introspection_dunders(src, attr):
+    import ast as _ast
+    from kitsune.core.loader import _ASTScanner, _scan_ast
+
+    scanner = _ASTScanner()
+    scanner.visit(_ast.parse(src))
+    assert scanner.errors == []
+    assert scanner.soft_findings, "ожидалась мягкая находка"
+    assert any(attr in finding for finding in scanner.soft_findings)
+
+    for finding in scanner.soft_findings:
+        assert finding in scanner.warnings
+
+    _scan_ast(src)
+
+
+def test_soft_and_hard_escape_attr_sets_are_disjoint_partition():
+    from kitsune.core.loader import (
+        _HARD_ESCAPE_ATTRS,
+        _SANDBOX_ESCAPE_ATTRS,
+        _SOFT_ESCAPE_ATTRS,
+    )
+    assert isinstance(_SOFT_ESCAPE_ATTRS, frozenset)
+    assert isinstance(_HARD_ESCAPE_ATTRS, frozenset)
+    assert _SOFT_ESCAPE_ATTRS & _HARD_ESCAPE_ATTRS == frozenset()
+    assert _SOFT_ESCAPE_ATTRS | _HARD_ESCAPE_ATTRS == _SANDBOX_ESCAPE_ATTRS
+    assert _SOFT_ESCAPE_ATTRS == frozenset({"__class__", "__self__", "__func__"})
+
+
+@pytest.mark.parametrize("src", [
+
+    "getattr((), '__class__')",
+    "getattr(getattr((), '__class__'), '__base__')",
+    "getattr(().__class__.__base__, '__subclasses__')()",
+    "getattr('', '__class__')",
+    "getattr(''.__class__, '__mro__')",
+    "def f(): pass\ngetattr(f, '__globals__')",
+    "def f(): pass\ngetattr(f, '__globals__')['__builtins__']",
+    "def f(): pass\ngetattr(f, 'func_globals')",
+
+    "def f(): pass\ngetattr(f, '__code__')",
+    "def f(): pass\ngetattr(f, 'func_code')",
+    "def f(): pass\ngetattr(f, '__closure__')",
+    "def f(obj): return getattr(obj, '__bases__')",
+    "def f(obj): return getattr(obj, '__mro__')",
+    "def f(obj): return getattr(obj, '__subclasses__')",
+    "def f(obj): return getattr(obj, '__self__')",
+    "def f(obj): return getattr(obj, '__func__')",
+    "def f(obj): return getattr(obj, '__getattribute__')",
+    "def f(obj): return getattr(obj, '__reduce__')",
+    "def f(obj): return getattr(obj, '__reduce_ex__')",
+])
+def test_scan_ast_blocks_sandbox_escape_via_getattr_literal(src):
+    from kitsune.core.loader import _scan_ast, ASTSecurityError
+    with pytest.raises(ASTSecurityError) as exc:
+        _scan_ast(src)
+    assert "sandbox escape attribute" in str(exc.value)
+
+
+@pytest.mark.parametrize("attr", [
+    "__class__", "__base__", "__bases__", "__mro__", "__subclasses__",
+    "__globals__", "func_globals", "__code__", "func_code", "__closure__",
+    "__self__", "__func__", "__getattribute__", "__reduce__", "__reduce_ex__",
+])
+def test_sandbox_escape_attrs_frozenset_covers_all_vectors(attr):
+    from kitsune.core.loader import _SANDBOX_ESCAPE_ATTRS, _SENSITIVE_ATTR_NAMES
+    assert isinstance(_SANDBOX_ESCAPE_ATTRS, frozenset)
+    assert attr in _SANDBOX_ESCAPE_ATTRS
+
+    assert attr in _SENSITIVE_ATTR_NAMES
+
+
+@pytest.mark.parametrize("src", [
+    "import operator\noperator.attrgetter('__class__')(())",
+    "from operator import attrgetter\nattrgetter('__subclasses__')(object)",
+    "import operator\noperator.methodcaller('__reduce__')(object())",
+])
+def test_scan_ast_blocks_sandbox_escape_via_operator_helpers(src):
+    from kitsune.core.loader import _scan_ast, ASTSecurityError
+    with pytest.raises(ASTSecurityError):
+        _scan_ast(src)
+
+
+def test_scan_ast_allows_safe_dunder_attrs_after_escape_hardening():
+    from kitsune.core.loader import _scan_ast
+    for src in (
+        "x = obj.__name__",
+        "x = obj.__doc__",
+        "x = obj.__dict__",
+        "class M:\n    def __init__(self):\n        self.x = 1\n",
+        "def f(obj): return getattr(obj, '__name__', '?')",
+        "x = __name__",
+        "class M:\n    async def __aenter__(self):\n        return self\n",
+    ):
+        _scan_ast(src)
+
+
+@pytest.mark.parametrize("src", [
+
+    "getattr((), '__cla' + 'ss__')",
+    "getattr((), f'__class__')",
+    "getattr(obj, '__sub' + 'classes__')",
+    "getattr(obj, '__glob' 'als__')",
+
+    "vars(obj)['__subclasses__']",
+    "o = object()\nvars(o)['__class__']",
+    "globals()['__globals__']",
+
+    "'{0.__class__.__base__.__subclasses__}'.format(())",
+    "import string\nstring.Formatter().get_field('0.__class__', [()], {})",
+    "'{0.__class__}'.format_map({0: ()})",
+    "'{0[__class__]}'.format(())",
+    "'{0:{1.__class__}}'.format(1, ())",
+    "import string\nstring.Formatter().vformat('{0.__globals__}', [f], {})",
+])
+def test_scan_ast_blocks_folded_and_format_escape_vectors(src):
+    from kitsune.core.loader import _scan_ast, ASTSecurityError
+    with pytest.raises(ASTSecurityError) as exc:
+        _scan_ast(src)
+    assert "sandbox escape attribute" in str(exc.value)
+
+
+def test_getattr_escape_check_uses_folded_str_like_attrgetter():
+    from kitsune.core.loader import _ASTScanner
+    import ast
+    node = ast.parse("getattr((), '__cla' + 'ss__')", mode="eval").body
+    assert _ASTScanner._folded_str(node.args[1]) == "__class__"
+
+
+def test_namespace_subscript_checks_sandbox_escape_attrs():
+    from kitsune.core.loader import _scan_ast, ASTSecurityError, _SANDBOX_ESCAPE_ATTRS
+    for attr in sorted(_SANDBOX_ESCAPE_ATTRS):
+        with pytest.raises(ASTSecurityError) as exc:
+            _scan_ast(f"vars(obj)[{attr!r}]")
+        assert attr in str(exc.value)
+
+
+def test_format_template_parser_finds_sensitive_attr():
+    from kitsune.core.loader import _ASTScanner
+    f = _ASTScanner._format_template_sensitive_attr
+    assert f("{0.__class__.__base__}") == "__class__"
+    assert f("{0[__subclasses__]}") == "__subclasses__"
+    assert f("{0:{1.__globals__}}") == "__globals__"
+
+    assert f("{} {name} {0.id}") is None
+    assert f("{0.__name__}") is None
+    assert f("{:>10}") is None
+    assert f("{{literal}}") is None
+
+    assert f("{unclosed") is None
+
+
+@pytest.mark.parametrize("src", [
+
+    "'{}'.format(1)",
+    "'{name}'.format(name='x')",
+    "'{0.name} {0.id}'.format(user)",
+    "'{:>10}'.format('x')",
+    "'{0[0]}'.format([1])",
+    "'{a[key]}'.format(a={'key': 1})",
+    "d = {'x': 1}\nprint('{x}'.format_map(d))",
+    "'{0.__name__}'.format(cls)",
+    "'{{literal}}'.format()",
+    "'{0!r}'.format(x)",
+    "template.format(**data)",
+    "'{unclosed'.format()",
+
+    "def f(obj, name):\n    return getattr(obj, name, None)",
+
+    "vars(obj)['name']",
+    "globals()['MY_CONST']",
+])
+def test_scan_ast_allows_safe_format_and_namespace_usage(src):
+    from kitsune.core.loader import _scan_ast
+    _scan_ast(src)
+
+
+def test_paths_exposes_single_source_of_truth_for_modes():
+    from kitsune import paths
+    assert paths.PRIVATE_DIR_MODE == 0o700
+    assert paths.PRIVATE_FILE_MODE == 0o600
+
+
+def test_harden_dir_creates_and_fixes_mode(tmp_path):
+    import stat as _stat
+    from kitsune.paths import harden_dir, PRIVATE_DIR_MODE
+    target = tmp_path / "data"
+    harden_dir(target)
+    assert target.is_dir()
+    assert _stat.S_IMODE(target.stat().st_mode) == PRIVATE_DIR_MODE
+
+    target.chmod(0o755)
+    harden_dir(target)
+    assert _stat.S_IMODE(target.stat().st_mode) == PRIVATE_DIR_MODE
+
+
+def test_harden_file_fixes_mode(tmp_path):
+    import stat as _stat
+    from kitsune.paths import harden_file, PRIVATE_FILE_MODE
+    f = tmp_path / "kitsune.session"
+    f.write_bytes(b"x")
+    f.chmod(0o644)
+    harden_file(f)
+    assert _stat.S_IMODE(f.stat().st_mode) == PRIVATE_FILE_MODE
+
+    harden_file(tmp_path / "missing")
+
+
+def test_no_literal_0o755_in_data_dir_owners():
+    from pathlib import Path as _P
+    root = _P(__file__).resolve().parents[1] / "kitsune"
+    for name in ("main.py", "session_enc.py", "accounts_manager.py",
+                 "crypto.py", "account_setup.py", "__init__.py"):
+        text = (root / name).read_text(encoding="utf-8")
+        assert "0o755" not in text, name
+
+
+def test_session_enc_and_accounts_use_paths_helpers():
+    from pathlib import Path as _P
+    root = _P(__file__).resolve().parents[1] / "kitsune"
+    for name in ("session_enc.py", "accounts_manager.py"):
+        text = (root / name).read_text(encoding="utf-8")
+        assert "harden_dir" in text, name
+
+
+def test_data_dir_mode_is_independent_of_import_order(tmp_path, monkeypatch):
+    import stat as _stat
+    import subprocess
+    from pathlib import Path as _P
+    root = _P(__file__).resolve().parents[1]
+    data = tmp_path / "vol"
+    env = dict(os.environ)
+    env["KITSUNE_DATA_DIR"] = str(data)
+    env.pop("DOCKER", None)
+    code = (
+        f"import sys; sys.path.insert(0, {str(root)!r})\n"
+        "import kitsune.session_enc as se\n"
+        "import kitsune.main as m\n"
+        "se._fix_all_permissions()\n"
+    )
+    proc = subprocess.run(
+        [sys.executable, "-c", code], env=env, capture_output=True, text=True,
+        timeout=120,
+    )
+    assert proc.returncode == 0, proc.stderr[-2000:]
+    assert _stat.S_IMODE(data.stat().st_mode) == 0o700
+    for sub in ("modules", "logs"):
+        p = data / sub
+        if p.exists():
+            assert _stat.S_IMODE(p.stat().st_mode) == 0o700
+
+
+def test_account_dir_is_private(tmp_path, monkeypatch):
+    import stat as _stat
+    import importlib
+    monkeypatch.setenv("KITSUNE_DATA_DIR", str(tmp_path / "vol"))
+    import kitsune.paths as paths
+    importlib.reload(paths)
+    import kitsune.accounts_manager as am
+    importlib.reload(am)
+    mgr = am.AccountsManager()
+    meta = mgr.create_account("probe")
+    adir = mgr.account_dir(meta["slug"])
+    assert _stat.S_IMODE(adir.stat().st_mode) == 0o700
+    for sub in ("modules", "logs"):
+        assert _stat.S_IMODE((adir / sub).stat().st_mode) == 0o700
+    assert _stat.S_IMODE(am.accounts_root().stat().st_mode) == 0o700
+
+
+_FRAME_ESCAPE_VECTORS = [
+    "import sys\nsys._getframe().f_globals['__builtins__']",
+    "import sys\nsys._getframe(0).f_globals['os'].system('ls')",
+    "import sys\nsys._getframe().f_back.f_globals['__builtins__']",
+    "import sys\nsys._getframe().f_builtins['__import__']('os')",
+    "import sys\nsys._getframe().f_locals['secret']",
+    "def g():\n    yield 1\ng().gi_frame.f_globals['__builtins__']",
+    "async def c():\n    pass\nc().cr_frame.f_globals['__builtins__']",
+    "try:\n    pass\nexcept Exception as e:\n    e.__traceback__.tb_frame.f_globals['__builtins__']",
+    "import inspect\ninspect.currentframe().f_globals['__builtins__']",
+]
+
+
+@pytest.mark.parametrize("src", _FRAME_ESCAPE_VECTORS)
+def test_scan_ast_blocks_frame_escape_vectors(src):
+    from kitsune.core.loader import _scan_ast, ASTSecurityError
+    with pytest.raises(ASTSecurityError):
+        _scan_ast(src)
+
+
+@pytest.mark.xfail(strict=True, reason="динамическое имя атрибута не сворачивается статически")
+def test_scan_ast_blocks_dynamic_getattr_tuple_subclasses():
+    from kitsune.core.loader import _scan_ast, ASTSecurityError
+    with pytest.raises(ASTSecurityError):
+        _scan_ast("n = '__cl' + 'ass'.upper()\ngetattr((), n)")
+
+
+@pytest.mark.xfail(strict=True, reason="имя атрибута приходит из рантайм-переменной")
+def test_scan_ast_blocks_dynamic_getattr_runtime_name():
+    from kitsune.core.loader import _scan_ast, ASTSecurityError
+    with pytest.raises(ASTSecurityError):
+        _scan_ast("n = ''.join(['f_glo', 'bals'])\ngetattr((), n)")

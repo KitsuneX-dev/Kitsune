@@ -6,6 +6,10 @@ import traceback
 from ..core.loader import KitsuneModule, command
 from ..core.security import OWNER
 from ..utils import escape_html, truncate
+from ..utils.proc import run_cmd
+
+
+_SH_TIMEOUT = 30
 
 class EvalModule(KitsuneModule):
     name        = "eval"
@@ -59,17 +63,17 @@ class EvalModule(KitsuneModule):
         cmd = parts[1].strip()
         m = await event.reply(f"⏳ <code>{escape_html(cmd)}</code>", parse_mode="html")
         try:
-            proc = await asyncio.create_subprocess_shell(
+
+
+            rc, stdout, stderr = await run_cmd(
                 cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
+                timeout=_SH_TIMEOUT,
+                shell=True,
             )
-            try:
-                stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=30)
-                output = stdout.decode(errors="replace").strip()
-            except asyncio.TimeoutError:
-                proc.kill()
-                output = "⏰ Timeout (30s)"
+            if rc == -9 and not stdout:
+                output = f"⏰ Timeout ({_SH_TIMEOUT}s)"
+            else:
+                output = (stdout + stderr).decode(errors="replace").strip()
             out = (
                 f"<b>$</b> <code>{escape_html(cmd)}</code>\n"
                 f"<code>{escape_html(truncate(output, 3000))}</code>"

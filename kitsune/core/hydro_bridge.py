@@ -6,6 +6,28 @@ from collections import deque
 
 logger = logging.getLogger(__name__)
 
+
+def _resolve_edit_fallback_errors() -> tuple[type[BaseException], ...]:
+    names = (
+        "MessageNotModifiedError",
+        "MessageIdInvalidError",
+        "MessageAuthorRequiredError",
+        "MessageEditTimeExpiredError",
+    )
+    collected: list[type[BaseException]] = []
+    try:
+        from telethon import errors as _tl_errors
+        for name in names:
+            cls = getattr(_tl_errors, name, None)
+            if isinstance(cls, type) and issubclass(cls, BaseException):
+                collected.append(cls)
+    except Exception:
+        logger.debug("HydroBridge: не удалось импортировать ошибки telethon", exc_info=True)
+    return tuple(collected)
+
+
+_EDIT_FALLBACK_ERRORS: tuple[type[BaseException], ...] = _resolve_edit_fallback_errors()
+
 class _HydroMessageAdapter:
     def __init__(self, hydro_msg, telethon_client) -> None:
         self._msg = hydro_msg
@@ -44,7 +66,11 @@ class _HydroMessageAdapter:
                 self.chat_id, self._msg.id, text,
                 parse_mode=parse_mode, **kwargs,
             )
-        except Exception:
+        except _EDIT_FALLBACK_ERRORS as exc:
+            logger.info(
+                "HydroBridge.edit: правка невозможна (%s), отправляю новое сообщение",
+                type(exc).__name__,
+            )
             return await self._client.send_message(
                 self.chat_id, text, parse_mode=parse_mode, **kwargs,
             )
@@ -67,8 +93,14 @@ class _HydroMessageAdapter:
     async def get_reply_message(self) -> typing.Any | None:
         rp = getattr(self._msg, "reply_to_message", None)
         return _HydroMessageAdapter(rp, self._client) if rp else None
-    async def download_media(self, *args, **kwargs) -> bytes | None:
+    async def download_media(self, file=None, *args, **kwargs) -> bytes | str | None:
         try:
+            import os as _os
+            if file is not None:
+                await self._msg.download(file_name=file)
+                if isinstance(file, (str, _os.PathLike)):
+                    return _os.fspath(file)
+                return "<stream>"
             import io
             buf = io.BytesIO()
             await self._msg.download(file_name=buf)

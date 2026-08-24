@@ -22,7 +22,7 @@ def test_scan_ast_allows_safe_code():
             async def hello_cmd(self, event):
                 await event.reply("hi")
     """)
-    _scan_ast(safe)                                
+    _scan_ast(safe)
 def test_scan_ast_blocks_subprocess():
     from kitsune.core.loader import _scan_ast, ASTSecurityError
     with pytest.raises(ASTSecurityError):

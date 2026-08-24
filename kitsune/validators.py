@@ -26,8 +26,8 @@ class Boolean(Validator):
         )
     @staticmethod
     def _validate(value: ConfigAllowedTypes, /) -> bool:
-        true_vals = {"true", "1", "yes", "on", "y", True, 1}
-        false_vals = {"false", "0", "no", "off", "n", False, 0}
+        true_vals = {"true", "1", "yes", "on", "y", True}
+        false_vals = {"false", "0", "no", "off", "n", False}
         normalized = str(value).lower() if isinstance(value, str) else value
         if normalized in true_vals:
             return True
@@ -69,8 +69,8 @@ class Integer(Validator):
     ) -> int:
         try:
             value = int(str(value).strip())
-        except (ValueError, TypeError):
-            raise ValidationError(f"«{value}» is not an integer")
+        except (ValueError, TypeError) as exc:
+            raise ValidationError(f"«{value}» is not an integer") from exc
         if minimum is not None and value < minimum:
             raise ValidationError(f"Value {value} is less than minimum ({minimum})")
         if maximum is not None and value > maximum:
@@ -107,8 +107,8 @@ class Float(Validator):
     ) -> float:
         try:
             value = float(str(value).strip().replace(",", "."))
-        except (ValueError, TypeError):
-            raise ValidationError(f"«{value}» is not a float")
+        except (ValueError, TypeError) as exc:
+            raise ValidationError(f"«{value}» is not a float") from exc
         if minimum is not None and value < minimum:
             raise ValidationError(f"Value {value} is less than minimum ({minimum})")
         if maximum is not None and value > maximum:
@@ -280,7 +280,7 @@ class Series(Validator):
                 try:
                     validated.append(validator.validate(item))
                 except ValidationError as exc:
-                    raise ValidationError(f"Item «{item}» is invalid: {exc}")
+                    raise ValidationError(f"Item «{item}» is invalid: {exc}") from exc
             value = validated
         return value
 class Link(Validator):
@@ -297,8 +297,8 @@ class Link(Validator):
             result = urllib.parse.urlparse(str(value))
             if result.scheme not in ("http", "https") or not result.netloc:
                 raise ValueError
-        except Exception:
-            raise ValidationError(f"«{value}» is not a valid URL (http/https)")
+        except Exception as exc:
+            raise ValidationError(f"«{value}» is not a valid URL (http/https)") from exc
         return str(value)
 class TelegramID(Validator):
     def __init__(self):
@@ -311,8 +311,8 @@ class TelegramID(Validator):
     def _validate(value: ConfigAllowedTypes, /) -> int:
         try:
             value = int(str(value).strip())
-        except (ValueError, TypeError):
-            raise ValidationError(f"«{value}» is not a Telegram ID")
+        except (ValueError, TypeError) as exc:
+            raise ValidationError(f"«{value}» is not a Telegram ID") from exc
         s = str(value)
         if s.startswith("-100"):
             value = int(s[4:])
@@ -357,3 +357,112 @@ class Union(Validator):
             except ValidationError:
                 pass
         raise ValidationError(f"«{value}» did not pass any validator")
+class NoneType(Validator):
+    def __init__(self):
+        super().__init__(
+            self._validate,
+            doc="empty value",
+            _internal_id="NoneType",
+        )
+    @staticmethod
+    def _validate(value: ConfigAllowedTypes, /) -> None:
+        if value:
+            raise ValidationError(f"Passed value «{value}» is not empty")
+        return None
+_EMOJI_PATTERN = re.compile(
+    "["
+    "\U0001F1E6-\U0001F1FF"
+    "\U0001F300-\U0001F5FF"
+    "\U0001F600-\U0001F64F"
+    "\U0001F680-\U0001F6FF"
+    "\U0001F700-\U0001F77F"
+    "\U0001F780-\U0001F7FF"
+    "\U0001F800-\U0001F8FF"
+    "\U0001F900-\U0001F9FF"
+    "\U0001FA00-\U0001FAFF"
+    "\U00002600-\U000026FF"
+    "\U00002700-\U000027BF"
+    "\U0000FE00-\U0000FE0F"
+    "\U00002190-\U000021FF"
+    "\U00002300-\U000023FF"
+    "\U0000200D"
+    "\U000020E3"
+    "]+",
+    flags=re.UNICODE,
+)
+def _count_emojis(value: str) -> typing.Tuple[int, str]:
+    stripped = _EMOJI_PATTERN.sub("", value)
+    clusters = _EMOJI_PATTERN.findall(value)
+    return len(clusters), stripped
+class Emoji(Validator):
+    def __init__(
+        self,
+        length: typing.Optional[int] = None,
+        min_len: typing.Optional[int] = None,
+        max_len: typing.Optional[int] = None,
+    ):
+        parts = ["emoji string"]
+        if length is not None:
+            parts.append(f"exactly {length} emojis")
+        elif min_len is not None and max_len is not None:
+            parts.append(f"{min_len}–{max_len} emojis")
+        elif min_len is not None:
+            parts.append(f"at least {min_len} emojis")
+        elif max_len is not None:
+            parts.append(f"up to {max_len} emojis")
+        super().__init__(
+            functools.partial(
+                self._validate,
+                length=length,
+                min_len=min_len,
+                max_len=max_len,
+            ),
+            doc=", ".join(parts),
+            _internal_id="Emoji",
+        )
+    @staticmethod
+    def _validate(
+        value: ConfigAllowedTypes,
+        /,
+        *,
+        length: typing.Optional[int],
+        min_len: typing.Optional[int],
+        max_len: typing.Optional[int],
+    ) -> str:
+        value = str(value)
+        count, remainder = _count_emojis(value)
+        if remainder.strip():
+            raise ValidationError(f"«{value}» is not a valid emoji-only string")
+        if length is not None and count != length:
+            raise ValidationError(f"«{value}» is not {length} emojis long")
+        if min_len is not None and count < min_len:
+            raise ValidationError(f"«{value}» must contain at least {min_len} emojis")
+        if max_len is not None and count > max_len:
+            raise ValidationError(f"«{value}» must contain no more than {max_len} emojis")
+        return value
+class EntityLike(RegExp):
+    def __init__(self):
+        super().__init__(
+            regex=r"^(?:@|https?://t\.me/)?(?:[a-zA-Z0-9_]{5,32}|[a-zA-Z0-9_]{1,32}\?[a-zA-Z0-9_]{1,32}|-?\d+)$",
+            description="username, t.me link or chat id",
+        )
+    @staticmethod
+    def _validate(
+        value: ConfigAllowedTypes,
+        /,
+        *,
+        regex: str,
+        flags: typing.Optional[re.RegexFlag] = None,
+    ) -> typing.Union[str, int]:
+        value = RegExp._validate(value, regex=regex, flags=flags)
+        if value.lstrip("-").isdigit():
+            if value.startswith("-100"):
+                value = value[4:]
+            return int(value)
+        if value.startswith("https://t.me/"):
+            value = value.split("https://t.me/", 1)[1]
+        elif value.startswith("http://t.me/"):
+            value = value.split("http://t.me/", 1)[1]
+        if not value.startswith("@"):
+            value = f"@{value}"
+        return value

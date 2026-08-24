@@ -63,7 +63,7 @@ class QueryGallery:
         except ImportError:
             return False
         results = []
-        for i, (url, cap) in enumerate(zip(items[:50], captions)):
+        for i, (url, cap) in enumerate(zip(items[:50], captions, strict=False)):
             result_id = str(uuid.uuid4())
             common = {
                 "id":          result_id,

@@ -70,10 +70,9 @@ class RateLimiter:
         if self._cleanup_task is None or self._cleanup_task.done():
             self._cleanup_task = asyncio.ensure_future(self._cleanup_loop(interval))
     async def _cleanup_loop(self, interval: float) -> None:
-        _IDLE_TTL = 3600.0  
+        _IDLE_TTL = 3600.0
         while True:
             await asyncio.sleep(interval)
-            now = time.monotonic()
             stale = [
                 uid for uid, bucket in self._buckets.items()
                 if uid != self._owner_id and bucket.idle_seconds() > _IDLE_TTL

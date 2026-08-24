@@ -9,9 +9,9 @@ from dataclasses import dataclass, field
 logger = logging.getLogger(__name__)
 
 
-STATE_CLOSED    = "closed"                          
-STATE_OPEN      = "open"                                    
-STATE_HALF_OPEN = "half_open"                                
+STATE_CLOSED    = "closed"
+STATE_OPEN      = "open"
+STATE_HALF_OPEN = "half_open"
 
 
 class CircuitBreakerOpenError(RuntimeError):
@@ -34,12 +34,12 @@ class CircuitBreaker:
         *,
         failure_threshold: int = 5,
         cooldown: float = 60.0,
-        expected_exceptions: typing.Tuple[type, ...] | None = None,
+        expected_exceptions: typing.Tuple[type[BaseException], ...] | None = None,
     ) -> None:
         self.name = name
         self._failure_threshold = max(1, int(failure_threshold))
         self._cooldown = max(0.0, float(cooldown))
-        self._expected: typing.Tuple[type, ...] = expected_exceptions or (
+        self._expected: typing.Tuple[type[BaseException], ...] = expected_exceptions or (
             TimeoutError,
             asyncio.TimeoutError,
             ConnectionError,
@@ -58,7 +58,7 @@ class CircuitBreaker:
         if self._stats.state != STATE_OPEN:
             return self._stats.state == STATE_OPEN
         if time.monotonic() - self._stats.opened_at >= self._cooldown:
-            return False                                
+            return False
         return True
     async def allow(self) -> bool:
         async with self._lock:
@@ -172,7 +172,7 @@ class _CircuitBreakerRegistry:
         *,
         failure_threshold: int = 5,
         cooldown: float = 60.0,
-        expected_exceptions: typing.Tuple[type, ...] | None = None,
+        expected_exceptions: typing.Tuple[type[BaseException], ...] | None = None,
     ) -> CircuitBreaker:
         cb = self._items.get(name)
         if cb is not None:
@@ -197,7 +197,7 @@ def get_breaker(
     *,
     failure_threshold: int = 5,
     cooldown: float = 60.0,
-    expected_exceptions: typing.Tuple[type, ...] | None = None,
+    expected_exceptions: typing.Tuple[type[BaseException], ...] | None = None,
 ) -> CircuitBreaker:
     return global_registry.get_or_create(
         name,
@@ -225,7 +225,7 @@ async def retry_with_backoff(
     *args: typing.Any,
     policy: RetryPolicy | None = None,
     on_retry: typing.Callable[[int, BaseException], typing.Awaitable[None] | None] | None = None,
-    expected_exceptions: typing.Tuple[type, ...] = (
+    expected_exceptions: typing.Tuple[type[BaseException], ...] = (
         TimeoutError, asyncio.TimeoutError, ConnectionError, OSError,
     ),
     name: str = "anonymous",
@@ -260,7 +260,8 @@ async def retry_with_backoff(
             continue
         except Exception:
             raise
-    assert last_exc is not None                 
+    if last_exc is None:
+        raise RuntimeError(f"retry[{name}]: цикл повторов завершился без исключения и без результата")
     raise last_exc
 class DegradationFlags:
     def __init__(self) -> None:

@@ -1,11 +1,16 @@
 from __future__ import annotations
 import asyncio
+import contextlib
 import logging
 import os
 import shutil
 import sys
 import tempfile
 import time
+
+from ..._internal import graceful_restart
+from ...utils import git_async
+from ...utils.proc import run_cmd
 
 logger = logging.getLogger(__name__)
 
@@ -15,6 +20,9 @@ _CHECK_INTERVAL = 3600
 
 
 _FIRST_CHECK_DELAY = 300
+
+
+_PIP_TIMEOUT = 1200
 
 class UpdateChecker:
     def __init__(self, client, db) -> None:
@@ -40,31 +48,29 @@ class UpdateChecker:
                 logger.exception("UpdateChecker: check failed")
             await asyncio.sleep(_CHECK_INTERVAL)
     async def _check(self) -> None:
+
+
         try:
-            import git
-            repo = git.Repo(self._repo_path)
-            try:
-                branch = repo.active_branch.name
-            except TypeError:
-                branch = "main"
+            repo = await git_async.open_repo(self._repo_path)
+            branch = await git_async.active_branch(repo)
         except Exception as exc:
             logger.debug("UpdateChecker: git repo unavailable — %s", exc)
             return
         try:
-            for remote in repo.remotes:
-                remote.fetch()
+            await git_async.fetch(repo, None)
         except Exception as exc:
             logger.debug("UpdateChecker: fetch failed — %s", exc)
             return
         try:
-            diff = repo.git.log([f"HEAD..origin/{branch}", "--oneline"])
+            diff = await git_async.git_log(repo, [f"HEAD..origin/{branch}", "--oneline"])
         except Exception as exc:
             logger.debug("UpdateChecker: git log failed — %s", exc)
             return
         if not diff:
             return
         try:
-            remote_sha = next(repo.iter_commits(f"origin/{branch}", max_count=1)).hexsha
+            commits = await git_async.iter_commits(repo, f"origin/{branch}", max_count=1)
+            remote_sha = commits[0].hexsha
         except Exception:
             return
         if remote_sha == self._db.get(_DB_KEY, "last_notified_commit", None):
@@ -80,7 +86,7 @@ class UpdateChecker:
             changes += f"\n<i>...и ещё {count - 8} коммитов</i>"
         from kitsune.version import __version_str__
         try:
-            remote_version = repo.git.show(f"origin/{branch}:kitsune/version.py")
+            remote_version = await git_async.git_show(repo, f"origin/{branch}:kitsune/version.py")
             import re
             m = re.search(r"__version__\s*=\s*\((\d+),\s*(\d+),\s*(\d+)\)", remote_version)
             new_ver = f"{m.group(1)}.{m.group(2)}.{m.group(3)}" if m else f"{__version_str__}+{count}"
@@ -165,7 +171,7 @@ class UpdateChecker:
                     member_data = await resp.json()
             status = member_data.get("result", {}).get("status", "")
             if status in ("member", "administrator", "creator"):
-                return                    
+                return
             from telethon.tl.functions.channels import InviteToChannelRequest
             from telethon.tl.functions.messages import AddChatUserRequest
             bot_entity = await asyncio.wait_for(self._client.get_entity(bot_username), timeout=15)
@@ -214,27 +220,24 @@ class UpdateChecker:
     async def _run_update(self, edit) -> None:
         await edit("⬇️ <b>Скачиваю обновление...</b>\n████░░░░░░░░  33%")
         try:
-            import git
-            repo   = git.Repo(self._repo_path)
-            origin = repo.remote("origin")
+            repo = await git_async.open_repo(self._repo_path)
             for attempt in range(3):
                 try:
-                    origin.fetch()
+                    await git_async.fetch(repo, "origin")
                     break
                 except Exception:
                     if attempt == 2:
                         raise
                     await asyncio.sleep(10)
-            try:
-                branch = repo.active_branch.name
-            except TypeError:
-                branch = "main"
+            branch = await git_async.active_branch(repo)
             config_path   = os.path.join(self._repo_path, "config.toml")
             config_backup = None
             if os.path.exists(config_path):
                 backup_dir = os.path.join(self._repo_path, ".kitsune_update_backup")
                 try:
-                    os.makedirs(backup_dir, exist_ok=True)
+
+
+                    os.makedirs(backup_dir, mode=0o700, exist_ok=True)
                     config_backup = os.path.join(backup_dir, "config.toml")
                 except OSError:
                     fd, config_backup = tempfile.mkstemp(suffix=".toml")
@@ -242,33 +245,43 @@ class UpdateChecker:
                 try:
                     with open(config_path, "rb") as _src, open(config_backup, "wb") as _dst:
                         _dst.write(_src.read())
+
+
+                    with contextlib.suppress(OSError):
+                        os.chmod(config_backup, 0o600)
                 except OSError as _e:
                     logger.warning(
                         "UpdateChecker: failed to backup config.toml (%s) \u2014 skipping backup",
                         _e,
                     )
                     config_backup = None
-            repo.git.reset("--hard", f"origin/{branch}")
+            await git_async.git_reset(repo, "--hard", f"origin/{branch}")
             if config_backup and os.path.exists(config_backup):
+                _restored = False
                 try:
                     with open(config_backup, "rb") as _src, open(config_path, "wb") as _dst:
                         _dst.write(_src.read())
+                    _restored = True
                 except OSError as _e:
-                    logger.warning(
-                        "UpdateChecker: failed to restore config.toml (%s)",
-                        _e,
+                    logger.error(
+                        "UpdateChecker: failed to restore config.toml (%s) \u2014 "
+                        "backup kept at %s, restore it manually",
+                        _e, config_backup,
                     )
                 finally:
-                    try:
-                        os.unlink(config_backup)
-                    except OSError:
-                        pass
-                    backup_dir = os.path.join(self._repo_path, ".kitsune_update_backup")
-                    if os.path.isdir(backup_dir):
+
+
+                    if _restored:
                         try:
-                            os.rmdir(backup_dir)
+                            os.unlink(config_backup)
                         except OSError:
                             pass
+                        backup_dir = os.path.join(self._repo_path, ".kitsune_update_backup")
+                        if os.path.isdir(backup_dir):
+                            try:
+                                os.rmdir(backup_dir)
+                            except OSError:
+                                pass
         except Exception as exc:
             raise RuntimeError(f"Git update failed: {exc}") from exc
         await edit("📦 <b>Устанавливаю зависимости...</b>\n████████░░░░  67%")
@@ -279,17 +292,18 @@ class UpdateChecker:
         )
         if not os.path.exists(req_file):
             req_file = os.path.join(self._repo_path, "requirements.txt")
-        proc = await asyncio.create_subprocess_exec(
-            sys.executable, "-m", "pip", "install", "-r", req_file, "--quiet",
+
+
+        rc, _out, stderr = await run_cmd(
+            [sys.executable, "-m", "pip", "install", "-r", req_file, "--quiet"],
+            timeout=_PIP_TIMEOUT,
             cwd=self._repo_path,
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.PIPE,
         )
-        _, stderr = await proc.communicate()
-        if proc.returncode != 0:
-            raise RuntimeError(stderr.decode()[:300])
+        if rc != 0:
+            raise RuntimeError(stderr.decode(errors="replace")[:300] or f"pip rc={rc}")
         await edit("🔄 <b>Перезапускаю...</b>\n████████████  100%")
         await asyncio.sleep(1)
+        await graceful_restart(self._client, self._db)
         os.execl(sys.executable, sys.executable, "-m", "kitsune")
     async def notify_update_done(self) -> None:
         chat_id     = self._db.get(_DB_KEY, "update_msg_chat",  None)

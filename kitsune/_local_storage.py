@@ -8,7 +8,8 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_PATH = Path.home() / ".kitsune" / "local_storage.json"
+from .paths import data_dir as _kdd
+_DEFAULT_PATH = _kdd() / "local_storage.json"
 
 class LocalStorage:
     def __init__(self, path: Path | str | None = None) -> None:

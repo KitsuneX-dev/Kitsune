@@ -16,7 +16,7 @@ def _get_bot_ready_event(client) -> asyncio.Event | None:
     if event is None:
         try:
             event = asyncio.Event()
-            setattr(client, "_kitsune_bot_ready", event)
+            client._kitsune_bot_ready = event
         except Exception:
             return None
     return event
@@ -32,7 +32,8 @@ def _make_bot(token: str) -> typing.Any:
     return make_aiogram_bot(str(token), parse_mode="HTML", timeout=60)
 def _get_platform() -> str:
     import sys, os
-    if os.path.exists("/data/data/tech.ula") or "com.termux" in os.environ.get("PREFIX", ""):
+    from kitsune.utils.platform import is_userland
+    if is_userland() or "com.termux" in os.environ.get("PREFIX", ""):
         return "📱 Android (UserLand)"
     if "ANDROID_ROOT" in os.environ or "ANDROID_DATA" in os.environ:
         return "📱 Android (Termux)"
@@ -266,10 +267,7 @@ class BotRunner:
         if owner_id is None:
             owner_id = getattr(self._client, "tg_id", None)
             if owner_id is not None:
-                import asyncio as _asyncio
-                _asyncio.ensure_future(
-                    self._db.set(_DB_KEY, "owner_id", owner_id)
-                )
+                await self._db.set(_DB_KEY, "owner_id", owner_id)
                 logger.info("BotRunner: owner_id restored from tg_id=%s", owner_id)
         if owner_id is None or msg.from_user.id != int(owner_id):
             try:
@@ -453,7 +451,7 @@ class BotRunner:
         await self._db.set("kitsune.core", "lang", code)
         await self._db.set(_DB_KEY, "lang_asked", True)
         try:
-            from ...translations import Translator                
+            from ...translations import Translator
             tr = getattr(self._client, "_kitsune_translator", None)
             if tr is None:
                 tr = Translator(self._db)

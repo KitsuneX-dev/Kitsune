@@ -6,10 +6,95 @@ import time
 import typing
 from ..core.loader import KitsuneModule, command, ModuleConfig, ConfigValue
 from ..core.security import OWNER
+from .. import validators
 
 logger = logging.getLogger(__name__)
 
 _DB_OWNER = "kitsune.api_limiter"
+
+_TL_GROUPS: tuple[str, ...] = (
+    "account",
+    "auth",
+    "bots",
+    "channels",
+    "chatlists",
+    "contacts",
+    "folders",
+    "fragment",
+    "help",
+    "langpack",
+    "messages",
+    "payments",
+    "phone",
+    "photos",
+    "premium",
+    "smsjobs",
+    "stats",
+    "stickers",
+    "stories",
+    "updates",
+    "upload",
+    "users",
+)
+
+def _build_constructors() -> dict[str, int]:
+    try:
+        from telethon.tl import functions
+        from telethon.tl.tlobject import TLRequest
+    except Exception:
+        logger.warning("APILimiter: telethon TL functions unavailable")
+        return {}
+    result: dict[str, int] = {}
+    for group_name in _TL_GROUPS:
+        group = getattr(functions, group_name, None)
+        if group is None:
+            continue
+        for attr in dir(group):
+            method = getattr(group, attr, None)
+            if not isinstance(method, type):
+                continue
+            try:
+                if not issubclass(method, TLRequest):
+                    continue
+            except TypeError:
+                continue
+            constructor_id = getattr(method, "CONSTRUCTOR_ID", None)
+            if constructor_id is None:
+                continue
+            result[method.__name__.rsplit("Request", 1)[0].lower()] = constructor_id
+    return result
+CONSTRUCTORS: dict[str, int] = _build_constructors()
+
+_FORBIDDABLE_METHODS: list[str] = [
+    "getUserPhotos",
+    "sendReaction",
+    "joinChannel",
+    "importChatInvite",
+    "exportChatInvite",
+    "leaveChannel",
+    "deleteChannel",
+    "setPrivacy",
+    "updateProfile",
+    "updateUsername",
+    "changePhone",
+    "resetPassword",
+    "deleteAccount",
+    "editBanned",
+    "editAdmin",
+    "deleteHistory",
+    "addChatUser",
+    "inviteToChannel",
+    "unblock",
+    "block",
+]
+
+_DEFAULT_FORBIDDEN: list[str] = [
+    "joinChannel",
+    "importChatInvite",
+    "changePhone",
+    "resetPassword",
+    "deleteAccount",
+]
 
 _SYSTEM_REQUESTS: frozenset[str] = frozenset({
     "GetChannelDifferenceRequest",
@@ -97,12 +182,59 @@ class APILimiterModule(KitsuneModule):
                 default=60,
                 doc="[Hydrogram] Окно мониторинга Hydrogram запросов (секунд)",
             ),
+            ConfigValue(
+                "forbidden_methods",
+                default=list(_DEFAULT_FORBIDDEN),
+                doc=(
+                    "[Telethon] TL-методы, запрещённые внешним модулям. "
+                    "Ядро и встроенные модули не ограничиваются"
+                ),
+                validator=validators.MultiChoice(_FORBIDDABLE_METHODS),
+                on_change=lambda: self._apply_forbidden_methods(),
+            ),
         )
     async def on_load(self) -> None:
+        self._apply_forbidden_methods()
         await asyncio.sleep(5)
         await self._install()
         self._apply_hydro_limits()
         self._apply_telethon_flood_threshold()
+    def _apply_forbidden_methods(self) -> None:
+        forbid = getattr(self.client, "forbid_constructors", None)
+        if not callable(forbid):
+            logger.debug(
+                "APILimiter: клиент не поддерживает forbid_constructors — "
+                "защита от чужих TL-вызовов недоступна"
+            )
+            return
+        names = self.config["forbidden_methods"] or []
+        if isinstance(names, str):
+            names = [names]
+        ids: list[int] = []
+        unknown: list[str] = []
+        for name in names:
+            constructor_id = CONSTRUCTORS.get(str(name).lower())
+            if constructor_id is None:
+                unknown.append(str(name))
+                continue
+            ids.append(constructor_id)
+        forbid(ids)
+        if unknown:
+            logger.warning("APILimiter: неизвестные TL-методы в конфиге: %s", ", ".join(unknown))
+        logger.info("APILimiter: запрещено внешним модулям %d TL-методов", len(ids))
+    @command("api_forbidden", required=OWNER)
+    async def forbidden_cmd(self, event) -> None:
+        names = self.config["forbidden_methods"] or []
+        applied = len(getattr(self.client, "forbidden_constructors", []) or [])
+        listing = "\n".join(f"• <code>{n}</code>" for n in names) or "<i>пусто</i>"
+        await event.message.edit(
+            "🛡 <b>Запрещённые внешним модулям TL-методы</b>\n"
+            f"{listing}\n\n"
+            f"Активных конструкторов: <b>{applied}</b>\n"
+            f"Известно методов в карте: <b>{len(CONSTRUCTORS)}</b>\n\n"
+            "Менять список: <code>.cfg APILimiter</code> → <code>forbidden_methods</code>",
+            parse_mode="html",
+        )
     def _apply_hydro_limits(self) -> None:
         try:
             bridge = getattr(self.client, "_kitsune_hydro_bridge", None)
@@ -178,7 +310,7 @@ class APILimiterModule(KitsuneModule):
                                         )
                             except Exception:
                                 pass
-                            time.sleep(pause)
+                            await asyncio.sleep(pause)
                             limiter._lock = False
             return await old_call(sender, request, ordered, flood_sleep_threshold)
         self.client._call = _patched_call

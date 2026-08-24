@@ -3,11 +3,23 @@ import asyncio
 import logging
 import re
 import time
+import traceback
 import typing
 from telethon import events
 from telethon.tl.types import Message
 from .rate_limiter import RateLimiter
 from .security import SecurityManager, OWNER, SUDO
+
+try:
+    from ..utils import escape_html as _escape_html
+except Exception:  # pragma: no cover
+    def _escape_html(text: typing.Any) -> str:
+        return (
+            str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        )
+
+def _remove_html(text: typing.Any) -> str:
+    return re.sub(r"<[^>]+>", "", str(text))
 
 logger = logging.getLogger(__name__)
 
@@ -222,6 +234,8 @@ class CommandDispatcher:
         self._limiter  = RateLimiter()
         self._loader: typing.Any = None
         self._commands: dict[str, tuple[typing.Callable, typing.Any, typing.Any]] = {}
+        self._aliases: dict[str, str] = {}
+        self._disabled_commands: set[str] = set()
         self._watchers: list[tuple[typing.Callable | None, typing.Callable, tuple[str, ...], typing.Any]] = []
         self._pending_input: dict | None = None
         self._co_owners_cache: list[int] = []
@@ -250,7 +264,76 @@ class CommandDispatcher:
         else:
             logger.debug("Dispatcher: registered command .%s (required=%d)", name, int(required or 0))
     def unregister_command(self, name: str) -> None:
-        self._commands.pop(name.lower(), None)
+        key = name.lower()
+        self._commands.pop(key, None)
+        for alias, target in list(self._aliases.items()):
+            if target.split(maxsplit=1)[0].lower() == key:
+                self._aliases.pop(alias, None)
+    def add_alias(self, alias: str, cmd: str, args: str | None = None) -> bool:
+        cmd = cmd.lower().strip()
+        if cmd not in self._commands:
+            return False
+        alias = alias.lower().strip()
+        if not alias or alias in self._commands:
+            return False
+        args = (args or "").strip()
+        self._aliases[alias] = f"{cmd} {args}" if args else cmd
+        return True
+    def remove_alias(self, alias: str) -> bool:
+        return bool(self._aliases.pop(alias.lower().strip(), None))
+    def get_aliases(self) -> dict[str, str]:
+        return dict(self._aliases)
+    @staticmethod
+    def _rewrite_command_text(message: typing.Any, new_text: str) -> None:
+        import contextlib as _cl
+        with _cl.suppress(Exception):
+            message._kitsune_alias_text = new_text
+        with _cl.suppress(Exception):
+            message.entities = None
+        for attr in ("message", "text", "raw_text"):
+            with _cl.suppress(Exception):
+                object.__setattr__(message, attr, new_text)
+            with _cl.suppress(Exception):
+                setattr(message, attr, new_text)
+    def load_aliases(self, aliases: dict[str, str]) -> None:
+        if not isinstance(aliases, dict):
+            return
+        for alias, target in aliases.items():
+            parts = str(target).split(maxsplit=1)
+            if not parts:
+                continue
+            self.add_alias(str(alias), parts[0], parts[1] if len(parts) > 1 else None)
+    def resolve_alias(self, cmd_name: str) -> tuple[str, str] | None:
+        target = self._aliases.get(cmd_name.lower())
+        if not target:
+            return None
+        parts = target.split(maxsplit=1)
+        real_cmd = parts[0].lower()
+        if real_cmd not in self._commands:
+            return None
+        return real_cmd, (parts[1] if len(parts) > 1 else "")
+    def disable_command(self, cmd_name: str) -> bool:
+        key = cmd_name.lower().strip()
+        if not key:
+            return False
+        self._disabled_commands.add(key)
+        return True
+    def enable_command(self, cmd_name: str) -> bool:
+        key = cmd_name.lower().strip()
+        if key in self._disabled_commands:
+            self._disabled_commands.discard(key)
+            return True
+        return False
+    def is_command_disabled(self, cmd_name: str) -> bool:
+        return cmd_name.lower() in self._disabled_commands
+    def get_disabled_commands(self) -> list[str]:
+        return sorted(self._disabled_commands)
+    def load_disabled_commands(self, names: typing.Iterable[str]) -> None:
+        if not names:
+            return
+        for name in names:
+            if isinstance(name, str) and name.strip():
+                self._disabled_commands.add(name.lower().strip())
     def _resolve_role_db_owner(self, module: typing.Any) -> str:
         if module is None:
             return ""
@@ -415,7 +498,12 @@ class CommandDispatcher:
             if parts:
                 cmd_name = parts[0].lower().split("@")[0]
                 entry = self._commands.get(cmd_name)
-                if entry is not None:
+                if entry is None:
+                    resolved = self.resolve_alias(cmd_name)
+                    if resolved is not None:
+                        cmd_name = resolved[0]
+                        entry = self._commands.get(cmd_name)
+                if entry is not None and cmd_name not in self._disabled_commands:
                     handler, _required, _module = entry
                     if getattr(handler, "_incoming", False):
                         await self._handle_message(
@@ -423,10 +511,8 @@ class CommandDispatcher:
                         )
                         return
         if sender_id not in sudo_users and not is_co_owner:
-                                                                              
-                                                                               
-                                                                            
-                                                              
+
+
             self._dispatch_watchers(event, message)
             return
         await self._handle_message(event, is_own=False, is_co_owner=is_co_owner)
@@ -458,6 +544,19 @@ class CommandDispatcher:
             cmd_name = parts[0].lower().split("@")[0]
             entry = self._commands.get(cmd_name)
             if entry is None:
+                resolved = self.resolve_alias(cmd_name)
+                if resolved is None:
+                    return
+                real_cmd, baked_args = resolved
+                user_args = parts[1] if len(parts) > 1 else ""
+                merged = " ".join(p for p in (baked_args, user_args) if p)
+                new_text = self._prefix + real_cmd + (f" {merged}" if merged else "")
+                self._rewrite_command_text(message, new_text)
+                cmd_name = real_cmd
+                entry = self._commands.get(cmd_name)
+                if entry is None:
+                    return
+            if cmd_name in self._disabled_commands:
                 return
             handler, required, module = entry
             if is_co_owner:
@@ -499,19 +598,28 @@ class CommandDispatcher:
                     return
             else:
                 try:
-                    allowed = await self._security.check(message, required)
+                    module_name = (
+                        type(module).__name__ if module is not None else None
+                    )
+                    allowed = await self._security.check(
+                        message,
+                        required,
+                        command=cmd_name,
+                        module_name=module_name,
+                    )
                 except Exception:
                     logger.exception("Dispatcher: security check failed for .%s", cmd_name)
                     return
             if not allowed:
                 return
+            try:
+                self._handle_grep(message)
+            except Exception:
+                logger.debug("Dispatcher: grep handling failed", exc_info=True)
             asyncio.ensure_future(self._safe_call(handler, event, cmd_name))
             return
-                                                                  
-                                                                               
-                                                                               
-                                                                               
-                                                                       
+
+
         self._dispatch_watchers(event, message)
     def _dispatch_watchers(self, event: events.NewMessage.Event, message: Message) -> None:
         if not self._watchers:
@@ -531,10 +639,197 @@ class CommandDispatcher:
             asyncio.ensure_future(
                 self._safe_call(handler, event, f"watcher:{handler.__name__}")
             )
+    def _grep(
+        self, pattern: str, text: str, invert: bool = False, ignore_case: bool = False
+    ) -> str:
+        regex = re.compile(
+            re.escape(pattern).strip(), (re.IGNORECASE if ignore_case else 0)
+        )
+        result: list[str] = []
+        for line in text.splitlines():
+            match = regex.search(_remove_html(line).strip())
+            is_matched = bool(match)
+            if invert:
+                is_matched = not is_matched
+            if is_matched:
+                if match:
+                    highlighted_line = line.replace(
+                        match.group(0), f"<u><i>{match.group(0)}</i></u>"
+                    )
+                    result.append(highlighted_line)
+                else:
+                    result.append(line)
+        return "\n".join(result)
+
+    def _handle_grep(self, message: Message) -> Message:
+        try:
+            grep_enabled = self._db.get("kitsune.core", "grep", True)
+        except Exception:
+            grep_enabled = True
+        if not grep_enabled:
+            return message
+
+        raw_text = message.raw_text or message.text or ""
+
+        if "||grep" in raw_text or "|| grep" in raw_text:
+            new = re.sub(r"\|\| ?grep", "| grep", raw_text)
+            try:
+                message.raw_text = new
+                message.text = new
+                message.message = new
+            except Exception:
+                pass
+            return message
+
+        if getattr(message, "kitsune_grepped", False):
+            return message
+
+        grep_match = re.search(r".+\| ?grep (.+)", raw_text)
+        if grep_match is None:
+            return message
+
+        grep_raw_args = grep_match.group(1)
+
+        stripped = re.sub(r"\| ?grep.+", "", raw_text)
+        try:
+            message.raw_text = stripped
+            message.text = stripped
+            message.message = stripped
+        except Exception:
+            pass
+
+        old_edit = message.edit
+        old_reply = message.reply
+        old_respond = message.respond
+
+        def process_text(text: str) -> str:
+            grep_args = grep_raw_args.split(" ")
+            ignore_case = "-i" in grep_args
+            invert = "-v" in grep_args
+            filtered_pattern = [str(a) for a in grep_args if a not in ("-i", "-v")]
+            pattern = " ".join(filtered_pattern) if filtered_pattern else ".*"
+            grepped_text = self._grep(
+                pattern=pattern, text=str(text), invert=invert, ignore_case=ignore_case
+            )
+            if not grepped_text.strip():
+                return "✂️ <b>No lines to grep</b>"
+            return grepped_text
+
+        async def my_edit(text, *args, **kwargs):
+            kwargs["parse_mode"] = "HTML"
+            return await old_edit(process_text(text), *args, **kwargs)
+
+        async def my_reply(text, *args, **kwargs):
+            kwargs["parse_mode"] = "HTML"
+            return await old_reply(process_text(text), *args, **kwargs)
+
+        async def my_respond(text, *args, **kwargs):
+            kwargs["parse_mode"] = "HTML"
+            return await old_respond(process_text(text), *args, **kwargs)
+
+        try:
+            message.edit = my_edit
+            message.reply = my_reply
+            message.respond = my_respond
+            message.kitsune_grepped = True
+        except Exception:
+            pass
+
+        return message
+
+    def _t(self, key: str, default: str) -> str:
+        translator = getattr(self._client, "_kitsune_translator", None)
+        if translator is not None:
+            try:
+                lang = self._db.get("kitsune.core", "lang", "ru")
+                translator.set_language(lang)
+                text = translator.translate(key)
+                if text and text != key:
+                    return text
+            except Exception:
+                pass
+        return default
+
+    async def command_exc(self, exc: BaseException, message: typing.Any) -> None:
+        logger.exception("Dispatcher: command failed", exc_info=exc)
+        try:
+            from telethon.errors import RPCError, FloodWaitError
+        except Exception:
+            RPCError = FloodWaitError = ()  # type: ignore
+        call_text = _escape_html(getattr(message, "message", "") or getattr(message, "raw_text", "") or "")
+        txt: str
+        if FloodWaitError and isinstance(exc, FloodWaitError):
+            seconds = int(getattr(exc, "seconds", 0) or 0)
+            hours = seconds // 3600
+            minutes = (seconds % 3600) // 60
+            secs = seconds % 60
+            hours_s = f"{hours} hours, " if hours else ""
+            minutes_s = f"{minutes} minutes, " if minutes else ""
+            secs_s = f"{secs} seconds" if secs else ""
+            fw_time = f"{hours_s}{minutes_s}{secs_s}".strip().rstrip(",")
+            req_name = type(getattr(exc, "request", exc)).__name__
+            template = self._t(
+                "fw_error",
+                "🚫 <b>Call</b> <code>{}</code> <b>failed due to FloodWait:</b> "
+                "<code>{}</code> <b>(request:</b> <code>{}</code><b>)</b>",
+            )
+            try:
+                txt = template.format(call_text, fw_time, req_name)
+            except Exception:
+                txt = (
+                    f"🚫 <b>Call</b> <code>{call_text}</code> <b>failed due to "
+                    f"FloodWait:</b> <code>{fw_time}</code>"
+                )
+        elif RPCError and isinstance(exc, RPCError):
+            template = self._t(
+                "rpc_error",
+                "🚫 <b>Call</b> <code>{}</code> <b>failed due to RPC (Telegram) "
+                "error:</b> <code>{}</code>",
+            )
+            try:
+                txt = template.format(call_text, _escape_html(str(exc)))
+            except Exception:
+                txt = (
+                    f"🚫 <b>Call</b> <code>{call_text}</code> <b>failed due to RPC "
+                    f"error:</b> <code>{_escape_html(str(exc))}</code>"
+                )
+        else:
+            inlinelogs = True
+            try:
+                inlinelogs = self._db.get("kitsune.core", "inlinelogs", True)
+            except Exception:
+                pass
+            if not inlinelogs:
+                txt = f"🚫 <b>Call</b> <code>{call_text}</code> <b>failed!</b>"
+            else:
+                tb = "\n".join(traceback.format_exc().splitlines()[1:])
+                txt = (
+                    f"🚫 <b>Call</b> <code>{call_text}</code> <b>failed!</b>\n\n"
+                    f"<b>🧾 Logs:</b>\n<pre><code class=\"language-logs\">"
+                    f"{_escape_html(tb)}</code></pre>"
+                )
+        try:
+            edit = getattr(message, "edit", None)
+            if callable(edit) and getattr(message, "out", False):
+                await edit(txt, parse_mode="HTML")
+            else:
+                respond = getattr(message, "respond", None)
+                if callable(respond):
+                    await respond(txt, parse_mode="HTML")
+        except Exception:
+            pass
+
     async def _safe_call(self, handler: typing.Callable, event: typing.Any, label: str) -> None:
         try:
             await handler(event)
         except asyncio.CancelledError:
             raise
-        except Exception:
-            logger.exception("Dispatcher: unhandled exception in %s", label)
+        except Exception as exc:
+            if label.startswith("watcher:"):
+                logger.exception("Dispatcher: unhandled exception in %s", label)
+                return
+            message = getattr(event, "message", None)
+            if message is not None:
+                await self.command_exc(exc, message)
+            else:
+                logger.exception("Dispatcher: unhandled exception in %s", label)
