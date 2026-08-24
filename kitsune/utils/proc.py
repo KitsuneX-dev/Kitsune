@@ -41,7 +41,7 @@ async def kill_process_tree(
             proc.kill()
         except ProcessLookupError:
             pass
-        except Exception as exc:  # pragma: no cover — платформозависимо
+        except Exception as exc:  
             logger.debug("proc: kill(%s) не удался — %s", proc.pid, exc)
 
 

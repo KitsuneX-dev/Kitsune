@@ -428,7 +428,7 @@ _file_handler.setFormatter(_main_formatter)
 
 class _PassThroughQueueHandler(QueueHandler):
 
-    def prepare(self, record: logging.LogRecord) -> logging.LogRecord:  # type: ignore[override]
+    def prepare(self, record: logging.LogRecord) -> logging.LogRecord:  
         return record
 
 

@@ -5,27 +5,28 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# Files that existed in 1.4.3 but were deliberately replaced or removed in 1.4.4.
-# Keep this list explicit: an updater must never delete arbitrary untracked files,
-# because user modules and local configuration may live beside the source tree.
+
+
+
 _LEGACY_143_PATHS = (
     "kitsune/core/loader.py",
     "kitsune/inline/core.py",
     "kitsune/modules/backup.py",
     "kitsune/secure/customtl.py",
     "kitsune/secure/patcher.py",
+    "kitsune/secure/__init__.py",
     "kitsune/utils.py",
     "kitsune/utils_additions.py",
 )
 
 
 def cleanup_legacy_143_layout(repo_root: Path | str) -> tuple[Path, ...]:
-    """Remove only known-obsolete 1.4.3 source files from an overlaid install.
+    
 
-    The migration is idempotent and intentionally uses an allow-list instead of
-    comparing the installation with Git: untracked user modules, sessions,
-    configuration and databases must be preserved.
-    """
+
+
+
+
 
     root = Path(repo_root).resolve()
     removed: list[Path] = []
@@ -34,7 +35,7 @@ def cleanup_legacy_143_layout(repo_root: Path | str) -> tuple[Path, ...]:
         candidate = root / relative
         try:
             candidate.relative_to(root)
-        except ValueError:  # pragma: no cover - fixed internal allow-list
+        except ValueError:  
             continue
 
         try:
@@ -46,10 +47,17 @@ def cleanup_legacy_143_layout(repo_root: Path | str) -> tuple[Path, ...]:
 
     secure_dir = root / "kitsune" / "secure"
     try:
+        pycache_dir = secure_dir / "__pycache__"
+        if pycache_dir.is_dir():
+            for cached_file in pycache_dir.iterdir():
+                if cached_file.is_file() or cached_file.is_symlink():
+                    cached_file.unlink()
+            if not any(pycache_dir.iterdir()):
+                pycache_dir.rmdir()
         if secure_dir.is_dir() and not any(secure_dir.iterdir()):
             secure_dir.rmdir()
-    except OSError:
-        pass
+    except OSError as exc:
+        logger.warning("migration: failed to remove empty legacy secure package: %s", exc)
 
     if removed:
         logger.info(

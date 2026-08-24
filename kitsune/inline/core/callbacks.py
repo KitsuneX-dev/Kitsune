@@ -8,7 +8,7 @@ import uuid
 from ..types import InlineCall
 from .common import logger
 
-if typing.TYPE_CHECKING:  # pragma: no cover
+if typing.TYPE_CHECKING:  
     from .common import CallbackQuery
 
 class _CallbacksMixin:

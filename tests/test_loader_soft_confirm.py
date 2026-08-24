@@ -241,7 +241,7 @@ async def test_load_from_url_without_callback_ignores_findings(
 
 
 def _make_loader_mod():
-    from kitsune.modules.loader_mod import LoaderMod as _LM  # type: ignore
+    from kitsune.modules.loader_mod import LoaderMod as _LM  
     m = _LM.__new__(_LM)
     m.client = MagicMock()
     m.db = _make_db()

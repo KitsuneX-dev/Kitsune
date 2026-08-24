@@ -37,10 +37,10 @@ BASE_DIR = (
 
 BASE_PATH = Path(BASE_DIR)
 
-# Overlaying 1.4.4 on 1.4.3 leaves several renamed modules behind.
-# Remove only the explicit, known-obsolete files before importing the rest of
-# the application; configuration, sessions, databases and user modules remain
-# untouched.
+
+
+
+
 cleanup_legacy_143_layout(BASE_PATH)
 install_patches()
 

@@ -62,8 +62,8 @@ from ._types import (
 
 try:
     from .inline.types import InlineCall, InlineButton, InlineMessage
-except Exception:  # pragma: no cover - telethon может отсутствовать в тестах
-    InlineCall = InlineButton = InlineMessage = None  # type: ignore[misc, assignment]
+except Exception:  
+    InlineCall = InlineButton = InlineMessage = None  
 
 __all__ = [
     "KitsuneModule", "Module",

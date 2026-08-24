@@ -1100,7 +1100,7 @@ class SetupServer:
         if not (proxy_cfg.get("host") and proxy_cfg.get("port")):
             return
         try:
-            import python_socks  # noqa: F401
+            import python_socks  
             return
         except ImportError:
             pass

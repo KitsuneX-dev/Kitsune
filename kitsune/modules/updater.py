@@ -479,7 +479,7 @@ class UpdaterModule(KitsuneModule):
     async def rollback_cmd(self, event) -> None:
         args = self.get_args(event).strip()
         try:
-            import git  # noqa: F401
+            import git  
         except ImportError:
             await event.reply(self.strings("rollback_no_git"), parse_mode="html")
             return

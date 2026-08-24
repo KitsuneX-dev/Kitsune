@@ -31,7 +31,7 @@ def _load_config() -> dict:
             import tomllib as _toml_reader
             data = _toml_reader.loads(cfg.read_text(encoding="utf-8"))
         except ImportError:
-            import toml as _toml_reader  # type: ignore[no-redef]
+            import toml as _toml_reader  
             data = _toml_reader.loads(cfg.read_text(encoding="utf-8"))
     except Exception:
         return {}

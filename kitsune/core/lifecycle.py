@@ -28,6 +28,44 @@ def spawn(coro) -> asyncio.Task:
     return task
 
 
+def start_telethon_updates(client: Any) -> asyncio.Task:
+    
+
+
+
+
+
+
+
+
+    try:
+        update_task = spawn(client.run_until_disconnected())
+    except Exception:
+        logger.exception("main: failed to schedule Telethon update loop")
+        raise
+
+    logger.info("main: Telethon update loop scheduled (run_until_disconnected)")
+
+    async def _catch_up_in_background() -> None:
+        try:
+            await asyncio.wait_for(client.catch_up(), timeout=15.0)
+            logger.info("main: Telethon catch-up request queued")
+        except asyncio.TimeoutError:
+            logger.warning(
+                "main: Telethon catch-up timed out; live updates remain active"
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.warning(
+                "main: Telethon catch-up failed; live updates remain active",
+                exc_info=True,
+            )
+
+    spawn(_catch_up_in_background())
+    return update_task
+
+
 def print_banner(me: Any) -> None:
     from ..version import __version_str__
     from colorama import Fore, Style, init as colorama_init
@@ -361,21 +399,10 @@ async def startup(
     loader = Loader(client, db, dispatcher)
     client._kitsune_loader = loader
 
-    async def _start_telethon_updates() -> None:
-        try:
-            with contextlib.suppress(Exception):
-                await asyncio.wait_for(client.catch_up(), timeout=15.0)
-            spawn(client.run_until_disconnected())
-            logger.info("main: Telethon update loop started (run_until_disconnected)")
-        except Exception:
-            logger.exception(
-                "main: failed to start update loop — "
-                "commands and watchers will NOT work until this is fixed!"
-            )
-
-    update_loop_task = asyncio.create_task(
-        _start_telethon_updates(), name="telethon-update-startup"
-    )
+    
+    
+    
+    update_loop_task = start_telethon_updates(client)
 
     async def _load_all_modules() -> None:
         await asyncio.gather(
@@ -467,10 +494,21 @@ async def startup(
     install_signal_handlers(stop_event, loop)
     start_watchdog(stop_event, loop)
 
-    await update_loop_task
-
+    stop_wait_task = asyncio.create_task(stop_event.wait(), name="shutdown-wait")
     try:
-        await stop_event.wait()
+        done, _ = await asyncio.wait(
+            (stop_wait_task, update_loop_task),
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if update_loop_task in done and not stop_event.is_set():
+            
+            
+            await update_loop_task
+            raise RuntimeError("Telethon update loop stopped unexpectedly")
     finally:
+        if not stop_wait_task.done():
+            stop_wait_task.cancel()
+            with contextlib.suppress(Exception, asyncio.CancelledError):
+                await stop_wait_task
         with contextlib.suppress(Exception):
             await shutdown(client, db)

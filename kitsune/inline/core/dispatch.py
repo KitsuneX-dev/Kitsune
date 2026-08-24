@@ -28,7 +28,7 @@ if AIOGRAM_AVAILABLE:
         InputTextMessageContent,
     )
 
-if typing.TYPE_CHECKING:  # pragma: no cover
+if typing.TYPE_CHECKING:  
     from .common import AiogramMessage, ChosenInlineResult, InlineQuery
 
 class _DispatchMixin:

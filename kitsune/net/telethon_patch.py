@@ -81,9 +81,9 @@ def _patch_telethon_mtproxy() -> None:
     if target_cls is None:
         logger.debug("rkn_bypass: класс с readexactly не найден в tcpmtproxy")
         return
-    if getattr(target_cls.readexactly, "_kitsune_size_guard", False):  # type: ignore[attr-defined]
+    if getattr(target_cls.readexactly, "_kitsune_size_guard", False):  
         return
-    original = target_cls.readexactly  # type: ignore[attr-defined]
+    original = target_cls.readexactly  
     async def readexactly_safe(self, n):
         if n is None or n < 0:
             raise ConnectionError(
@@ -93,8 +93,8 @@ def _patch_telethon_mtproxy() -> None:
         if n == 0:
             return b""
         return await original(self, n)
-    readexactly_safe._kitsune_size_guard = True  # type: ignore[attr-defined]
-    target_cls.readexactly = readexactly_safe  # type: ignore[attr-defined]
+    readexactly_safe._kitsune_size_guard = True  
+    target_cls.readexactly = readexactly_safe  
     logger.info(
         "rkn_bypass: fallback MTProxy patch applied (class=%s)",
         target_cls.__name__,

@@ -237,7 +237,7 @@ async def setup_all_avatars(client: "TelegramClient", db) -> None:
         except Exception as e:
             logger.debug("assets: не удалось создать kitsune-assets: %s", e)
     all_channel_ok = True
-    for title, cid in id_map.items():  # type: ignore[assignment]
+    for title, cid in id_map.items():  
         if not cid:
             logger.debug("assets: канал '%s' не найден — пропускаем", title)
             all_channel_ok = False

@@ -12,7 +12,7 @@ from .security import SecurityManager, OWNER, SUDO
 
 try:
     from ..utils import escape_html as _escape_html
-except Exception:  # pragma: no cover
+except Exception:  
     def _escape_html(text: typing.Any) -> str:
         return (
             str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
@@ -755,7 +755,7 @@ class CommandDispatcher:
         try:
             from telethon.errors import RPCError, FloodWaitError
         except Exception:
-            RPCError = FloodWaitError = ()  # type: ignore
+            RPCError = FloodWaitError = ()  
         call_text = _escape_html(getattr(message, "message", "") or getattr(message, "raw_text", "") or "")
         txt: str
         if FloodWaitError and isinstance(exc, FloodWaitError):

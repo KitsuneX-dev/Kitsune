@@ -129,10 +129,10 @@ class LegacyApiError(ModuleLoadError):
     pass
 
 
-from . import ast_scanner as _ast_scanner  # noqa: E402
-from . import dependency_resolver as _dependency_resolver  # noqa: E402
-from . import disk_cache as _disk_cache  # noqa: E402
-from .ast_scanner import (  # noqa: E402,F401
+from . import ast_scanner as _ast_scanner  
+from . import dependency_resolver as _dependency_resolver  
+from . import disk_cache as _disk_cache  
+from .ast_scanner import (  
     LEGACY_API_BLOCK_MESSAGE,
     _ALIAS_TRACKED_MODULES,
     _AST_CACHE_MAX_SIZE,
@@ -158,7 +158,7 @@ from .ast_scanner import (  # noqa: E402,F401
     _scan_ast_with_cache,
     detect_legacy_api,
 )
-from .disk_cache import (  # noqa: E402,F401
+from .disk_cache import (  
     _AST_SCAN_OK_FILENAME,
     _AST_SCAN_OK_FLUSH_EVERY,
     _AST_SCAN_OK_MAX_SIZE,
@@ -167,7 +167,7 @@ from .disk_cache import (  # noqa: E402,F401
     _remember_ast_scan_ok,
     flush_ast_scan_cache,
 )
-from .dependency_resolver import (  # noqa: E402,F401
+from .dependency_resolver import (  
     _IMPORT_TO_PIP,
     _LAST_PIP_STDERR,
     _PIP_INSTALL_TIMEOUT,
@@ -480,7 +480,7 @@ class KitsuneModule:
             return True
 
         event = asyncio.Event()
-        event.status = False  # type: ignore[attr-defined]
+        event.status = False  
 
         async def _approve(call: typing.Any) -> None:
             try:
@@ -488,7 +488,7 @@ class KitsuneModule:
                 await self.client(JoinChannelRequest(channel))
             except Exception:
                 logger.debug("request_join: join failed", exc_info=True)
-            event.status = True  # type: ignore[attr-defined]
+            event.status = True  
             event.set()
             try:
                 await call.edit(
@@ -503,7 +503,7 @@ class KitsuneModule:
                 "declined_joins",
                 list(set(declined + [channel.id])),
             )
-            event.status = False  # type: ignore[attr-defined]
+            event.status = False  
             event.set()
             try:
                 await call.edit(
@@ -526,12 +526,12 @@ class KitsuneModule:
             ],
         )
         await event.wait()
-        if assure_joined and not event.status:  # type: ignore[attr-defined]
+        if assure_joined and not event.status:  
             raise RuntimeError(
                 f"You need to join @{getattr(channel, 'username', '?')} "
                 "in order to use this module"
             )
-        return bool(event.status)  # type: ignore[attr-defined]
+        return bool(event.status)  
 class StopLoop(Exception):
     pass
 

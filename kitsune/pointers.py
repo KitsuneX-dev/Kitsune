@@ -44,7 +44,7 @@ class ListPointer(Pointer):
         if item not in lst:
             lst.append(item)
             await self.set(lst)
-    async def remove(self, item: typing.Any) -> bool:  # type: ignore[override]
+    async def remove(self, item: typing.Any) -> bool:  
         lst = self.get()
         if item in lst:
             lst.remove(item)
@@ -133,7 +133,7 @@ class PointerList(list):
         self._save()
         return a
 
-    def __iadd__(self, __x: typing.Iterable) -> "PointerList":  # type: ignore[misc]
+    def __iadd__(self, __x: typing.Iterable) -> "PointerList":  
         a = super().__iadd__(__x)
         self._save()
         return a
