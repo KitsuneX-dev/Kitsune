@@ -681,10 +681,10 @@ def _scan_ast_with_cache(source: str, filename: str = "<module>") -> list[str]:
     cached = _ast_cache.get(key)
     if cached is not None:
         _ast_cache.move_to_end(key)
-        findings = _ast_soft_findings_cache.get(key, [])
+        cached_findings = _ast_soft_findings_cache.get(key, [])
         if key in _ast_soft_findings_cache:
             _ast_soft_findings_cache.move_to_end(key)
-        return list(findings)
+        return list(cached_findings)
     if not _disk_cache._ast_scan_ok_loaded:
         _disk_cache._load_ast_scan_cache()
     if key in _disk_cache._ast_scan_ok_hashes:

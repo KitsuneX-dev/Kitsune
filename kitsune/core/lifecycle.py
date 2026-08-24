@@ -361,6 +361,22 @@ async def startup(
     loader = Loader(client, db, dispatcher)
     client._kitsune_loader = loader
 
+    async def _start_telethon_updates() -> None:
+        try:
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(client.catch_up(), timeout=15.0)
+            spawn(client.run_until_disconnected())
+            logger.info("main: Telethon update loop started (run_until_disconnected)")
+        except Exception:
+            logger.exception(
+                "main: failed to start update loop — "
+                "commands and watchers will NOT work until this is fixed!"
+            )
+
+    update_loop_task = asyncio.create_task(
+        _start_telethon_updates(), name="telethon-update-startup"
+    )
+
     async def _load_all_modules() -> None:
         await asyncio.gather(
             loader.load_all_builtin(),
@@ -451,16 +467,7 @@ async def startup(
     install_signal_handlers(stop_event, loop)
     start_watchdog(stop_event, loop)
 
-    try:
-        with contextlib.suppress(Exception):
-            await asyncio.wait_for(client.catch_up(), timeout=15.0)
-        spawn(client.run_until_disconnected())
-        logger.info("main: Telethon update loop started (run_until_disconnected)")
-    except Exception:
-        logger.exception(
-            "main: failed to start update loop — "
-            "commands and watchers will NOT work until this is fixed!"
-        )
+    await update_loop_task
 
     try:
         await stop_event.wait()

@@ -98,7 +98,7 @@ def resolve_connection_mode(cfg: dict[str, Any]) -> Any:
             "main: %s недоступен в этой версии Telethon — использую ConnectionTcpFull",
             cls_name,
         )
-        cls = getattr(_tl_network, "ConnectionTcpFull")
+        cls = _tl_network.ConnectionTcpFull
     elif mode != "full":
         logger.info("main: connection_mode='%s' → %s", mode, cls_name)
     return cls

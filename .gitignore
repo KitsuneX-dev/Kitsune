@@ -51,4 +51,8 @@ htmlcov/
 
 .mypy_cache/
 
+# Local release comparison and packaged artifacts
+.comparison/
+artifacts/
+
 kitsune_checkpoint_*.zip
