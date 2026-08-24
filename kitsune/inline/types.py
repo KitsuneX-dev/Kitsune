@@ -20,17 +20,44 @@ class InlineCall:
     message_id: int
     data: str
     _answer: typing.Callable
-    _edit:   typing.Callable
+    _edit:   typing.Callable | None = None
     from_user_id: int | None = None
+    inline_message_id: str = ""
+    unit_id: str = ""
+    _manager: typing.Any = None
     async def answer(self, text: str = "", show_alert: bool = False) -> None:
         await self._answer(text=text, show_alert=show_alert)
+    async def _manager_edit(
+        self,
+        text: str | None = None,
+        reply_markup: typing.Any = None,
+        **kwargs: typing.Any,
+    ) -> typing.Any:
+        manager = self._manager
+        edit_unit = getattr(manager, "_edit_unit", None) if manager is not None else None
+        if edit_unit is None:
+            raise RuntimeError("InlineCall.edit: no edit backend available")
+        return await edit_unit(
+            text=text,
+            reply_markup=reply_markup,
+            unit_id=self.unit_id or None,
+            inline_message_id=self.inline_message_id or None,
+            chat_id=self.chat_id or None,
+            message_id=self.message_id or None,
+        )
     async def edit(
         self,
-        text: str,
+        text: str | None = None,
         reply_markup: typing.Any = None,
         parse_mode: str = "HTML",
-    ) -> None:
-        await self._edit(text=text, reply_markup=reply_markup, parse_mode=parse_mode)
+    ) -> typing.Any:
+        if callable(self._edit):
+            return await self._edit(
+                text=text, reply_markup=reply_markup, parse_mode=parse_mode,
+            )
+        return await self._manager_edit(
+            text=text, reply_markup=reply_markup, parse_mode=parse_mode,
+        )
 def markup_from_buttons(
     buttons: list[InlineButton | list[InlineButton]],
 ) -> list[list[dict]]:

@@ -17,10 +17,17 @@ def _warn_no_aiogram_once() -> None:
 
 class _InlineTarget:
 
-    __slots__ = ("inline_message_id",)
+    __slots__ = ("inline_message_id", "chat_id", "message_id")
 
-    def __init__(self, inline_message_id: str) -> None:
+    def __init__(
+        self,
+        inline_message_id: str = "",
+        chat_id: int | None = None,
+        message_id: int | None = None,
+    ) -> None:
         self.inline_message_id = inline_message_id
+        self.chat_id = chat_id
+        self.message_id = message_id
 
 class _MarkupMixin:
     def generate_markup(

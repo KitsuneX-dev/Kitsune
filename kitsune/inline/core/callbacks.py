@@ -95,16 +95,38 @@ class _CallbacksMixin:
             if user_id not in self._owner_ids():
                 await call.answer("🚫 Нет доступа.", show_alert=True)
                 return
+        chat_id = call.message.chat.id if call.message else 0
+        message_id = call.message.message_id if call.message else 0
+        inline_message_id = call.inline_message_id or ""
+
+        async def _edit(
+            text: str | None = None,
+            reply_markup: typing.Any = None,
+            **kwargs: typing.Any,
+        ) -> typing.Any:
+            return await self._edit_unit(
+                text=text,
+                reply_markup=reply_markup,
+                unit_id=unit_id,
+                inline_message_id=inline_message_id or None,
+                chat_id=chat_id or None,
+                message_id=message_id or None,
+            )
+
+        _edit._kitsune_unit_edit = True
+
         wrapped = InlineCall(
             id=call.id,
-            chat_id=call.message.chat.id if call.message else 0,
-            message_id=call.message.message_id if call.message else 0,
+            chat_id=chat_id,
+            message_id=message_id,
             data=call.data,
             _answer=call.answer,
-            _edit=call.message.edit_text if call.message else None,
+            _edit=_edit,
             from_user_id=call.from_user.id if call.from_user else None,
+            inline_message_id=inline_message_id,
+            unit_id=unit_id or "",
+            _manager=self,
         )
-        wrapped.inline_message_id = call.inline_message_id or ""
         try:
             await handler(wrapped, *args, **kwargs)
         except Exception:

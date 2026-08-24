@@ -74,10 +74,14 @@ class _DispatchMixin:
         *,
         unit_id: str | None = None,
         inline_message_id: str | None = None,
+        chat_id: int | None = None,
+        message_id: int | None = None,
         **kwargs: typing.Any,
     ) -> typing.Any:
         unit = self._units.get(unit_id or "", {})
         iid = inline_message_id or unit.get("inline_message_id") or ""
+        if not unit and iid:
+            unit = self._units.get(f"iid:{iid}", {})
         if text is not None:
             safe = _sanitize_tg_html(text)
             if unit:
@@ -86,8 +90,11 @@ class _DispatchMixin:
             safe = unit.get("text", "") or ""
         if reply_markup is not None and unit:
             unit["buttons"] = self._normalize_form_markup(reply_markup)
-        buttons = unit.get("buttons", []) if unit else (reply_markup or [])
-        target = _InlineTarget(iid)
+        if reply_markup is not None and not unit:
+            buttons = self._normalize_form_markup(reply_markup)
+        else:
+            buttons = unit.get("buttons", []) if unit else (reply_markup or [])
+        target = _InlineTarget(iid, chat_id, message_id)
         await self.edit(target, safe, buttons, inline_message_id=iid or None)
         return True
     async def edit(
@@ -233,7 +240,10 @@ class _DispatchMixin:
             _cb_msg_id = getattr(_cb_msg, "message_id", None)
             if iid:
                 await _try_text_then_caption(_iid=iid)
-            elif hasattr(call_or_msg, "_edit") and callable(call_or_msg._edit):
+            elif (
+                callable(getattr(call_or_msg, "_edit", None))
+                and not getattr(call_or_msg._edit, "_kitsune_unit_edit", False)
+            ):
                 try:
                     await call_or_msg._edit(text, reply_markup=markup, parse_mode="HTML")
                 except Exception as _exc_edit:
@@ -247,10 +257,15 @@ class _DispatchMixin:
                         await _try_text_then_caption(_chat=_cb_chat_id, _msg=_cb_msg_id)
                     else:
                         raise
-            elif hasattr(call_or_msg, "chat_id") and hasattr(call_or_msg, "message_id"):
+            elif (
+                getattr(call_or_msg, "chat_id", None)
+                and getattr(call_or_msg, "message_id", None)
+            ):
                 await _try_text_then_caption(
                     _chat=call_or_msg.chat_id, _msg=call_or_msg.message_id,
                 )
+            elif _cb_chat_id and _cb_msg_id:
+                await _try_text_then_caption(_chat=_cb_chat_id, _msg=_cb_msg_id)
             else:
                 telethon_msg = getattr(call_or_msg, "_telethon_msg", None)
                 if telethon_msg is None:
@@ -588,13 +603,15 @@ class _DispatchMixin:
                                  sq, value, original_iid, chat_id_for_wipe)
                     wrapped = InlineCall(
                         id="chosen",
-                        chat_id=0,
+                        chat_id=chat_id_for_wipe or 0,
                         message_id=0,
                         data="",
                         _answer=self._noop_answer,
                         _edit=None,
+                        inline_message_id=original_iid or "",
+                        unit_id=unit_id,
+                        _manager=self,
                     )
-                    wrapped.inline_message_id = original_iid
                     sender_id = None
                     try:
                         sender_id = result.from_user.id
