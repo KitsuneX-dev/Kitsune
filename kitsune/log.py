@@ -270,7 +270,12 @@ class KitsuneLogsHandler(logging.Handler):
         return [
             self.targets[0].format(r)
             for r in (self.buffer + list(self.handledbuffer))
-            if r.levelno >= lvl and (not getattr(r, "kitsune_caller", None) or client_id == r.kitsune_caller)
+            if r.levelno >= lvl
+            and (
+                client_id is None
+                or not getattr(r, "kitsune_caller", None)
+                or client_id == r.kitsune_caller
+            )
         ]
     def emit(self, record: logging.LogRecord) -> None:
         caller: int | None = None
@@ -326,11 +331,7 @@ class KitsuneLogsHandler(logging.Handler):
     def setLevel(self, level: int) -> None:
         self.lvl = level
         try:
-            root = logging.getLogger()
-            if level > logging.NOTSET:
-                root.setLevel(level)
-            else:
-                root.setLevel(logging.INFO)
+            logging.getLogger().setLevel(logging.DEBUG)
         except Exception:
             pass
 _main_formatter = logging.Formatter(
@@ -424,6 +425,7 @@ _file_handler = RotatingFileHandler(
 )
 
 _file_handler.setFormatter(_main_formatter)
+_file_handler.setLevel(logging.INFO)
 
 
 class _PassThroughQueueHandler(QueueHandler):
@@ -772,7 +774,7 @@ async def _send_startup_banner_via_bot(
         if me.last_name:
             display_name = f"{display_name} {me.last_name}".strip()
         text = (
-            f"🌘 <b>Kitsune {__version_str__} запущен!</b>\n\n"
+            f"🦊 <b>Kitsune {__version_str__} проснулась!</b>\n\n"
             f"👤 Аккаунт: <b>{display_name}</b> (id: <code>{me.id}</code>)\n"
             f"🌳 Commit: {sha_line}\n"
             f"✊ Обновление: {update_status}\n"
@@ -861,8 +863,8 @@ def init() -> None:
     root.handlers = []
     start_log_listener()
     root.addHandler(KitsuneLogsHandler([console_handler, rotating_handler], capacity=7000))
-    root.setLevel(logging.INFO)
-    for noisy in ("telethon", "hydrogram", "matplotlib", "aiohttp", "aiogram", "httpx"):
+    root.setLevel(logging.DEBUG)
+    for noisy in ("telethon", "hydrogram", "matplotlib", "aiohttp", "aiogram", "httpx", "asyncio", "urllib3", "PIL", "websockets"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
     _network_noise_filter = _NetworkNoiseFilter()
     _hydro_session_filter = _HydrogramSessionNoiseFilter()

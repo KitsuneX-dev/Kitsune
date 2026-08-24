@@ -196,7 +196,7 @@ class LogsModule(KitsuneModule):
             if not hasattr(handler, "dumps"):
                 continue
             try:
-                lines = handler.dumps(level, client_id=self.tg_id)
+                lines = handler.dumps(level, client_id=None)
             except TypeError:
                 try:
                     lines = handler.dumps(level)

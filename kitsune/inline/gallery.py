@@ -79,7 +79,7 @@ class Gallery:
         if not silent and hasattr(message, "out"):
             try:
                 fn = message.edit if message.out else message.respond
-                status_message = await fn("🌘 Открываю галерею...")
+                status_message = await fn("🦊 Лиса открывает галерею находок...")
             except Exception:
                 pass
         try:

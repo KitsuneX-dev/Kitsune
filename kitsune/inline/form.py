@@ -184,7 +184,7 @@ class Form:
         if not silent and hasattr(message, "out"):
             with contextlib.suppress(Exception):
                 send = message.edit if getattr(message, "out", False) else message.respond
-                status_message = await send("🌘 <b>Открываю форму...</b>", parse_mode="html")
+                status_message = await send("🦊 <b>Лиса разворачивает форму...</b>", parse_mode="html")
         origin_chat_id = self._form_chat_id(message)
         self._units[unit_id] = {
             "type": "form",
