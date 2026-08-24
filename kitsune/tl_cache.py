@@ -1,5 +1,6 @@
 from __future__ import annotations
 import asyncio
+import contextlib
 import inspect
 import logging
 import socket
@@ -204,10 +205,57 @@ class KitsuneTelegramClient(TelegramClient):
         self._forbidden_constructors: list[int] = []
         self._raw_updates_processor: typing.Optional[typing.Callable[[typing.Any], typing.Any]] = None
         self._entity_lock = asyncio.Lock()
+        self._install_updates_queue_hook()
+
+    def _install_updates_queue_hook(self) -> None:
+        original = getattr(self, "_updates_queue", None)
+        sender = getattr(self, "_sender", None)
+        if original is None or sender is None:
+            logger.debug(
+                "tl_cache: updates queue hook unavailable (queue=%s, sender=%s)",
+                original is not None,
+                sender is not None,
+            )
+            return
+        if getattr(sender, "_updates_queue", None) is not original:
+            logger.debug("tl_cache: updates queue not shared with sender, hook skipped")
+            return
         try:
-            self._updates_queue = _HookedUpdatesQueue(self)
+            hooked = _HookedUpdatesQueue(self)
+            while not original.empty():
+                hooked.put_nowait(original.get_nowait())
+            self._updates_queue = hooked
+            sender._updates_queue = hooked
         except Exception:
-            logger.debug("KitsuneTelegramClient: updates queue hook unavailable", exc_info=True)
+            logger.debug("tl_cache: updates queue hook failed, keeping original", exc_info=True)
+            self._updates_queue = original
+            with contextlib.suppress(Exception):
+                sender._updates_queue = original
+
+    def _verify_updates_queue_wiring(self) -> None:
+        sender = getattr(self, "_sender", None)
+        if sender is None:
+            return
+        client_q = getattr(self, "_updates_queue", None)
+        sender_q = getattr(sender, "_updates_queue", None)
+        if client_q is None or sender_q is None or client_q is sender_q:
+            return
+        logger.warning(
+            "tl_cache: очередь обновлений рассинхронизирована (client=%s, sender=%s) — "
+            "восстанавливаю общую очередь, иначе команды не будут работать",
+            type(client_q).__name__,
+            type(sender_q).__name__,
+        )
+        with contextlib.suppress(Exception):
+            while not sender_q.empty():
+                client_q.put_nowait(sender_q.get_nowait())
+        with contextlib.suppress(Exception):
+            sender._updates_queue = client_q
+
+    async def connect(self, *args: typing.Any, **kwargs: typing.Any) -> typing.Any:
+        result = await super().connect(*args, **kwargs)
+        self._verify_updates_queue_wiring()
+        return result
 
     @property
     def entity_cache(self) -> dict[typing.Any, CacheRecordEntity]:
