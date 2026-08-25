@@ -415,7 +415,9 @@ class UpdaterModule(KitsuneModule):
             )
             result = await pyver.ensure_python_async(repo_path, required=required, log=edit)
             new_python = result.get("python") or sys.executable
-            if os.path.realpath(new_python) != os.path.realpath(sys.executable):
+            if bool(result.get("changed")) or (
+                os.path.realpath(new_python) != os.path.realpath(sys.executable)
+            ):
                 logger.info(
                     "updater: переключаюсь на Python %s (%s)",
                     pyver.format_version(result.get("version")), new_python,
@@ -434,39 +436,37 @@ class UpdaterModule(KitsuneModule):
         pip_errors = []
         if is_termux:
             try:
-                with open(req_file, encoding="utf-8") as f:
-                    pkgs = [l.strip() for l in f if l.strip() and not l.strip().startswith("#")]
-                for pkg in pkgs:
-
-
+                for pkg in pyver.read_requirement_lines(req_file):
                     rc, _out, err = await run_cmd(
                         [
                             sys.executable, "-m", "pip", "install", pkg,
                             "--quiet", "--no-warn-script-location",
                             "--prefer-binary", "--no-build-isolation",
+                            "--disable-pip-version-check",
                         ],
                         timeout=_PIP_TIMEOUT_ONE,
                         cwd=repo_path,
                     )
                     if rc != 0:
                         err_txt = err.decode(errors="replace").strip() or f"pip rc={rc}"
-                        if "platform android is not supported" not in err_txt.lower():
-                            pip_errors.append(f"{pkg}: {err_txt[:120]}")
+                        if "platform android is not supported" in err_txt.lower():
+                            continue
+                        if pyver.is_optional_requirement(pkg):
+                            continue
+                        pip_errors.append(f"{pkg}: {err_txt[:120]}")
             except Exception as exc:
                 pip_errors.append(str(exc))
         else:
-            rc, _out, stderr = await run_cmd(
-                [
-                    sys.executable, "-m", "pip", "install", "-r", req_file,
-                    "--quiet", "--no-warn-script-location",
-                ],
-                timeout=_PIP_TIMEOUT_ALL,
+            ok, errors = await pyver.pip_install_requirements_async(
+                sys.executable,
+                req_file,
                 cwd=repo_path,
+                log=edit,
+                timeout=_PIP_TIMEOUT_ALL,
+                one_timeout=_PIP_TIMEOUT_ONE,
             )
-            if rc != 0:
-                pip_errors.append(
-                    stderr.decode(errors="replace")[:500] or f"pip rc={rc}"
-                )
+            if not ok:
+                pip_errors.extend(errors[:3])
         if pip_errors:
             err_text = "\n".join(pip_errors[:3])
             await edit(

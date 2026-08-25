@@ -12,7 +12,6 @@ from ..._internal import exec_restart, graceful_restart
 from ...utils import git_async
 from ...utils import pyver
 from ...utils import update_guard
-from ...utils.proc import run_cmd
 
 logger = logging.getLogger(__name__)
 
@@ -236,10 +235,10 @@ class UpdateChecker:
             owners=_GUARD_OWNERS,
             notify=edit,
         )
-    async def _ensure_python(self, edit) -> str:
+    async def _ensure_python(self, edit) -> tuple[str, bool]:
         required = pyver.read_requires_python(self._repo_path)
         if pyver.version_ok(required):
-            return sys.executable
+            return sys.executable, False
         await edit(
             "🐍 <b>Обновляю Python...</b>\n"
             f"Нужен <code>{pyver.format_version(required)}+</code>, "
@@ -252,11 +251,14 @@ class UpdateChecker:
             log=edit,
         )
         new_python = result.get("python") or sys.executable
+        changed = bool(result.get("changed")) or (
+            os.path.realpath(new_python) != os.path.realpath(sys.executable)
+        )
         logger.info(
             "UpdateChecker: переключаюсь на Python %s (%s)",
             pyver.format_version(result.get("version")), new_python,
         )
-        return new_python
+        return new_python, changed
     async def _restart_on(self, python: str) -> None:
         await graceful_restart(self._client, self._db)
         exec_restart(python=python)
@@ -327,8 +329,8 @@ class UpdateChecker:
                                 pass
         except Exception as exc:
             raise RuntimeError(f"Git update failed: {exc}") from exc
-        python = await self._ensure_python(edit)
-        if os.path.realpath(python) != os.path.realpath(sys.executable):
+        python, python_changed = await self._ensure_python(edit)
+        if python_changed:
             await edit("🔄 <b>Перезапускаю на новом Python...</b>\n████████████  100%")
             await asyncio.sleep(1)
             await self._restart_on(python)
@@ -337,13 +339,11 @@ class UpdateChecker:
         req_file = pyver.default_requirements(self._repo_path)
         if not os.path.exists(req_file):
             req_file = os.path.join(self._repo_path, "requirements.txt")
-        rc, _out, stderr = await run_cmd(
-            [python, "-m", "pip", "install", "-r", req_file, "--quiet"],
-            timeout=_PIP_TIMEOUT,
-            cwd=self._repo_path,
+        ok, errors = await pyver.pip_install_requirements_async(
+            python, req_file, cwd=self._repo_path, log=edit, timeout=_PIP_TIMEOUT,
         )
-        if rc != 0:
-            raise RuntimeError(stderr.decode(errors="replace")[:300] or f"pip rc={rc}")
+        if not ok:
+            raise RuntimeError("\n".join(errors)[:300] or "pip install не удался")
         await edit("🔄 <b>Перезапускаю...</b>\n████████████  100%")
         await asyncio.sleep(1)
         await self._restart_on(python)

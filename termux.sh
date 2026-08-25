@@ -284,12 +284,18 @@ if python3 -c "import cryptg" 2>/dev/null; then
     ok "cryptg уже установлен"
 else
     _CRYPTG_OK=false
-    if pip_cmd install --prefer-binary --only-binary=:all: --no-cache-dir -q "cryptg>=0.6.0" 2>/dev/null; then
+    if python3 -c "import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)" 2>/dev/null; then
+        _CRYPTG_SPEC="cryptg>=0.6.0"
+    else
+        _CRYPTG_SPEC="cryptg>=0.4.0,<0.6.0"
+        info "cryptg 0.6+ требует Python 3.11+ — использую совместимую ветку 0.5.x"
+    fi
+    if pip_cmd install --prefer-binary --only-binary=:all: --no-cache-dir -q "$_CRYPTG_SPEC" 2>/dev/null; then
         _CRYPTG_OK=true
         ok "cryptg установлен (prebuilt wheel)"
     elif command -v cargo >/dev/null 2>&1; then
         warn "prebuilt wheel для cryptg нет — пробую собрать через cargo (это долго)"
-        if pip_cmd install --no-cache-dir -q "cryptg>=0.6.0" 2>/dev/null; then
+        if pip_cmd install --no-cache-dir -q "$_CRYPTG_SPEC" 2>/dev/null; then
             _CRYPTG_OK=true
             ok "cryptg установлен (собран из исходников через cargo)"
         fi

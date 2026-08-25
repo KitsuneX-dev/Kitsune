@@ -29,6 +29,10 @@ __all__ = [
     "install_python_async",
     "venv_python",
     "default_requirements",
+    "requirement_name",
+    "is_optional_requirement",
+    "read_requirement_lines",
+    "pip_install_requirements_async",
     "rebuild_venv_async",
     "ensure_python_async",
     "ensure_startup_python",
@@ -54,6 +58,12 @@ _VENV_PROBE_TIMEOUT = 90
 _VENV_BUILD_TIMEOUT = 600
 
 _PIP_TIMEOUT = 1800
+
+_PIP_ONE_TIMEOUT = 600
+
+_OPTIONAL_PACKAGES = frozenset({"cryptg", "tgcrypto", "uvloop", "hydrogram"})
+
+_REQ_NAME_SPLIT_RE = re.compile(r"[<>=!~\s]")
 
 _APT_UPDATE_TIMEOUT = 600
 
@@ -277,10 +287,14 @@ def probe_interpreter_sync(
     return {"version": version, "can_venv": can_venv}
 
 
-async def _run(args: typing.Sequence[str], timeout: float) -> tuple[int, bytes, bytes]:
+async def _run(
+    args: typing.Sequence[str],
+    timeout: float,
+    cwd: str | None = None,
+) -> tuple[int, bytes, bytes]:
     from .proc import run_cmd
 
-    return await run_cmd([str(a) for a in args], timeout=timeout)
+    return await run_cmd([str(a) for a in args], timeout=timeout, cwd=cwd)
 
 
 async def venv_available_async(path: str) -> bool:
@@ -430,6 +444,90 @@ def default_requirements(repo_path: str | None = None) -> str:
     return os.path.join(root, "requirements.txt")
 
 
+def requirement_name(line: str) -> str:
+    text = str(line).split("#", 1)[0].split(";", 1)[0].strip()
+    if not text:
+        return ""
+    if text.startswith("-"):
+        return ""
+    text = text.split("@", 1)[0].strip()
+    text = text.split("[", 1)[0].strip()
+    name = _REQ_NAME_SPLIT_RE.split(text, 1)[0].strip()
+    return name.lower().replace("_", "-")
+
+
+def is_optional_requirement(line: str) -> bool:
+    return requirement_name(line) in _OPTIONAL_PACKAGES
+
+
+def read_requirement_lines(req_file: str) -> list[str]:
+    try:
+        with open(req_file, encoding="utf-8", errors="replace") as fh:
+            raw = fh.readlines()
+    except OSError:
+        return []
+    lines: list[str] = []
+    for item in raw:
+        text = item.strip()
+        if not text or text.startswith("#"):
+            continue
+        lines.append(text)
+    return lines
+
+
+def _pip_base(python: str) -> list[str]:
+    return [
+        python, "-m", "pip", "install",
+        "--prefer-binary",
+        "--no-warn-script-location",
+        "--disable-pip-version-check",
+    ]
+
+
+async def pip_install_requirements_async(
+    python: str,
+    req_file: str,
+    *,
+    cwd: str | None = None,
+    log: typing.Any = None,
+    timeout: float = _PIP_TIMEOUT,
+    one_timeout: float = _PIP_ONE_TIMEOUT,
+) -> tuple[bool, list[str]]:
+    rc, _out, err = await _run(_pip_base(python) + ["-r", req_file], timeout, cwd)
+    if rc == 0:
+        return True, []
+    bulk_err = err.decode(errors="replace").strip() if err else ""
+    await _emit(
+        log,
+        "⚠️ Массовая установка зависимостей не удалась — "
+        "перехожу на поштучную установку...",
+    )
+    lines = read_requirement_lines(req_file)
+    if not lines:
+        return False, [bulk_err[:400] or f"pip rc={rc}"]
+    errors: list[str] = []
+    skipped: list[str] = []
+    for line in lines:
+        rc_one, _out_one, err_one = await _run(_pip_base(python) + [line], one_timeout, cwd)
+        if rc_one == 0:
+            continue
+        text = err_one.decode(errors="replace").strip() if err_one else ""
+        name = requirement_name(line) or line
+        if is_optional_requirement(line):
+            skipped.append(name)
+            await _emit(
+                log,
+                f"⚠️ Пакет <code>{name}</code> недоступен для этого Python — пропускаю.",
+            )
+            continue
+        errors.append(f"{name}: {text[:160] or f'pip rc={rc_one}'}")
+    if errors:
+        return False, errors
+    if skipped:
+        await _emit(log, "ℹ️ Пропущены необязательные пакеты: " + ", ".join(skipped))
+    return True, skipped
+
+
 async def rebuild_venv_async(
     repo_path: str,
     interpreter: str,
@@ -469,14 +567,13 @@ async def rebuild_venv_async(
     )
     req_file = requirements or default_requirements(root)
     await _emit(log, "📦 Переустанавливаю зависимости на новом Python...")
-    rc, _out, err = await _run(
-        [python, "-m", "pip", "install", "-r", req_file, "--no-warn-script-location"],
-        _PIP_TIMEOUT,
+    ok, errors = await pip_install_requirements_async(
+        python, req_file, cwd=root, log=log,
     )
-    if rc != 0:
+    if not ok:
         raise RuntimeError(
             "pip install на новом Python не удался: "
-            + (err.decode(errors="replace").strip()[:400] or f"rc={rc}")
+            + ("\n".join(errors).strip()[:400] or "неизвестная ошибка pip")
         )
     shutil.rmtree(backup, ignore_errors=True)
     return python
