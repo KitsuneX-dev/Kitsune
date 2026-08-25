@@ -12,6 +12,21 @@ if sys.version_info < (3, 10):
         file=sys.stderr,
     )
     sys.exit(1)
+
+
+def _startup_python_check() -> None:
+    root = Path(__file__).resolve().parent.parent
+    if str(root) not in sys.path:
+        sys.path.insert(0, str(root))
+    try:
+        from kitsune.utils import pyver
+    except Exception as exc:
+        print(f"[Kitsune] предупреждение: проверка версии Python недоступна — {exc}")
+        return
+    pyver.ensure_startup_python(str(root))
+
+
+_startup_python_check()
 warnings.filterwarnings(
     "ignore",
     category=DeprecationWarning,

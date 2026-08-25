@@ -38,7 +38,6 @@ _SOFT_ESCAPE_ATTRS: frozenset[str] = frozenset({
     "__class__",
     "__self__",
     "__func__",
-    "__traceback__",
 })
 
 _HARD_ESCAPE_ATTRS: frozenset[str] = frozenset({
@@ -70,6 +69,7 @@ _INTROSPECTION_ATTRS: frozenset[str] = _SOFT_ESCAPE_ATTRS | frozenset({
     "__dict__",
     "__wrapped__",
     "__doc__",
+    "__traceback__",
 })
 
 
@@ -114,16 +114,16 @@ _HARD_ATTR_NAMES: frozenset[str] = frozenset(
     set(_HARD_ESCAPE_ATTRS)
     | set(_HARD_DUNDER_ATTRS)
     | set(_DANGEROUS_OS_ATTRS)
+    | set(_ASYNC_SUBPROCESS_ATTRS)
+    | set(_DESTRUCTIVE_ATTR_NAMES)
     | {"system", "popen", "Popen"}
 )
 
-_SOFT_ATTR_NAMES: frozenset[str] = frozenset(
-    set(_INTROSPECTION_ATTRS)
-    | set(_ASYNC_SUBPROCESS_ATTRS)
-    | set(_DESTRUCTIVE_ATTR_NAMES)
-) - _HARD_ATTR_NAMES
+_SOFT_ATTR_NAMES: frozenset[str] = frozenset(_INTROSPECTION_ATTRS) - _HARD_ATTR_NAMES
 
 _SENSITIVE_ATTR_NAMES: frozenset[str] = _HARD_ATTR_NAMES | _SOFT_ATTR_NAMES
+
+_FORMAT_SENSITIVE_ATTRS: frozenset[str] = _SANDBOX_ESCAPE_ATTRS
 
 _WILDCARD_BLOCKED_MODULES: frozenset[str] = _SENSITIVE_MODULE_KEYS
 
@@ -152,10 +152,6 @@ class _ASTScanner(ast.NodeVisitor):
         if msg not in self.soft_findings:
             self.soft_findings.append(msg)
         self.warnings.append(msg)
-
-    @staticmethod
-    def _is_hard_attr(attr: str) -> bool:
-        return attr in _HARD_ATTR_NAMES
 
     @staticmethod
     def _is_dynamic_arg(node: ast.AST) -> bool:
@@ -192,7 +188,7 @@ class _ASTScanner(ast.NodeVisitor):
         normalized = field_name.replace("[", ".").replace("]", ".")
         for part in normalized.split("."):
             part = part.strip().strip("'\"")
-            if part in _SENSITIVE_ATTR_NAMES:
+            if part in _FORMAT_SENSITIVE_ATTRS:
                 return part
         return None
 
@@ -224,14 +220,10 @@ class _ASTScanner(ast.NodeVisitor):
                 return
             hit = self._field_path_sensitive_attr(field)
             if hit is not None:
-                msg = (
-                    f"sandbox escape attribute via Formatter.get_field: "
+                self.errors.append(
+                    f"Blocked sandbox escape attribute via Formatter.get_field: "
                     f"{hit} (line {node.lineno})"
                 )
-                if self._is_hard_attr(hit):
-                    self.errors.append(f"Blocked {msg}")
-                else:
-                    self._soft(f"Requires confirmation: {msg}")
             return
 
         template: str | None = None
@@ -245,14 +237,10 @@ class _ASTScanner(ast.NodeVisitor):
             return
         hit = self._format_template_sensitive_attr(template)
         if hit is not None:
-            msg = (
-                f"sandbox escape attribute via format string: {hit} "
+            self.errors.append(
+                f"Blocked sandbox escape attribute via format string: {hit} "
                 f"(line {node.lineno})"
             )
-            if self._is_hard_attr(hit):
-                self.errors.append(f"Blocked {msg}")
-            else:
-                self._soft(f"Requires confirmation: {msg}")
 
     def _is_module_registry(self, node: ast.expr) -> bool:
         if isinstance(node, ast.Attribute) and node.attr == "modules":
@@ -401,15 +389,15 @@ class _ASTScanner(ast.NodeVisitor):
             if root == "asyncio":
                 for alias in node.names:
                     if alias.name in _ASYNC_SUBPROCESS_ATTRS:
-                        self._soft(
-                            f"Requires confirmation: subprocess from-import: "
+                        self.errors.append(
+                            f"Blocked subprocess from-import of "
                             f"asyncio.{alias.name} (line {node.lineno})"
                         )
             destructive = _DESTRUCTIVE_ATTRS.get(root, frozenset())
             for alias in node.names:
                 if alias.name in destructive:
-                    self._soft(
-                        f"Requires confirmation: destructive from-import: "
+                    self.errors.append(
+                        f"Blocked destructive from-import of "
                         f"{root}.{alias.name} (line {node.lineno})"
                     )
         self.generic_visit(node)
@@ -445,6 +433,12 @@ class _ASTScanner(ast.NodeVisitor):
             )
             return
         for part in folded.split("."):
+            if part in _SANDBOX_ESCAPE_ATTRS:
+                self.errors.append(
+                    f"Blocked sandbox escape attribute via operator.{helper}(): "
+                    f"{part} (line {node.lineno})"
+                )
+                return
             if part in _HARD_ATTR_NAMES:
                 self.errors.append(
                     f"Blocked operator.{helper}() access to {part!r} (line {node.lineno})"
@@ -522,10 +516,14 @@ class _ASTScanner(ast.NodeVisitor):
             )
             if folded_attr is not None:
                 attr = folded_attr
-                if attr in _HARD_ATTR_NAMES:
+                if attr in _SANDBOX_ESCAPE_ATTRS:
                     self.errors.append(
                         f"Blocked sandbox escape attribute via getattr: {attr} "
                         f"(line {node.lineno})"
+                    )
+                elif attr in _HARD_ATTR_NAMES:
+                    self.errors.append(
+                        f"Blocked getattr access to {attr!r} (line {node.lineno})"
                     )
                 elif attr in _SOFT_ATTR_NAMES:
                     self._soft(
@@ -573,8 +571,8 @@ class _ASTScanner(ast.NodeVisitor):
                         )
                         break
         if isinstance(node.func, ast.Attribute) and node.func.attr in _ASYNC_SUBPROCESS_ATTRS:
-            self._soft(
-                f"Requires confirmation: asyncio subprocess spawn: "
+            self.errors.append(
+                f"Blocked asyncio subprocess spawn: "
                 f"{node.func.attr} (line {node.lineno})"
             )
         if isinstance(node.func, ast.Attribute):
@@ -585,8 +583,8 @@ class _ASTScanner(ast.NodeVisitor):
                     f"Blocked os.{attr_name}() call (line {node.lineno})"
                 )
             if base_module and attr_name in _DESTRUCTIVE_ATTRS.get(base_module, frozenset()):
-                self._soft(
-                    f"Requires confirmation: destructive call: "
+                self.errors.append(
+                    f"Blocked destructive call: "
                     f"{base_module}.{attr_name} (line {node.lineno})"
                 )
         self.generic_visit(node)
@@ -608,8 +606,8 @@ class _ASTScanner(ast.NodeVisitor):
                 f"Blocked os.{node.attr} access (line {node.lineno})"
             )
         if base_module and node.attr in _DESTRUCTIVE_ATTRS.get(base_module, frozenset()):
-            self._soft(
-                f"Requires confirmation: destructive access: "
+            self.errors.append(
+                f"Blocked destructive access: "
                 f"{base_module}.{node.attr} (line {node.lineno})"
             )
         if base_module in _ALIAS_TRACKED_MODULES and node.attr == "__dict__":
@@ -631,8 +629,8 @@ class _ASTScanner(ast.NodeVisitor):
                 f"(line {node.lineno})"
             )
         elif node.attr in _ASYNC_SUBPROCESS_ATTRS:
-            self._soft(
-                f"Requires confirmation: subprocess helper access: {node.attr} "
+            self.errors.append(
+                f"Blocked subprocess helper access: {node.attr} "
                 f"(line {node.lineno})"
             )
         self.generic_visit(node)
@@ -668,7 +666,7 @@ class _ASTScanner(ast.NodeVisitor):
                 f"Blocked __builtins__ subscript access (line {node.lineno})"
             )
         elif subscript_key is not None:
-            if subscript_key in _HARD_ESCAPE_ATTRS:
+            if subscript_key in _SANDBOX_ESCAPE_ATTRS:
                 self.errors.append(
                     f"Blocked sandbox escape attribute via subscript "
                     f"[{subscript_key!r}] (line {node.lineno})"
@@ -694,7 +692,7 @@ class _ASTScanner(ast.NodeVisitor):
                 if key is not None:
 
 
-                    if key in _HARD_ESCAPE_ATTRS:
+                    if key in _SANDBOX_ESCAPE_ATTRS:
                         self.errors.append(
                             f"Blocked sandbox escape attribute via {ns_func}()"
                             f"[{key!r}] (line {node.lineno})"
@@ -714,8 +712,8 @@ class _ASTScanner(ast.NodeVisitor):
                             f"{key} (line {node.lineno})"
                         )
                 else:
-                    self._soft(
-                        f"Requires confirmation: dynamic subscript access: "
+                    self.errors.append(
+                        f"Blocked dynamic subscript access: "
                         f"{ns_func}()[...] (line {node.lineno})"
                     )
         self.generic_visit(node)

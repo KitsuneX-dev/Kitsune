@@ -184,14 +184,30 @@ async def test_failing_component_does_not_block_restart(monkeypatch):
     assert "db_shutdown" in order
 
 
-def _execl_sites() -> list[tuple[Path, int, list[str]]]:
+_RESTART_MODULES = (
+    Path("modules/updater.py"),
+    Path("modules/notifier/update_checker.py"),
+)
+
+
+def _exec_restart_sites() -> list[tuple[Path, int, list[str]]]:
     sites: list[tuple[Path, int, list[str]]] = []
-    for path in sorted(KITSUNE_DIR.rglob("*.py")):
+    for rel in _RESTART_MODULES:
+        path = KITSUNE_DIR / rel
         lines = path.read_text(encoding="utf-8").splitlines()
         for idx, line in enumerate(lines):
-            if re.search(r"^\s*os\.execl\(", line):
+            if re.search(r"^\s*exec_restart\(", line):
                 sites.append((path, idx, lines))
     return sites
+
+
+def _execl_occurrences() -> list[str]:
+    hits: list[str] = []
+    for path in sorted(KITSUNE_DIR.rglob("*.py")):
+        for idx, line in enumerate(path.read_text(encoding="utf-8").splitlines()):
+            if re.search(r"os\.execl\w*\(", line):
+                hits.append(f"{path}:{idx + 1}")
+    return hits
 
 
 def _enclosing_function(path: Path, lineno: int) -> tuple[int, int]:
@@ -206,28 +222,35 @@ def _enclosing_function(path: Path, lineno: int) -> tuple[int, int]:
         if node.lineno <= lineno <= end:
             if best is None or node.lineno > best[0]:
                 best = (node.lineno, end)
-    assert best is not None, f"{path}:{lineno} — os.execl вне функции"
+    assert best is not None, f"{path}:{lineno} — exec_restart вне функции"
     return best
 
 
 def test_all_execl_sites_are_guarded():
-    sites = _execl_sites()
-    assert len(sites) == 6, f"ожидалось 6 точек os.execl, найдено {len(sites)}"
+    assert _execl_occurrences() == [], (
+        f"os.execl* остался в kitsune/: {_execl_occurrences()}"
+    )
+
+    sites = _exec_restart_sites()
+    assert len(sites) == 6, f"ожидалось 6 точек exec_restart, найдено {len(sites)}"
 
     unguarded: list[str] = []
     for path, idx, lines in sites:
         start, _end = _enclosing_function(path, idx + 1)
         body_before = "\n".join(lines[start - 1: idx])
-        if "graceful_restart" not in body_before:
+        if (
+            "graceful_restart" not in body_before
+            and "_graceful_restart_blocking" not in body_before
+        ):
             unguarded.append(f"{path}:{idx + 1}")
 
-    assert unguarded == [], f"os.execl без graceful_restart: {unguarded}"
+    assert unguarded == [], f"exec_restart без graceful_restart: {unguarded}"
 
 
 def test_internal_restart_calls_shutdown_wrapper():
     source = (KITSUNE_DIR / "_internal.py").read_text(encoding="utf-8")
     body = source.split("def restart(")[1]
-    assert body.index("_graceful_restart_blocking") < body.index("os.execl(")
+    assert body.index("_graceful_restart_blocking") < body.index("exec_restart(")
 
 
 def test_signature_defaults_only():

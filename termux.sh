@@ -10,11 +10,19 @@ warn() { echo -e "${YELLOW}⚠️   $*${RESET}"; }
 err()  { echo -e "${RED}❌  $*${RESET}"; exit 1; }
 step() { echo -e "\n${MAGENTA}${BOLD}── $* ──${RESET}"; }
 
+pip_cmd() {
+    if [[ -n "${PYTHON:-}" ]]; then
+        "$PYTHON" -m pip "$@"
+    else
+        pip "$@"
+    fi
+}
+
 pip_install() {
     local pkg="$1"
-    pip install --prefer-binary --no-cache-dir -q "$pkg" 2>/dev/null && return 0
-    pip install --no-build-isolation --no-cache-dir -q "$pkg" 2>/dev/null && return 0
-    pip install --no-cache-dir -q "$pkg" 2>/dev/null && return 0
+    pip_cmd install --prefer-binary --no-cache-dir -q "$pkg" 2>/dev/null && return 0
+    pip_cmd install --no-build-isolation --no-cache-dir -q "$pkg" 2>/dev/null && return 0
+    pip_cmd install --no-cache-dir -q "$pkg" 2>/dev/null && return 0
     return 1
 }
 
@@ -32,6 +40,115 @@ ok "Пакеты обновлены"
 step "Базовые зависимости"
 pkg install -y git python python-pip libjpeg-turbo openssl libffi zlib build-essential 2>/dev/null || true
 ok "Базовые пакеты установлены"
+
+REQ_PY_MAJOR=3
+REQ_PY_MINOR=12
+
+read_requires_python() {
+    local file="$1"
+    [[ -f "$file" ]] || return 1
+    local spec
+    spec=$(grep -m1 -E '^[[:space:]]*requires-python[[:space:]]*=' "$file" 2>/dev/null \
+        | sed -E 's/.*=[[:space:]]*["'\'']([^"'\'']+)["'\''].*/\1/')
+    [[ -n "$spec" ]] || return 1
+    local best_major="" best_minor=""
+    local IFS=','
+    local part
+    for part in $(echo "$spec" | tr -d ' '); do
+        if [[ "$part" =~ ^(\>=|==|~=)([0-9]+)\.([0-9]+) ]]; then
+            local mj="${BASH_REMATCH[2]}" mn="${BASH_REMATCH[3]}"
+            if [[ -z "$best_major" ]] || (( mj > best_major )) || { (( mj == best_major )) && (( mn > best_minor )); }; then
+                best_major="$mj"; best_minor="$mn"
+            fi
+        elif [[ "$part" =~ ^\>([0-9]+)\.([0-9]+) ]]; then
+            local mj="${BASH_REMATCH[1]}" mn=$(( BASH_REMATCH[2] + 1 ))
+            if [[ -z "$best_major" ]] || (( mj > best_major )) || { (( mj == best_major )) && (( mn > best_minor )); }; then
+                best_major="$mj"; best_minor="$mn"
+            fi
+        fi
+    done
+    [[ -n "$best_major" ]] || return 1
+    REQ_PY_MAJOR="$best_major"
+    REQ_PY_MINOR="$best_minor"
+    return 0
+}
+
+py_version_of() {
+    "$1" -c "import sys; print('%d.%d' % sys.version_info[:2])" 2>/dev/null
+}
+
+py_version_ok() {
+    "$1" -c "import sys; sys.exit(0 if sys.version_info[:2] >= ($REQ_PY_MAJOR, $REQ_PY_MINOR) else 1)" 2>/dev/null
+}
+
+py_can_venv() {
+    local probe
+    probe=$(mktemp -d 2>/dev/null) || return 1
+    if "$1" -m venv --without-pip "$probe/probe" &>/dev/null; then
+        rm -rf "$probe"
+        return 0
+    fi
+    rm -rf "$probe"
+    return 1
+}
+
+py_candidate_names() {
+    local offset
+    for offset in 6 5 4 3 2 1 0; do
+        echo "python${REQ_PY_MAJOR}.$(( REQ_PY_MINOR + offset ))"
+    done
+    echo "python${REQ_PY_MAJOR}"
+    echo "python"
+}
+
+pick_python() {
+    local cmd path fallback="" fallback_ver=""
+    while read -r cmd; do
+        command -v "$cmd" &>/dev/null || continue
+        path=$(command -v "$cmd")
+        py_version_ok "$path" || continue
+        local ver
+        ver=$(py_version_of "$path")
+        if py_can_venv "$path"; then
+            PYTHON="$path"
+            PYTHON_VER="$ver"
+            return 0
+        fi
+        if [[ -z "$fallback" ]]; then
+            fallback="$path"
+            fallback_ver="$ver"
+        fi
+    done < <(py_candidate_names)
+    if [[ -n "$fallback" ]]; then
+        PYTHON="$fallback"
+        PYTHON_VER="$fallback_ver"
+        return 0
+    fi
+    return 1
+}
+
+step "Проверка версии Python"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo ".")"
+for _pp in "$SCRIPT_DIR/pyproject.toml" "$HOME/Kitsune/pyproject.toml" "./pyproject.toml"; do
+    if read_requires_python "$_pp"; then
+        info "requires-python: ${REQ_PY_MAJOR}.${REQ_PY_MINOR}+"
+        break
+    fi
+done
+REQ_PY="${REQ_PY_MAJOR}.${REQ_PY_MINOR}"
+
+PYTHON=""
+PYTHON_VER=""
+if ! pick_python; then
+    warn "Python ${REQ_PY}+ не найден — обновляю Termux-пакеты..."
+    pkg upgrade -y -q 2>/dev/null || true
+    pkg install -y python python-pip 2>/dev/null || true
+    pick_python || err "В Termux нет Python ${REQ_PY}+ (текущий: $(python3 -V 2>&1)).
+    Обнови Termux из F-Droid/GitHub и выполни: pkg upgrade && pkg install python
+    Зависимость cryptg>=0.6.0 требует Python ${REQ_PY}+ и понижена не будет."
+fi
+ok "Python: $PYTHON ($PYTHON_VER), требуется ${REQ_PY}+"
+export PATH="$(dirname "$PYTHON"):$PATH"
 
 step "Нативные Python-пакеты (без компиляции)"
 pkg install -y python-psutil 2>/dev/null && ok "psutil установлен (нативный)" || \
@@ -120,9 +237,9 @@ fi
 step "aiogram + pydantic"
 if pip_install "pydantic>=2.7.0"; then
     ok "pydantic установлен"
-elif pip install --prefer-binary --no-cache-dir -q "pydantic" 2>/dev/null; then
+elif pip_cmd install --prefer-binary --no-cache-dir -q "pydantic" 2>/dev/null; then
     ok "pydantic установлен (последняя доступная версия)"
-elif pip install --prefer-binary --no-cache-dir -q "pydantic==1.10.21" 2>/dev/null; then
+elif pip_cmd install --prefer-binary --no-cache-dir -q "pydantic==1.10.21" 2>/dev/null; then
     ok "pydantic 1.x установлен (совместимый fallback)"
     warn "pydantic версии 1.x — нотификатор может работать ограниченно"
 else
@@ -131,9 +248,9 @@ fi
 
 if pip_install "aiogram>=3.7.0"; then
     ok "aiogram установлен"
-elif pip install --prefer-binary --no-cache-dir -q "aiogram" 2>/dev/null; then
+elif pip_cmd install --prefer-binary --no-cache-dir -q "aiogram" 2>/dev/null; then
     ok "aiogram установлен (последняя доступная версия)"
-elif pip install --prefer-binary --no-cache-dir -q "aiogram==3.7.0" 2>/dev/null; then
+elif pip_cmd install --prefer-binary --no-cache-dir -q "aiogram==3.7.0" 2>/dev/null; then
     ok "aiogram 3.7.0 установлен"
 else
     warn "aiogram не установился — бот-нотификатор будет недоступен"
@@ -143,16 +260,16 @@ step "Hydrogram"
 pip_install "hydrogram" && \
     ok "Hydrogram установлен" || warn "Hydrogram не установился — продолжаю без него"
 
-if pip install --prefer-binary --no-cache-dir -q "tgcrypto>=1.2.5" 2>/dev/null; then
+if pip_cmd install --prefer-binary --no-cache-dir -q "tgcrypto>=1.2.5" 2>/dev/null; then
     ok "tgcrypto установлен (prebuilt wheel)"
 else
     info "Prebuilt wheel не найден — собираю tgcrypto из исходников..."
     _BUILD_OK=false
 
-    if pip install --no-cache-dir -q "tgcrypto>=1.2.5" 2>/dev/null; then
+    if pip_cmd install --no-cache-dir -q "tgcrypto>=1.2.5" 2>/dev/null; then
         _BUILD_OK=true
 
-    elif pip install --no-build-isolation --no-cache-dir -q "tgcrypto>=1.2.5" 2>/dev/null; then
+    elif pip_cmd install --no-build-isolation --no-cache-dir -q "tgcrypto>=1.2.5" 2>/dev/null; then
         _BUILD_OK=true
     fi
     if $_BUILD_OK; then
@@ -167,12 +284,12 @@ if python3 -c "import cryptg" 2>/dev/null; then
     ok "cryptg уже установлен"
 else
     _CRYPTG_OK=false
-    if pip install --prefer-binary --only-binary=:all: --no-cache-dir -q "cryptg>=0.6.0" 2>/dev/null; then
+    if pip_cmd install --prefer-binary --only-binary=:all: --no-cache-dir -q "cryptg>=0.6.0" 2>/dev/null; then
         _CRYPTG_OK=true
         ok "cryptg установлен (prebuilt wheel)"
     elif command -v cargo >/dev/null 2>&1; then
         warn "prebuilt wheel для cryptg нет — пробую собрать через cargo (это долго)"
-        if pip install --no-cache-dir -q "cryptg>=0.6.0" 2>/dev/null; then
+        if pip_cmd install --no-cache-dir -q "cryptg>=0.6.0" 2>/dev/null; then
             _CRYPTG_OK=true
             ok "cryptg установлен (собран из исходников через cargo)"
         fi
@@ -187,7 +304,7 @@ fi
 step "uvloop (ускорение event loop)"
 pkg install -y libuv 2>/dev/null && ok "libuv установлен (нативный)" || \
     warn "libuv через pkg недоступен — пробую собрать uvloop с вендорным libuv"
-if UVLOOP_USE_SYSTEM_LIBUV=1 pip install --prefer-binary --no-cache-dir -q "uvloop>=0.19.0" 2>/dev/null; then
+if UVLOOP_USE_SYSTEM_LIBUV=1 pip_cmd install --prefer-binary --no-cache-dir -q "uvloop>=0.19.0" 2>/dev/null; then
     ok "uvloop установлен (system libuv)"
 elif pip_install "uvloop>=0.19.0"; then
     ok "uvloop установлен"
@@ -287,7 +404,7 @@ if [[ -z "${NO_AUTOSTART:-}" ]]; then
 clear
 echo -e "\033[1;35m  🦊 Kitsune Userbot\033[0m"
 export KITSUNE_LOW_POWER="$KITSUNE_LOW_POWER"
-cd "\$HOME/Kitsune" && python3 -m kitsune
+cd "\$HOME/Kitsune" && "$PYTHON" -m kitsune
 PROFILE
     ok "Автозапуск настроен (~/.bash_profile), KITSUNE_LOW_POWER=$KITSUNE_LOW_POWER"
 fi
@@ -295,9 +412,9 @@ fi
 echo ""
 echo -e "${MAGENTA}${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
 echo -e "  ${GREEN}${BOLD}🦊 Готово!${RESET}"
-echo -e "  ${CYAN}Запуск:${RESET} cd ~/Kitsune && python3 -m kitsune"
+echo -e "  ${CYAN}Запуск:${RESET} cd ~/Kitsune && $PYTHON -m kitsune"
 echo -e "  ${YELLOW}Конфиг:${RESET} ~/Kitsune/config.toml"
 echo -e "  ${CYAN}KITSUNE_LOW_POWER:${RESET} $KITSUNE_LOW_POWER  ${YELLOW}($LOW_POWER_SOURCE)${RESET}"
 echo -e "${MAGENTA}${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}\n"
 
-python3 -m kitsune
+"$PYTHON" -m kitsune

@@ -8,13 +8,17 @@ import sys
 import tempfile
 import time
 
-from ..._internal import graceful_restart
+from ..._internal import exec_restart, graceful_restart
 from ...utils import git_async
+from ...utils import pyver
+from ...utils import update_guard
 from ...utils.proc import run_cmd
 
 logger = logging.getLogger(__name__)
 
 _DB_KEY = "kitsune.notifier"
+
+_GUARD_OWNERS = ("kitsune.notifier", "kitsune.updater")
 
 _CHECK_INTERVAL = 3600
 
@@ -33,7 +37,12 @@ class UpdateChecker:
             os.path.join(os.path.dirname(__file__), "..", "..", "..")
         )
     def start(self) -> None:
-        self._check_task = asyncio.ensure_future(self._loop())
+        self._check_task = update_guard.spawn_guarded(
+            self._loop(),
+            db=self._db,
+            owners=_GUARD_OWNERS,
+            store_error=False,
+        )
     def stop(self) -> None:
         if self._check_task and not self._check_task.done():
             self._check_task.cancel()
@@ -202,7 +211,12 @@ class UpdateChecker:
         await self._db.set(_DB_KEY, "update_msg_via_telethon", not inline_message_id)
         await self._db.set(_DB_KEY, "update_start_time",    time.time())
         await self._db.force_save()
-        await self._run_update(edit)
+        await update_guard.guarded_update(
+            lambda: self._run_update(edit),
+            db=self._db,
+            owners=_GUARD_OWNERS,
+            notify=edit,
+        )
     async def do_update(self, msg=None) -> None:
         async def edit(text: str) -> None:
             if msg:
@@ -216,7 +230,36 @@ class UpdateChecker:
         await self._db.set(_DB_KEY, "update_msg_id",     msg_id)
         await self._db.set(_DB_KEY, "update_start_time", time.time())
         await self._db.force_save()
-        await self._run_update(edit)
+        await update_guard.guarded_update(
+            lambda: self._run_update(edit),
+            db=self._db,
+            owners=_GUARD_OWNERS,
+            notify=edit,
+        )
+    async def _ensure_python(self, edit) -> str:
+        required = pyver.read_requires_python(self._repo_path)
+        if pyver.version_ok(required):
+            return sys.executable
+        await edit(
+            "🐍 <b>Обновляю Python...</b>\n"
+            f"Нужен <code>{pyver.format_version(required)}+</code>, "
+            f"установлен <code>{pyver.format_version(pyver.current_version())}</code>\n"
+            "██████░░░░░░  50%"
+        )
+        result = await pyver.ensure_python_async(
+            self._repo_path,
+            required=required,
+            log=edit,
+        )
+        new_python = result.get("python") or sys.executable
+        logger.info(
+            "UpdateChecker: переключаюсь на Python %s (%s)",
+            pyver.format_version(result.get("version")), new_python,
+        )
+        return new_python
+    async def _restart_on(self, python: str) -> None:
+        await graceful_restart(self._client, self._db)
+        exec_restart(python=python)
     async def _run_update(self, edit) -> None:
         await edit("⬇️ <b>Скачиваю обновление...</b>\n████░░░░░░░░  33%")
         try:
@@ -284,18 +327,18 @@ class UpdateChecker:
                                 pass
         except Exception as exc:
             raise RuntimeError(f"Git update failed: {exc}") from exc
+        python = await self._ensure_python(edit)
+        if os.path.realpath(python) != os.path.realpath(sys.executable):
+            await edit("🔄 <b>Перезапускаю на новом Python...</b>\n████████████  100%")
+            await asyncio.sleep(1)
+            await self._restart_on(python)
+            return
         await edit("📦 <b>Устанавливаю зависимости...</b>\n████████░░░░  67%")
-        is_termux = "com.termux" in os.environ.get("PREFIX", "") or os.path.isdir("/data/data/com.termux")
-        req_file  = os.path.join(
-            self._repo_path,
-            "requirements-termux.txt" if is_termux else "requirements.txt",
-        )
+        req_file = pyver.default_requirements(self._repo_path)
         if not os.path.exists(req_file):
             req_file = os.path.join(self._repo_path, "requirements.txt")
-
-
         rc, _out, stderr = await run_cmd(
-            [sys.executable, "-m", "pip", "install", "-r", req_file, "--quiet"],
+            [python, "-m", "pip", "install", "-r", req_file, "--quiet"],
             timeout=_PIP_TIMEOUT,
             cwd=self._repo_path,
         )
@@ -303,8 +346,7 @@ class UpdateChecker:
             raise RuntimeError(stderr.decode(errors="replace")[:300] or f"pip rc={rc}")
         await edit("🔄 <b>Перезапускаю...</b>\n████████████  100%")
         await asyncio.sleep(1)
-        await graceful_restart(self._client, self._db)
-        os.execl(sys.executable, sys.executable, "-m", "kitsune")
+        await self._restart_on(python)
     async def notify_update_done(self) -> None:
         chat_id     = self._db.get(_DB_KEY, "update_msg_chat",  None)
         msg_id      = self._db.get(_DB_KEY, "update_msg_id",    None)

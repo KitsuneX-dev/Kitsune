@@ -31,7 +31,7 @@ elif [[ -d "/data/user/0/tech.ula" \
      || "$(cat /proc/version 2>/dev/null)" == *"android"* \
      || "$(uname -r 2>/dev/null)" == *"android"* \
      || "$(uname -o 2>/dev/null)" == *"ndroid"* \
-     || ( -f "/proc/1/cmdline" && "$(cat /proc/1/cmdline 2>/dev/null)" == *"bash"* ) ]]; then
+     || ( -f "/proc/1/cmdline" && "$(tr -d '\0' < /proc/1/cmdline 2>/dev/null)" == *"bash"* ) ]]; then
     IS_USERLAND=true
     IS_UBUNTU=true
 elif command -v apt-get &>/dev/null; then
@@ -141,22 +141,118 @@ if ! command -v git &>/dev/null; then
 fi
 
 step "Проверка Python"
-PYTHON=""
-for cmd in python3.13 python3.12 python3.11 python3; do
-    if command -v "$cmd" &>/dev/null; then
-        if $cmd -c "import sys; sys.exit(0 if sys.version_info >= (3, 13) else 1)" 2>/dev/null; then
-            VER=$($cmd -c "import sys; print('.'.join(map(str,sys.version_info[:2])))")
-            PYTHON="$cmd"
-            ok "Python найден: $cmd ($VER)"
-            break
+
+REQ_PY_MAJOR=3
+REQ_PY_MINOR=12
+
+read_requires_python() {
+    local file="$1"
+    [[ -f "$file" ]] || return 1
+    local spec
+    spec=$(grep -m1 -E '^[[:space:]]*requires-python[[:space:]]*=' "$file" 2>/dev/null \
+        | sed -E 's/.*=[[:space:]]*["'\'']([^"'\'']+)["'\''].*/\1/')
+    [[ -n "$spec" ]] || return 1
+    local best_major="" best_minor=""
+    local IFS=','
+    local part
+    for part in $(echo "$spec" | tr -d ' '); do
+        if [[ "$part" =~ ^(\>=|==|~=)([0-9]+)\.([0-9]+) ]]; then
+            local mj="${BASH_REMATCH[2]}" mn="${BASH_REMATCH[3]}"
+            if [[ -z "$best_major" ]] || (( mj > best_major )) || { (( mj == best_major )) && (( mn > best_minor )); }; then
+                best_major="$mj"; best_minor="$mn"
+            fi
+        elif [[ "$part" =~ ^\>([0-9]+)\.([0-9]+) ]]; then
+            local mj="${BASH_REMATCH[1]}" mn=$(( BASH_REMATCH[2] + 1 ))
+            if [[ -z "$best_major" ]] || (( mj > best_major )) || { (( mj == best_major )) && (( mn > best_minor )); }; then
+                best_major="$mj"; best_minor="$mn"
+            fi
         fi
+    done
+    [[ -n "$best_major" ]] || return 1
+    REQ_PY_MAJOR="$best_major"
+    REQ_PY_MINOR="$best_minor"
+    return 0
+}
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo ".")"
+for _pp in "$SCRIPT_DIR/pyproject.toml" "$HOME/Kitsune/pyproject.toml" "./pyproject.toml"; do
+    if read_requires_python "$_pp"; then
+        info "requires-python из $_pp: ${REQ_PY_MAJOR}.${REQ_PY_MINOR}+"
+        break
     fi
 done
+REQ_PY="${REQ_PY_MAJOR}.${REQ_PY_MINOR}"
+
+py_version_of() {
+    "$1" -c "import sys; print('%d.%d' % sys.version_info[:2])" 2>/dev/null
+}
+
+py_version_ok() {
+    "$1" -c "import sys; sys.exit(0 if sys.version_info[:2] >= ($REQ_PY_MAJOR, $REQ_PY_MINOR) else 1)" 2>/dev/null
+}
+
+py_can_venv() {
+    local probe
+    probe=$(mktemp -d 2>/dev/null) || return 1
+    if "$1" -m venv --without-pip "$probe/probe" &>/dev/null; then
+        rm -rf "$probe"
+        return 0
+    fi
+    rm -rf "$probe"
+    return 1
+}
+
+py_candidate_names() {
+    local offset
+    for offset in 6 5 4 3 2 1 0; do
+        echo "python${REQ_PY_MAJOR}.$(( REQ_PY_MINOR + offset ))"
+    done
+    echo "python${REQ_PY_MAJOR}"
+    echo "python"
+}
+
+pick_python() {
+    local cmd path found_any="" fallback="" fallback_ver=""
+    local self_real=""
+    while read -r cmd; do
+        command -v "$cmd" &>/dev/null || continue
+        path=$(command -v "$cmd")
+        [[ -n "$self_real" && "$path" == "$self_real" ]] && continue
+        py_version_ok "$path" || continue
+        found_any="yes"
+        local ver
+        ver=$(py_version_of "$path")
+        if py_can_venv "$path"; then
+            PYTHON="$path"
+            PYTHON_VER="$ver"
+            return 0
+        fi
+        if [[ -z "$fallback" ]]; then
+            fallback="$path"
+            fallback_ver="$ver"
+        fi
+    done < <(py_candidate_names)
+    if [[ -n "$fallback" ]]; then
+        PYTHON="$fallback"
+        PYTHON_VER="$fallback_ver"
+        warn "Найден Python $fallback_ver ($fallback), но модуль venv недоступен — доустановлю его"
+        return 0
+    fi
+    [[ -n "$found_any" ]] && return 1
+    return 1
+}
+
+PYTHON=""
+PYTHON_VER=""
+if pick_python; then
+    ok "Python найден: $PYTHON ($PYTHON_VER), требуется ${REQ_PY}+"
+fi
 
 if [[ -z "$PYTHON" ]]; then
-    warn "Python 3.13+ не найден — устанавливаю..."
+    warn "Python ${REQ_PY}+ не найден — устанавливаю..."
     if $IS_TERMUX; then
-        pkg install python -y; PYTHON="python3"
+        pkg install python -y 2>/dev/null || true
+        pick_python || err "В Termux не удалось получить Python ${REQ_PY}+. Обнови Termux: pkg upgrade && pkg install python"
     elif $IS_UBUNTU; then
         if $IS_REAL_UBUNTU && command -v add-apt-repository &>/dev/null; then
             ${SUDO:-} add-apt-repository -y ppa:deadsnakes/ppa 2>/dev/null \
@@ -165,33 +261,36 @@ if [[ -z "$PYTHON" ]]; then
         elif ! $IS_REAL_UBUNTU; then
             info "Debian-семейство без PPA — ставлю Python из стоковых репозиториев"
         fi
-        if apt_install python3.13 python3.13-venv python3-pip 2>/dev/null; then
-            PYTHON="python3.13"
-        elif apt_install python3.14 python3.14-venv python3-pip 2>/dev/null; then
-            PYTHON="python3.14"
-        elif apt_install python3.12 python3.12-venv python3-pip 2>/dev/null; then
-            PYTHON="python3.12"
-            warn "Python 3.13 недоступен в репозитории — поставлен 3.12 (минимально совместим)"
-        elif $IS_REAL_UBUNTU; then
-            err "Установи Python 3.13 вручную: sudo add-apt-repository ppa:deadsnakes/ppa && sudo apt install python3.13 python3.13-venv"
-        else
-            err "На этой версии Debian нет Python 3.13+ в стандартных репозиториях (у тебя $(python3 -V 2>&1)).
+        for _off in 6 5 4 3 2 1 0; do
+            _tag="${REQ_PY_MAJOR}.$(( REQ_PY_MINOR + _off ))"
+            if apt_install "python${_tag}" "python${_tag}-venv" "python${_tag}-dev" python3-pip 2>/dev/null \
+               || apt_install "python${_tag}" "python${_tag}-venv" python3-pip 2>/dev/null; then
+                if pick_python; then
+                    break
+                fi
+            fi
+        done
+        if [[ -z "$PYTHON" ]] && $IS_REAL_UBUNTU; then
+            err "Установи Python ${REQ_PY}+ вручную: sudo add-apt-repository ppa:deadsnakes/ppa && sudo apt install python${REQ_PY} python${REQ_PY}-venv"
+        elif [[ -z "$PYTHON" ]]; then
+            err "В стандартных репозиториях нет Python ${REQ_PY}+ (у тебя $(python3 -V 2>&1)).
     Варианты:
-      1) Обновиться до Debian 13 (trixie) — там python3.13 есть в стоке: sudo apt install python3.13 python3.13-venv
-      2) Поставить через pyenv:  curl https://pyenv.run | bash && pyenv install 3.13
+      1) Обновиться до Debian 13 (trixie): sudo apt install python3.13 python3.13-venv
+      2) Поставить через pyenv:  curl https://pyenv.run | bash && pyenv install ${REQ_PY}
       3) Docker-образ проекта (Dockerfile в репозитории)
     PPA deadsnakes на Debian НЕ работает — не используй совет для Ubuntu."
         fi
     elif $IS_ALPINE; then
         apk_install python3 py3-pip || err "Установи Python вручную: sudo apk add python3 py3-pip"
-        PYTHON="python3"
+        pick_python || err "Alpine поставил Python ниже ${REQ_PY} — обнови систему или используй Docker-образ проекта"
     elif $IS_ARCH; then
         pacman_install python python-pip || err "Установи Python вручную: sudo pacman -S python"
-        PYTHON="python3"
+        pick_python || err "В системе Python ниже ${REQ_PY} — обнови пакеты: sudo pacman -Syu python"
     else
-        err "Установи Python 3.13+ вручную: https://python.org"
+        err "Установи Python ${REQ_PY}+ вручную: https://python.org"
     fi
-    ok "Python: $PYTHON"
+    [[ -n "$PYTHON" ]] || err "Не удалось получить Python ${REQ_PY}+ автоматически. Установи его вручную и запусти скрипт снова."
+    ok "Python: $PYTHON ($PYTHON_VER)"
 fi
 
 step "Системные зависимости"
@@ -277,6 +376,27 @@ ok "Папка Kitsune подтверждена: $INSTALL_DIR"
 
 step "Виртуальное окружение"
 VENV_DIR="$INSTALL_DIR/venv"
+
+if read_requires_python "$INSTALL_DIR/pyproject.toml"; then
+    REQ_PY="${REQ_PY_MAJOR}.${REQ_PY_MINOR}"
+    info "requires-python из репозитория: ${REQ_PY}+"
+    if ! py_version_ok "$PYTHON"; then
+        warn "Текущий $PYTHON ниже ${REQ_PY} — ищу другой интерпретатор"
+        PYTHON=""
+        pick_python || err "Нужен Python ${REQ_PY}+, подходящий интерпретатор не найден. Установи его вручную и перезапусти скрипт."
+        ok "Использую Python: $PYTHON ($PYTHON_VER)"
+    fi
+fi
+
+if [[ -d "$VENV_DIR" ]]; then
+    _VENV_PY_VER=$(py_version_of "$VENV_DIR/bin/python" || true)
+    if [[ -z "$_VENV_PY_VER" ]] || ! py_version_ok "$VENV_DIR/bin/python"; then
+        warn "Существующий venv на Python ${_VENV_PY_VER:-неизвестно} несовместим (нужен ${REQ_PY}+) — пересоздаю"
+        rm -rf "$VENV_DIR.old"
+        mv "$VENV_DIR" "$VENV_DIR.old" 2>/dev/null || rm -rf "$VENV_DIR"
+    fi
+fi
+
 if [[ ! -d "$VENV_DIR" ]]; then
     if ! $PYTHON -m venv "$VENV_DIR"; then
         if $IS_ALPINE; then
@@ -290,15 +410,16 @@ if [[ ! -d "$VENV_DIR" ]]; then
             $PYTHON -m venv "$VENV_DIR" \
                 || err "Не удалось создать venv. Запусти вручную: sudo pacman -S python python-pip"
         else
-            warn "venv не создался — пробую доустановить python${PYVER:-3.13}-venv..."
-            ${SUDO:-} apt-get install -y "python${PYVER:-3.13}-venv" python3-venv 2>/dev/null || true
+            warn "venv не создался — пробую доустановить python${PYVER:-$REQ_PY}-venv..."
+            ${SUDO:-} apt-get install -y "python${PYVER:-$REQ_PY}-venv" python3-venv 2>/dev/null || true
             $PYTHON -m venv "$VENV_DIR" \
-                || err "Не удалось создать venv. Запусти вручную: sudo apt install python3.13-venv"
+                || err "Не удалось создать venv. Запусти вручную: sudo apt install python${REQ_PY}-venv"
         fi
     fi
-    ok "venv создан: $VENV_DIR"
+    ok "venv создан: $VENV_DIR (Python $(py_version_of "$VENV_DIR/bin/python"))"
+    rm -rf "$VENV_DIR.old"
 else
-    ok "venv существует, пропускаю"
+    ok "venv существует (Python $(py_version_of "$VENV_DIR/bin/python")), пропускаю"
 fi
 
 PIP="$VENV_DIR/bin/pip"

@@ -6,16 +6,20 @@ import os
 import sys
 import time
 import typing
-from .._internal import graceful_restart
+from .._internal import exec_restart, graceful_restart
 from ..core.loader import KitsuneModule, command
 from ..core.security import OWNER
 from ..utils import escape_html
 from ..utils import git_async
+from ..utils import pyver
+from ..utils import update_guard
 from ..utils.proc import run_cmd
 
 logger = logging.getLogger(__name__)
 
 _DB_OWNER = "kitsune.updater"
+
+_GUARD_OWNERS = ("kitsune.updater", "kitsune.notifier")
 
 _TTL = 120
 
@@ -142,7 +146,23 @@ class UpdaterModule(KitsuneModule):
                 return
             await self.db.delete(_DB_OWNER, "pending_update")
             m = await event.reply("⬇️ <b>Обновляю...</b>", parse_mode="html")
-            await self._do_update(repo_path=pending["repo_path"], chat_id=event.chat_id, msg_id=m.id)
+
+            async def _confirm_edit(text: str) -> None:
+                try:
+                    await m.edit(text, parse_mode="html")
+                except Exception:
+                    pass
+
+            await update_guard.guarded_update(
+                lambda: self._do_update(
+                    repo_path=pending["repo_path"],
+                    chat_id=event.chat_id,
+                    msg_id=m.id,
+                ),
+                db=self.db,
+                owners=_GUARD_OWNERS,
+                notify=_confirm_edit,
+            )
             return
         m = await event.reply(self.strings("checking"), parse_mode="html")
         try:
@@ -280,16 +300,24 @@ class UpdaterModule(KitsuneModule):
                     pass
         notifier = self._get_notifier()
         if notifier and notifier._updater:
-            asyncio.ensure_future(
+            update_guard.spawn_guarded(
                 notifier._updater.do_update_inline(
                     chat_id=chat_id,
                     msg_id=msg_id,
                     edit_fn=_edit,
                     inline_message_id=inline_message_id,
-                )
+                ),
+                db=self.db,
+                owners=_GUARD_OWNERS,
+                notify=_edit,
             )
         else:
-            await self._do_update(repo_path=repo_path, chat_id=chat_id, msg_id=msg_id)
+            await update_guard.guarded_update(
+                lambda: self._do_update(repo_path=repo_path, chat_id=chat_id, msg_id=msg_id),
+                db=self.db,
+                owners=_GUARD_OWNERS,
+                notify=_edit,
+            )
     async def _cb_cancel_update(self, call) -> None:
         await self.db.delete(_DB_OWNER, "pending_update")
         inline = getattr(self.client, "_kitsune_inline", None)
@@ -377,9 +405,30 @@ class UpdaterModule(KitsuneModule):
                             "updater: не удалось удалить временную копию конфига %s — %s",
                             config_backup, _unlink_exc,
                         )
+        required = pyver.read_requires_python(repo_path)
+        if not pyver.version_ok(required):
+            await edit(
+                "🐍 <b>Обновляю Python...</b>\n"
+                f"Нужен <code>{pyver.format_version(required)}+</code>, "
+                f"установлен <code>{pyver.format_version(pyver.current_version())}</code>\n"
+                "██████░░░░░░  50%"
+            )
+            result = await pyver.ensure_python_async(repo_path, required=required, log=edit)
+            new_python = result.get("python") or sys.executable
+            if os.path.realpath(new_python) != os.path.realpath(sys.executable):
+                logger.info(
+                    "updater: переключаюсь на Python %s (%s)",
+                    pyver.format_version(result.get("version")), new_python,
+                )
+                await edit("🔄 <b>Перезапускаю на новом Python...</b>\n████████████  100%")
+                await self._save_restart_start(chat_id=chat_id, msg_id=msg_id, is_update=True)
+                await asyncio.sleep(1)
+                await graceful_restart(self.client, self.db)
+                exec_restart(python=new_python)
+                return
         await edit("📦 <b>Обновляю зависимости...</b>\n████████░░░░  67%")
-        is_termux = "com.termux" in os.environ.get("PREFIX", "") or os.path.isdir("/data/data/com.termux")
-        req_file  = os.path.join(repo_path, "requirements-termux.txt" if is_termux else "requirements.txt")
+        is_termux = pyver.is_termux()
+        req_file  = pyver.default_requirements(repo_path)
         if not os.path.exists(req_file):
             req_file = os.path.join(repo_path, "requirements.txt")
         pip_errors = []
@@ -432,7 +481,7 @@ class UpdaterModule(KitsuneModule):
         await self._save_restart_start(chat_id=chat_id, msg_id=msg_id, is_update=True)
         await asyncio.sleep(1)
         await graceful_restart(self.client, self.db)
-        os.execl(sys.executable, sys.executable, "-m", "kitsune")
+        exec_restart()
     def _repo_path(self) -> str:
         return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
@@ -468,7 +517,7 @@ class UpdaterModule(KitsuneModule):
             )
             await asyncio.sleep(1)
             await graceful_restart(self.client, self.db)
-            os.execl(sys.executable, sys.executable, "-m", "kitsune")
+            exec_restart()
         elif inline:
             try:
                 await inline.edit(call, self.strings("rollback_err"), [])
@@ -491,7 +540,7 @@ class UpdaterModule(KitsuneModule):
                 await self._save_restart_start(chat_id=event.chat_id, msg_id=m.id, is_update=True)
                 await asyncio.sleep(1)
                 await graceful_restart(self.client, self.db)
-                os.execl(sys.executable, sys.executable, "-m", "kitsune")
+                exec_restart()
             else:
                 await m.edit(self.strings("rollback_err"), parse_mode="html")
             return
@@ -535,7 +584,7 @@ class UpdaterModule(KitsuneModule):
         await self._save_restart_start(chat_id=event.chat_id, msg_id=m.id)
         await asyncio.sleep(1)
         await graceful_restart(self.client, self.db)
-        os.execl(sys.executable, sys.executable, "-m", "kitsune")
+        exec_restart()
     async def _save_restart_start(self, chat_id: int = 0, msg_id: int = 0, is_update: bool = False) -> None:
         now = time.time()
         await self.db.set(_DB_OWNER, "pending_restart", {

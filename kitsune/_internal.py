@@ -107,9 +107,10 @@ def package_parent() -> str:
 
 def build_restart_command(
     *extra_args: str,
+    python: str | None = None,
 ) -> tuple[list[str], dict[str, str], str]:
     parent = package_parent()
-    argv = [sys.executable, "-m", package_name()]
+    argv = [python or sys.executable, "-m", package_name()]
     argv.extend(a for a in sys.argv[1:] if a not in extra_args)
     argv.extend(extra_args)
     env = dict(os.environ)
@@ -121,15 +122,15 @@ def build_restart_command(
     return argv, env, parent
 
 
-def exec_restart(*extra_args: str) -> typing.NoReturn:
-    argv, env, parent = build_restart_command(*extra_args)
+def exec_restart(*extra_args: str, python: str | None = None) -> typing.NoReturn:
+    argv, env, parent = build_restart_command(*extra_args, python=python)
     logger.info("_internal.exec_restart: %s (cwd=%s)", " ".join(argv), parent)
     try:
         os.chdir(parent)
     except Exception:
         logger.debug("_internal.exec_restart: chdir failed", exc_info=True)
     try:
-        os.execve(sys.executable, argv, env)
+        os.execve(argv[0], argv, env)
     except Exception as exc:
         logger.exception("_internal.exec_restart: os.execve failed: %s", exc)
         try:
