@@ -161,6 +161,11 @@ def main() -> None:
     except KeyboardInterrupt:
         pass
     finally:
-
-
+        try:
+            from ._internal import restart_requested, exec_restart
+            if restart_requested():
+                logger.info("main: restart requested — замещаю процесс")
+                exec_restart()
+        except Exception:
+            logger.exception("main: exec_restart в finally не удался")
         os._exit(0)

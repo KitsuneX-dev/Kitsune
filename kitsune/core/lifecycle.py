@@ -171,7 +171,19 @@ def stop_watchdog() -> None:
 
 
 async def _cancel_background_tasks() -> None:
-    tasks = [t for t in list(_BG_TASKS) if not t.done()]
+    _skip: set[Any] = set()
+    try:
+        from .._internal import restart_initiator
+        _init = restart_initiator()
+        if _init is not None:
+            _skip.add(_init)
+    except Exception:
+        pass
+    with contextlib.suppress(RuntimeError):
+        _cur = asyncio.current_task()
+        if _cur is not None:
+            _skip.add(_cur)
+    tasks = [t for t in list(_BG_TASKS) if not t.done() and t not in _skip]
     for t in tasks:
         t.cancel()
     if not tasks:
@@ -271,9 +283,17 @@ async def shutdown(client: Any, db: Any) -> None:
     except Exception:
         logger.exception("main: session encrypt failed")
 
+    _protected: set[Any] = {asyncio.current_task()}
+    try:
+        from .._internal import restart_initiator
+        _init = restart_initiator()
+        if _init is not None:
+            _protected.add(_init)
+    except Exception:
+        pass
     remaining = [
         t for t in asyncio.all_tasks()
-        if t is not asyncio.current_task() and not t.done()
+        if t not in _protected and not t.done()
     ]
     if remaining:
         for t in remaining:

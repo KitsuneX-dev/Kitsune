@@ -77,6 +77,66 @@ def die(code: int = 0) -> typing.NoReturn:
             pass
     sys.exit(code)
 _RESTART_DONE = False
+_RESTART_REQUESTED: bool = False
+_RESTART_INITIATOR: asyncio.Task | None = None
+
+
+def restart_requested() -> bool:
+    return _RESTART_REQUESTED
+
+
+def mark_restart_requested() -> None:
+    global _RESTART_REQUESTED
+    _RESTART_REQUESTED = True
+
+
+def restart_initiator() -> asyncio.Task | None:
+    return _RESTART_INITIATOR
+
+
+def package_name() -> str:
+    name = (__package__ or "").split(".")[0]
+    if not name:
+        name = Path(__file__).resolve().parent.name
+    return name
+
+
+def package_parent() -> str:
+    return str(Path(__file__).resolve().parent.parent)
+
+
+def build_restart_command(
+    *extra_args: str,
+) -> tuple[list[str], dict[str, str], str]:
+    parent = package_parent()
+    argv = [sys.executable, "-m", package_name()]
+    argv.extend(a for a in sys.argv[1:] if a not in extra_args)
+    argv.extend(extra_args)
+    env = dict(os.environ)
+    old_pp = env.get("PYTHONPATH", "")
+    parts = [p for p in old_pp.split(os.pathsep) if p]
+    if parent not in parts:
+        parts.insert(0, parent)
+    env["PYTHONPATH"] = os.pathsep.join(parts)
+    return argv, env, parent
+
+
+def exec_restart(*extra_args: str) -> typing.NoReturn:
+    argv, env, parent = build_restart_command(*extra_args)
+    logger.info("_internal.exec_restart: %s (cwd=%s)", " ".join(argv), parent)
+    try:
+        os.chdir(parent)
+    except Exception:
+        logger.debug("_internal.exec_restart: chdir failed", exc_info=True)
+    try:
+        os.execve(sys.executable, argv, env)
+    except Exception as exc:
+        logger.exception("_internal.exec_restart: os.execve failed: %s", exc)
+        try:
+            subprocess.Popen(argv, env=env, cwd=parent, start_new_session=True)
+        except Exception:
+            logger.exception("_internal.exec_restart: fallback spawn failed")
+        os._exit(0)
 
 
 async def graceful_restart(
@@ -88,11 +148,16 @@ async def graceful_restart(
     extra_tasks: typing.Iterable[asyncio.Task] | None = None,
     timeout: float = 45.0,
 ) -> None:
-    global _RESTART_DONE
+    global _RESTART_DONE, _RESTART_REQUESTED, _RESTART_INITIATOR
     if _RESTART_DONE:
         logger.debug("graceful_restart: завершение уже выполнено, пропускаю")
         return
     _RESTART_DONE = True
+    _RESTART_REQUESTED = True
+    try:
+        _RESTART_INITIATOR = asyncio.current_task()
+    except RuntimeError:
+        _RESTART_INITIATOR = None
 
     if db is None and client is not None:
         db = getattr(client, "_kitsune_db", None)
@@ -184,18 +249,7 @@ def restart(
 ) -> typing.NoReturn:
     logger.info("_internal.restart: перезапуск...")
     _graceful_restart_blocking(client, db, **shutdown_kwargs)
-    module_path = os.path.relpath(
-        os.path.abspath(os.path.dirname(os.path.abspath(__file__)))
-    )
-    argv = [sys.executable, sys.executable, "-m", module_path]
-    argv.extend(a for a in sys.argv[1:] if a not in extra_args)
-    argv.extend(extra_args)
-    try:
-        os.execl(*argv)
-    except Exception as exc:
-        logger.exception("_internal.restart: os.execl failed: %s", exc)
-        subprocess.Popen([sys.executable, "-m", module_path] + list(extra_args))
-        sys.exit(0)
+    exec_restart(*extra_args)
 def get_startup_callback(*extra_args: str) -> typing.Callable:
     def _cb(*_: object) -> None:
         restart(*extra_args)
