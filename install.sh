@@ -740,7 +740,11 @@ mkdir -p "\$HOME/tmp"
 export TMPDIR="\$HOME/tmp"
 export KITSUNE_LOW_POWER="$KITSUNE_LOW_POWER"
 cd "$INSTALL_DIR"
-exec "$PYTHON_VENV" -m kitsune
+if [[ -r /dev/tty ]]; then
+    exec "$PYTHON_VENV" -m kitsune < /dev/tty
+else
+    exec "$PYTHON_VENV" -m kitsune
+fi
 ULSCRIPT
     chmod +x "$HOME/start_kitsune.sh"
     ok "Скрипт запуска создан: ~/start_kitsune.sh (KITSUNE_LOW_POWER=$KITSUNE_LOW_POWER)"
@@ -749,7 +753,11 @@ elif $IS_ALPINE; then
 #!/bin/sh
 export KITSUNE_LOW_POWER="$KITSUNE_LOW_POWER"
 cd "$INSTALL_DIR"
-exec "$PYTHON_VENV" -m kitsune
+if [ -r /dev/tty ]; then
+    exec "$PYTHON_VENV" -m kitsune < /dev/tty
+else
+    exec "$PYTHON_VENV" -m kitsune
+fi
 ALPSCRIPT
     chmod +x "$HOME/start_kitsune.sh"
     ok "Скрипт запуска создан: ~/start_kitsune.sh (в Alpine нет systemd — автозапуск не настраивается)"
@@ -782,8 +790,13 @@ echo -e "${MAGENTA}${BOLD}━━━━━━━━━━━━━━━━━━
 echo -e "  ${GREEN}${BOLD}🦊 Kitsune успешно установлен!${RESET}"
 echo -e "  ${CYAN}Директория:${RESET} $INSTALL_DIR"
 echo -e "  ${CYAN}KITSUNE_LOW_POWER:${RESET} $KITSUNE_LOW_POWER  ${YELLOW}($LOW_POWER_SOURCE)${RESET}"
+echo -e "  ${CYAN}Вход:${RESET} KITSUNE_LOGIN=qr — вход по QR-коду, KITSUNE_LOGIN=web — вход через веб-страницу"
 echo -e "${MAGENTA}${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
 echo ""
 
 cd "$INSTALL_DIR"
-exec "$PYTHON_VENV" -m kitsune
+if [[ -r /dev/tty ]]; then
+    exec "$PYTHON_VENV" -m kitsune < /dev/tty
+else
+    exec "$PYTHON_VENV" -m kitsune
+fi

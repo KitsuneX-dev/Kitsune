@@ -26,32 +26,62 @@ _QR_TOTAL_TIMEOUT: float = 600.0
 
 
 def _is_tty() -> bool:
-    return sys.stdout.isatty() and sys.stdin.isatty()
+    from . import console
+    return console.is_interactive()
+
+
+def _login_method_from_env() -> bool | None:
+    import os
+    raw = str(os.environ.get("KITSUNE_LOGIN", "")).strip().lower()
+    if raw in ("qr", "qrcode", "qr-code"):
+        return True
+    if raw in ("web", "browser", "site"):
+        return False
+    return None
 
 
 def ask_login_method(tty: bool | None = None) -> bool:
+    from . import console
+    forced = _login_method_from_env()
+    if forced is not None:
+        if forced:
+            print(f"\n  ℹ️ {_C}KITSUNE_LOGIN=qr{_Z} — использую вход по QR-коду\n", flush=True)
+        else:
+            print(f"\n  ℹ️ {_C}KITSUNE_LOGIN=web{_Z} — использую веб-регистрацию\n", flush=True)
+        return forced
     if tty is None:
         tty = _is_tty()
     if not tty:
+        print(
+            f"\n  ℹ️ {_Y}Терминал недоступен — использую веб-регистрацию.{_Z}\n"
+            f"     Для входа по QR-коду запусти: {_C}KITSUNE_LOGIN=qr python -m kitsune{_Z}\n",
+            flush=True,
+        )
         return False
     line = "━" * 44
-    print(f"\n{_M}{line}{_Z}")
-    print(f"  🦊 {_C}Kitsune Userbot{_Z} — выбор способа входа")
-    print(f"{_M}{line}{_Z}\n")
-    print(f"  {_W}Хочешь войти через QR-код (как в Telegram Desktop)?{_Z}")
-    print(f"    {_C}Y{_Z} — да, ввести API_ID/API_HASH в консоли и показать QR")
-    print(f"    {_C}N{_Z} — нет, открыть веб-страницу для регистрации/входа\n")
-    while True:
+    print(f"\n{_M}{line}{_Z}", flush=True)
+    print(f"  🦊 {_C}Kitsune Userbot{_Z} — выбор способа входа", flush=True)
+    print(f"{_M}{line}{_Z}\n", flush=True)
+    print(f"  {_W}Хочешь войти через QR-код (как в Telegram Desktop)?{_Z}", flush=True)
+    print(f"    {_C}Y{_Z} — да, ввести API_ID/API_HASH в консоли и показать QR", flush=True)
+    print(f"    {_C}N{_Z} — нет, открыть веб-страницу для регистрации/входа\n", flush=True)
+    for _ in range(10):
         try:
-            choice = input(f"  → {_W}Выбор [Y/N]{_Z}: ").strip().lower()
+            choice = console.prompt(f"  → {_W}Выбор [Y/N]{_Z}: ").strip().lower()
         except (EOFError, KeyboardInterrupt):
-            print(f"\n{_R}Прервано.{_Z}")
-            sys.exit(1)
-        if choice in ("y", "yes", "д", "да"):
-            return True
-        if choice in ("n", "no", "н", "нет", ""):
+            print(
+                f"\n  ⚠️ {_Y}Ввод недоступен — использую веб-регистрацию.{_Z}\n"
+                f"     Для QR-входа: {_C}KITSUNE_LOGIN=qr python -m kitsune{_Z}\n",
+                flush=True,
+            )
             return False
-        print(f"  {_Y}⚠ Введи Y или N.{_Z}")
+        if choice in ("y", "yes", "д", "да", "qr", "1"):
+            return True
+        if choice in ("n", "no", "н", "нет", "web", "2", ""):
+            return False
+        print(f"  {_Y}⚠ Введи Y или N.{_Z}", flush=True)
+    print(f"  ⚠️ {_Y}Слишком много попыток — использую веб-регистрацию.{_Z}", flush=True)
+    return False
 
 
 def _ask_api_credentials() -> tuple[int, str]:

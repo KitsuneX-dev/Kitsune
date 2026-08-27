@@ -10,6 +10,14 @@ warn() { echo -e "${YELLOW}⚠️   $*${RESET}"; }
 err()  { echo -e "${RED}❌  $*${RESET}"; exit 1; }
 step() { echo -e "\n${MAGENTA}${BOLD}── $* ──${RESET}"; }
 
+TUR_INDEX="https://termux-user-repository.github.io/pypi/"
+BUILD_LOG="${TMPDIR:-$PREFIX/tmp}/kitsune_build.log"
+BUILD_TIMEOUT="${BUILD_TIMEOUT:-2700}"
+SKIP_CODE=97
+PY_TAG=""
+TUR_ARCH=""
+RWP_SKIPPED=0
+
 pip_cmd() {
     if [[ -n "${PYTHON:-}" ]]; then
         "$PYTHON" -m pip "$@"
@@ -21,9 +29,72 @@ pip_cmd() {
 pip_install() {
     local pkg="$1"
     pip_cmd install --prefer-binary --no-cache-dir -q "$pkg" 2>/dev/null && return 0
+    pip_cmd install --prefer-binary --no-cache-dir -q --extra-index-url "$TUR_INDEX" "$pkg" 2>/dev/null && return 0
     pip_cmd install --no-build-isolation --no-cache-dir -q "$pkg" 2>/dev/null && return 0
     pip_cmd install --no-cache-dir -q "$pkg" 2>/dev/null && return 0
     return 1
+}
+
+detect_py_tag() {
+    PY_TAG=$("${PYTHON:-python3}" -c 'import sys; print("cp%d%d" % sys.version_info[:2])' 2>/dev/null || echo "")
+    case "$(uname -m)" in
+        aarch64|arm64)      TUR_ARCH="arm64_v8a" ;;
+        armv7l|armv8l|arm*) TUR_ARCH="armeabi_v7a" ;;
+        x86_64|amd64)       TUR_ARCH="x86_64" ;;
+        i686|i386|x86)      TUR_ARCH="x86" ;;
+        *)                  TUR_ARCH="" ;;
+    esac
+}
+
+show_build_log_tail() {
+    [[ -f "$BUILD_LOG" ]] || return 0
+    warn "Последние строки лога сборки:"
+    tail -n 8 "$BUILD_LOG" 2>/dev/null | sed 's/^/    /' || true
+    info "Полный лог: $BUILD_LOG"
+}
+
+run_with_progress() {
+    local desc="$1"; shift
+    local start=$SECONDS
+    mkdir -p "$(dirname "$BUILD_LOG")" 2>/dev/null || true
+    : > "$BUILD_LOG" 2>/dev/null || true
+    RWP_SKIPPED=0
+    "$@" >>"$BUILD_LOG" 2>&1 &
+    local pid=$!
+    trap 'RWP_SKIPPED=1' INT
+    local elapsed=0 shown=-1 mm ss
+    while kill -0 "$pid" 2>/dev/null; do
+        sleep 1 || true
+        elapsed=$(( SECONDS - start ))
+        if (( RWP_SKIPPED == 0 )) && (( elapsed >= BUILD_TIMEOUT )); then
+            RWP_SKIPPED=2
+        fi
+        if (( RWP_SKIPPED != 0 )); then
+            kill -TERM "$pid" 2>/dev/null || true
+            sleep 2 || true
+            kill -KILL "$pid" 2>/dev/null || true
+            break
+        fi
+        if (( elapsed % 5 == 0 )) && (( elapsed != shown )); then
+            shown=$elapsed
+            mm=$(printf "%02d" $(( elapsed / 60 )))
+            ss=$(printf "%02d" $(( elapsed % 60 )))
+            printf "\r${CYAN}⏳  %s… %s:%s (Ctrl+C — пропустить этот шаг)${RESET}" "$desc" "$mm" "$ss"
+        fi
+    done
+    local rc=0
+    wait "$pid" 2>/dev/null || rc=$?
+    trap - INT
+    printf "\r%-78s\r" " "
+    if (( RWP_SKIPPED == 1 )); then
+        warn "$desc — шаг пропущен по Ctrl+C, установка продолжается"
+        return "$SKIP_CODE"
+    fi
+    if (( RWP_SKIPPED == 2 )); then
+        warn "$desc — шаг прерван по таймауту (${BUILD_TIMEOUT} с)"
+        return "$SKIP_CODE"
+    fi
+    return "$rc"
 }
 
 if [[ -z "${PREFIX:-}" || "$PREFIX" != *"com.termux"* ]]; then
@@ -38,7 +109,7 @@ pkg update -y -q 2>/dev/null || true
 ok "Пакеты обновлены"
 
 step "Базовые зависимости"
-pkg install -y git python python-pip libjpeg-turbo openssl libffi zlib build-essential 2>/dev/null || true
+pkg install -y git curl python python-pip libjpeg-turbo openssl libffi zlib build-essential 2>/dev/null || true
 ok "Базовые пакеты установлены"
 
 REQ_PY_MAJOR=3
@@ -149,6 +220,8 @@ if ! pick_python; then
 fi
 ok "Python: $PYTHON ($PYTHON_VER), требуется ${REQ_PY}+"
 export PATH="$(dirname "$PYTHON"):$PATH"
+detect_py_tag
+info "Тег интерпретатора: ${PY_TAG:-неизвестен}, архитектура wheel: ${TUR_ARCH:-неизвестна}"
 
 step "Нативные Python-пакеты (без компиляции)"
 pkg install -y python-psutil 2>/dev/null && ok "psutil установлен (нативный)" || \
@@ -267,30 +340,73 @@ PYCHECK
 
 ensure_rust_toolchain() {
     if command -v cargo >/dev/null 2>&1; then
+        info "Rust (cargo) уже установлен — заново не ставлю"
         return 0
     fi
-    info "Для сборки pydantic-core нужен Rust — устанавливаю через pkg (это долго)"
-    pkg install -y rust binutils build-essential 2>/dev/null || true
+    warn "Для сборки pydantic-core нужен Rust: ~130 МБ загрузки, ~600 МБ на диске"
+    warn "Сама сборка на телефоне занимает 15–40 минут"
+    info "Пропустить Rust полностью: KITSUNE_SKIP_RUST=1"
+    run_with_progress "Установка Rust через pkg" pkg install -y rust binutils build-essential
+    local rc=$?
+    if (( rc != 0 )); then
+        show_build_log_tail
+    fi
     command -v cargo >/dev/null 2>&1
 }
+
+tur_wheel_available() {
+    command -v curl >/dev/null 2>&1 || return 1
+    [[ -n "$PY_TAG" && -n "$TUR_ARCH" ]] || return 1
+    curl -fsSL --max-time 25 "${TUR_INDEX}pydantic-core/" 2>/dev/null \
+        | grep -q "${PY_TAG}.*${TUR_ARCH}"
+}
+
+if [[ "${KITSUNE_SKIP_RUST:-}" == "1" ]]; then
+    info "KITSUNE_SKIP_RUST=1 — Rust и сборка из исходников отключены"
+fi
 
 if pydantic2_present; then
     PYDANTIC_OK=true
     ok "pydantic 2.x уже установлен"
 elif pip_cmd install --prefer-binary --only-binary=:all: --no-cache-dir -q "pydantic>=2.7.0" 2>/dev/null && pydantic2_present; then
     PYDANTIC_OK=true
-    ok "pydantic 2.x установлен (prebuilt wheel)"
+    ok "pydantic 2.x установлен (prebuilt wheel с PyPI)"
+elif pip_cmd install --prefer-binary --only-binary=:all: --no-cache-dir -q --extra-index-url "$TUR_INDEX" "pydantic>=2.7.0" 2>/dev/null && pydantic2_present; then
+    PYDANTIC_OK=true
+    ok "pydantic 2.x установлен — готовый wheel из Termux User Repository (Rust не потребовался)"
+elif [[ "${KITSUNE_SKIP_RUST:-}" == "1" ]]; then
+    NOTIFIER_DISABLED_REASON="готового wheel для pydantic-core нет, а сборка отключена через KITSUNE_SKIP_RUST=1"
 else
-    info "Готового wheel для pydantic-core под Android нет — пробую собрать из исходников"
+    if tur_wheel_available; then
+        info "В Termux User Repository есть wheel под ${PY_TAG}/${TUR_ARCH}, но pip его не смог установить — пробую сборку"
+    else
+        info "Готового wheel pydantic-core под ${PY_TAG:-твою версию Python}/${TUR_ARCH:-архитектуру} нет ни на PyPI, ни в TUR"
+    fi
+    export CARGO_BUILD_JOBS=1
+    export CARGO_NET_GIT_FETCH_WITH_CLI=true
+    export CARGO_TERM_PROGRESS_WHEN=never
+    export PIP_NO_CACHE_DIR=1
     if ensure_rust_toolchain; then
-        if CARGO_BUILD_JOBS=1 pip_cmd install --no-cache-dir -q "pydantic>=2.7.0" 2>/dev/null && pydantic2_present; then
+        run_with_progress "Сборка pydantic-core из исходников" \
+            pip_cmd install --no-cache-dir "pydantic>=2.7.0"
+        _PYD_RC=$?
+        if (( _PYD_RC == 0 )) && pydantic2_present; then
             PYDANTIC_OK=true
             ok "pydantic 2.x установлен (pydantic-core собран через cargo)"
-        elif CARGO_BUILD_JOBS=1 pip_cmd install --no-build-isolation --no-cache-dir -q "pydantic>=2.7.0" 2>/dev/null && pydantic2_present; then
-            PYDANTIC_OK=true
-            ok "pydantic 2.x установлен (сборка без изоляции)"
+        elif (( _PYD_RC == SKIP_CODE )); then
+            NOTIFIER_DISABLED_REASON="сборка pydantic-core прервана (Ctrl+C или таймаут)"
         else
-            NOTIFIER_DISABLED_REASON="сборка pydantic-core (Rust) в Termux не удалась"
+            show_build_log_tail
+            run_with_progress "Сборка pydantic-core без изоляции" \
+                pip_cmd install --no-build-isolation --no-cache-dir "pydantic>=2.7.0"
+            _PYD_RC2=$?
+            if (( _PYD_RC2 == 0 )) && pydantic2_present; then
+                PYDANTIC_OK=true
+                ok "pydantic 2.x установлен (сборка без изоляции)"
+            else
+                show_build_log_tail
+                NOTIFIER_DISABLED_REASON="сборка pydantic-core (Rust) в Termux не удалась"
+            fi
         fi
     else
         NOTIFIER_DISABLED_REASON="Rust-тулчейн (cargo) недоступен, а pydantic-core собирается только из исходников"
@@ -315,8 +431,10 @@ if [[ -n "$NOTIFIER_DISABLED_REASON" ]]; then
     warn "Бот-нотификатор ОТКЛЮЧЁН: $NOTIFIER_DISABLED_REASON"
     info "Kitsune запустится и будет работать полностью, кроме inline-бота и уведомлений."
     info "Чтобы включить нотификатор позже, выполни в Termux:"
-    info "    pkg install rust binutils build-essential"
-    info "    pip install 'pydantic>=2.7.0' 'aiogram>=3.7.0'"
+    info "    pip install --extra-index-url $TUR_INDEX 'pydantic>=2.7.0'"
+    info "    pip install 'aiogram>=3.7.0'"
+    info "И только если готового wheel под текущий Python нет:"
+    info "    pkg install rust binutils build-essential  (сборка 15–40 минут)"
 fi
 
 step "Hydrogram"
@@ -329,14 +447,26 @@ else
     info "Prebuilt wheel не найден — собираю tgcrypto из исходников..."
     _BUILD_OK=false
 
-    if pip_cmd install --no-cache-dir -q "tgcrypto>=1.2.5" 2>/dev/null; then
+    if pip_cmd install --prefer-binary --no-cache-dir -q --extra-index-url "$TUR_INDEX" "tgcrypto>=1.2.5" 2>/dev/null; then
         _BUILD_OK=true
-
-    elif pip_cmd install --no-build-isolation --no-cache-dir -q "tgcrypto>=1.2.5" 2>/dev/null; then
-        _BUILD_OK=true
+        ok "tgcrypto установлен (wheel из Termux User Repository)"
+    elif [[ "${KITSUNE_SKIP_RUST:-}" == "1" ]]; then
+        info "KITSUNE_SKIP_RUST=1 — сборка tgcrypto пропущена"
+    else
+        run_with_progress "Сборка tgcrypto из исходников" \
+            pip_cmd install --no-cache-dir "tgcrypto>=1.2.5"
+        _TG_RC=$?
+        if (( _TG_RC == 0 )); then
+            _BUILD_OK=true
+        elif (( _TG_RC != SKIP_CODE )); then
+            show_build_log_tail
+            run_with_progress "Сборка tgcrypto без изоляции" \
+                pip_cmd install --no-build-isolation --no-cache-dir "tgcrypto>=1.2.5"
+            (( $? == 0 )) && _BUILD_OK=true || show_build_log_tail
+        fi
     fi
     if $_BUILD_OK; then
-        ok "tgcrypto установлен (собран из исходников)"
+        ok "tgcrypto установлен"
     else
         warn "tgcrypto не установился — Hydrogram будет работать без C-ускорения"
     fi
@@ -356,11 +486,20 @@ else
     if pip_cmd install --prefer-binary --only-binary=:all: --no-cache-dir -q "$_CRYPTG_SPEC" 2>/dev/null; then
         _CRYPTG_OK=true
         ok "cryptg установлен (prebuilt wheel)"
+    elif pip_cmd install --prefer-binary --only-binary=:all: --no-cache-dir -q --extra-index-url "$TUR_INDEX" "$_CRYPTG_SPEC" 2>/dev/null; then
+        _CRYPTG_OK=true
+        ok "cryptg установлен (wheel из Termux User Repository)"
+    elif [[ "${KITSUNE_SKIP_RUST:-}" == "1" ]]; then
+        info "KITSUNE_SKIP_RUST=1 — сборка cryptg пропущена"
     elif command -v cargo >/dev/null 2>&1; then
-        warn "prebuilt wheel для cryptg нет — пробую собрать через cargo (это долго)"
-        if pip_cmd install --no-cache-dir -q "$_CRYPTG_SPEC" 2>/dev/null; then
+        warn "prebuilt wheel для cryptg нет — собираю через cargo (это долго, Ctrl+C — пропустить)"
+        run_with_progress "Сборка cryptg через cargo" \
+            pip_cmd install --no-cache-dir "$_CRYPTG_SPEC"
+        if (( $? == 0 )); then
             _CRYPTG_OK=true
             ok "cryptg установлен (собран из исходников через cargo)"
+        else
+            show_build_log_tail
         fi
     else
         warn "cargo не найден — сборка cryptg из исходников невозможна"
@@ -478,7 +617,12 @@ if [[ -z "${NO_AUTOSTART:-}" ]]; then
 clear
 echo -e "\033[1;35m  🦊 Kitsune Userbot\033[0m"
 export KITSUNE_LOW_POWER="$KITSUNE_LOW_POWER"
-cd "\$HOME/Kitsune" && "$PYTHON" -m kitsune
+cd "\$HOME/Kitsune"
+if [[ -r /dev/tty ]]; then
+    exec "$PYTHON" -m kitsune < /dev/tty
+else
+    exec "$PYTHON" -m kitsune
+fi
 PROFILE
     ok "Автозапуск настроен (~/.bash_profile), KITSUNE_LOW_POWER=$KITSUNE_LOW_POWER"
 fi
@@ -489,6 +633,12 @@ echo -e "  ${GREEN}${BOLD}🦊 Готово!${RESET}"
 echo -e "  ${CYAN}Запуск:${RESET} cd ~/Kitsune && $PYTHON -m kitsune"
 echo -e "  ${YELLOW}Конфиг:${RESET} ~/Kitsune/config.toml"
 echo -e "  ${CYAN}KITSUNE_LOW_POWER:${RESET} $KITSUNE_LOW_POWER  ${YELLOW}($LOW_POWER_SOURCE)${RESET}"
+echo -e "  ${CYAN}Вход:${RESET} KITSUNE_LOGIN=qr — вход по QR-коду, KITSUNE_LOGIN=web — вход через веб-страницу"
 echo -e "${MAGENTA}${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}\n"
 
-"$PYTHON" -m kitsune
+cd "$INSTALL_DIR"
+if [[ -r /dev/tty ]]; then
+    exec "$PYTHON" -m kitsune < /dev/tty
+else
+    exec "$PYTHON" -m kitsune
+fi

@@ -108,32 +108,99 @@ def _client_ip(request: typing.Any) -> str:
     return str(peer)
 
 
+def extract_token_candidates(
+    request: typing.Any,
+    cookie_name: str = COOKIE_NAME,
+) -> list[str]:
+    out: list[str] = []
+
+    def _add(value: typing.Any) -> None:
+        if not value:
+            return
+        text = str(value).strip()
+        if text and text not in out:
+            out.append(text)
+
+    try:
+        _add(request.query.get("token"))
+    except Exception:
+        logger.debug("auth: не удалось прочитать token из query", exc_info=True)
+    try:
+        auth = request.headers.get("Authorization", "") or ""
+        if auth.startswith("Bearer "):
+            _add(auth[len("Bearer "):])
+    except Exception:
+        logger.debug("auth: не удалось прочитать заголовок Authorization", exc_info=True)
+    try:
+        _add(request.cookies.get(cookie_name))
+    except Exception:
+        logger.debug("auth: не удалось прочитать cookie", exc_info=True)
+    return out
+
+
 def extract_token(request: typing.Any) -> str | None:
-    auth = request.headers.get("Authorization", "")
-    if auth.startswith("Bearer "):
-        tok = auth[len("Bearer "):].strip()
-        if tok:
-            return tok
-    cookie = request.cookies.get(COOKIE_NAME)
-    if cookie:
-        return cookie
-    q = request.query.get("token")
-    if q:
-        return q
-    return None
+    candidates = extract_token_candidates(request)
+    return candidates[0] if candidates else None
+
+
+_UNAUTHORIZED_HTML = """<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Kitsune · Доступ закрыт</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
+background:#0f1014;color:#e6e6ec;font:15px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;padding:24px}
+.card{max-width:520px;width:100%;background:#171821;border:1px solid #272935;border-radius:16px;padding:28px 26px}
+h1{margin:0 0 14px;font-size:20px;font-weight:600;color:#fff}
+p{margin:0 0 12px;color:#b6b8c6}
+code{display:block;margin:14px 0 4px;padding:12px 14px;background:#0f1014;border:1px solid #272935;
+border-radius:10px;color:#8fd3ff;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;
+font-size:13px;word-break:break-all}
+.hint{margin-top:18px;font-size:13px;color:#7c7f92}
+</style>
+</head>
+<body>
+<div class="card">
+<h1>🦊 Ссылка устарела</h1>
+<p>⚠️ Страница открыта без актуального токена — либо ссылка устарела, либо открыта не та ссылка.</p>
+<p>ℹ️ Возьми актуальную ссылку с токеном из консоли, где запущен Kitsune:</p>
+<code>http://127.0.0.1:&lt;порт&gt;/?token=&lt;токен&gt;</code>
+<p class="hint">Старый cookie уже удалён. Скопируй свежую ссылку целиком и открой её заново.</p>
+</div>
+</body>
+</html>
+"""
+
+
+def _wants_html(request: typing.Any) -> bool:
+    try:
+        if str(request.method).upper() != "GET":
+            return False
+        accept = request.headers.get("Accept", "") or ""
+    except Exception:
+        return False
+    return "text/html" in accept.lower()
 
 
 def build_auth_middleware(
     get_token: typing.Callable[[], str | None],
     limiter: RateLimiter,
     public_paths: typing.Iterable[str] = _PUBLIC_PATHS,
+    cookie_name: str = COOKIE_NAME,
+    public_prefixes: typing.Iterable[str] = (),
 ) -> typing.Any:
     public = frozenset(public_paths)
+    prefixes = tuple(public_prefixes)
 
     @aiohttp.web.middleware
     async def auth_middleware(request, handler):
         path = request.path
         if path in public:
+            return await handler(request)
+        if prefixes and path.startswith(prefixes):
             return await handler(request)
 
         ip = _client_ip(request)
@@ -143,19 +210,35 @@ def build_auth_middleware(
             )
 
         expected = get_token()
-        provided = extract_token(request)
+        candidates = extract_token_candidates(request, cookie_name)
+        cookie_value = None
+        try:
+            cookie_value = request.cookies.get(cookie_name)
+        except Exception:
+            logger.debug("auth: не удалось прочитать cookie", exc_info=True)
 
-        if not tokens_equal(provided, expected):
+        if not any(tokens_equal(t, expected) for t in candidates):
             limiter.register_fail(ip)
-            return aiohttp.web.Response(status=401, text="unauthorized")
+            if _wants_html(request):
+                response = aiohttp.web.Response(
+                    status=401, text=_UNAUTHORIZED_HTML, content_type="text/html",
+                )
+            else:
+                response = aiohttp.web.Response(status=401, text="unauthorized")
+            if cookie_value:
+                logger.warning(
+                    "auth: получен устаревший cookie %s — удаляю его", cookie_name,
+                )
+                response.del_cookie(cookie_name, path="/")
+            return response
 
         limiter.register_success(ip)
         response = await handler(request)
 
-        if request.query.get("token") and expected:
+        if expected and not tokens_equal(cookie_value, expected):
             response.set_cookie(
-                COOKIE_NAME, expected,
-                httponly=True, samesite="Strict", path="/",
+                cookie_name, expected,
+                httponly=True, samesite="Lax", path="/",
                 max_age=7 * 24 * 3600,
             )
         return response

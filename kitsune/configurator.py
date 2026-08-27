@@ -5,7 +5,8 @@ import sys
 import typing
 
 def _is_tty() -> bool:
-    return sys.stdout.isatty() and sys.stdin.isatty()
+    from . import console
+    return console.is_interactive()
 def _strip_ansi(text: str) -> str:
     return re.sub(r"\033\[[0-9;]*m", "", text)
 def tty_print(text: str, tty: bool | None = None) -> None:
@@ -13,9 +14,10 @@ def tty_print(text: str, tty: bool | None = None) -> None:
         tty = _is_tty()
     print(text if tty else _strip_ansi(text))
 def tty_input(prompt: str, tty: bool | None = None) -> str:
+    from . import console
     if tty is None:
         tty = _is_tty()
-    return input(prompt if tty else _strip_ansi(prompt))
+    return console.prompt(prompt if tty else _strip_ansi(prompt))
 try:
     from colorama import Fore, Style, init as _cinit
     _cinit(autoreset=True)

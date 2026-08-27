@@ -10,6 +10,8 @@ from pathlib import Path
 
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
 
+SETUP_COOKIE_NAME = "kitsune_setup"
+
 logger = logging.getLogger(__name__)
 
 
@@ -33,6 +35,51 @@ def _has_gui_session() -> bool:
     )
 
 
+_BROWSER_COMMANDS = (
+    "xdg-open",
+    "x-www-browser",
+    "sensible-browser",
+    "firefox",
+    "chromium",
+    "chromium-browser",
+    "google-chrome",
+    "gnome-open",
+    "kde-open",
+)
+
+
+def _launch_browser_command(url: str) -> bool:
+    import shutil
+    import subprocess
+    for name in _BROWSER_COMMANDS:
+        exe = shutil.which(name)
+        if not exe:
+            continue
+        try:
+            subprocess.Popen(
+                [exe, url],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+            return True
+        except Exception:
+            logger.debug("SetupServer: %s не смог открыть браузер", name, exc_info=True)
+    return False
+
+
+def _open_browser_silent(url: str) -> None:
+    import io
+    buf_out = io.StringIO()
+    buf_err = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(buf_out), contextlib.redirect_stderr(buf_err):
+            webbrowser.open(url, new=2, autoraise=True)
+    except Exception:
+        logger.debug("SetupServer: webbrowser.open failed", exc_info=True)
+
+
 def _open_browser_detached(url: str) -> None:
     if not _has_gui_session():
         logger.debug(
@@ -43,9 +90,11 @@ def _open_browser_detached(url: str) -> None:
 
     def _worker() -> None:
         try:
-            webbrowser.open(url, new=2, autoraise=True)
+            if _launch_browser_command(url):
+                return
         except Exception:
-            logger.debug("SetupServer: webbrowser.open failed", exc_info=True)
+            logger.debug("SetupServer: прямой запуск браузера не удался", exc_info=True)
+        _open_browser_silent(url)
 
     try:
         threading.Thread(
@@ -1056,6 +1105,8 @@ class SetupServer:
             get_token=lambda: self._setup_token,
             limiter=self._limiter,
             public_paths=frozenset({"/health"}),
+            cookie_name=SETUP_COOKIE_NAME,
+            public_prefixes=("/static/",),
         )
         app = web.Application(middlewares=[middleware])
         app.router.add_get("/", self._index)
