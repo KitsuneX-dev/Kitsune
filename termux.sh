@@ -617,6 +617,10 @@ if [[ -z "${NO_AUTOSTART:-}" ]]; then
 clear
 echo -e "\033[1;35m  🦊 Kitsune Userbot\033[0m"
 export KITSUNE_LOW_POWER="$KITSUNE_LOW_POWER"
+export LANG="\${LANG:-C.UTF-8}"
+export LC_ALL="\${LC_ALL:-C.UTF-8}"
+export PYTHONIOENCODING="utf-8"
+export PYTHONUTF8=1
 cd "\$HOME/Kitsune"
 if [[ -r /dev/tty ]]; then
     exec "$PYTHON" -m kitsune < /dev/tty

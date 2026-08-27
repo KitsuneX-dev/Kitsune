@@ -35,7 +35,58 @@ def _has_gui_session() -> bool:
     )
 
 
+def _should_open_browser() -> bool:
+    if os.environ.get("KITSUNE_NO_BROWSER"):
+        return False
+    if _is_termux():
+        return True
+    return _has_gui_session()
+
+
+def _is_usable_lan_ip(ip: str) -> bool:
+    import ipaddress
+    try:
+        addr = ipaddress.ip_address(str(ip).strip())
+    except Exception:
+        return False
+    if addr.is_loopback or addr.is_link_local or addr.is_unspecified:
+        return False
+    if not addr.is_private:
+        return False
+    for net in ("198.18.0.0/15", "100.64.0.0/10", "192.0.0.0/24"):
+        try:
+            if addr in ipaddress.ip_network(net):
+                return False
+        except Exception:
+            continue
+    return True
+
+
+def _detect_lan_ip() -> str | None:
+    import socket as _socket
+    candidates: list[str] = []
+    try:
+        with _socket.socket(_socket.AF_INET, _socket.SOCK_DGRAM) as sock:
+            sock.settimeout(1.0)
+            sock.connect(("8.8.8.8", 80))
+            candidates.append(str(sock.getsockname()[0]))
+    except Exception:
+        logger.debug("SetupServer: UDP-probe LAN IP failed", exc_info=True)
+    try:
+        for info in _socket.getaddrinfo(_socket.gethostname(), None, _socket.AF_INET):
+            addr = info[4][0]
+            if addr not in candidates:
+                candidates.append(str(addr))
+    except Exception:
+        logger.debug("SetupServer: getaddrinfo LAN IP failed", exc_info=True)
+    for ip in candidates:
+        if _is_usable_lan_ip(ip):
+            return ip
+    return None
+
+
 _BROWSER_COMMANDS = (
+    "termux-open-url",
     "xdg-open",
     "x-www-browser",
     "sensible-browser",
@@ -81,7 +132,7 @@ def _open_browser_silent(url: str) -> None:
 
 
 def _open_browser_detached(url: str) -> None:
-    if not _has_gui_session():
+    if not _should_open_browser():
         logger.debug(
             "SetupServer: графическая сессия не обнаружена — браузер не открываю"
         )
@@ -1098,6 +1149,8 @@ class SetupServer:
         from . import auth as _auth
 
         exposed = host not in ("127.0.0.1", "::1", "localhost")
+        if _is_termux() and host in ("127.0.0.1", "::1", "localhost"):
+            host = "0.0.0.0"
         self._setup_token = _auth.generate_token()
         self._limiter = _auth.RateLimiter()
 
@@ -1166,23 +1219,20 @@ class SetupServer:
             )
         url = f"http://127.0.0.1:{port}/?token={self._setup_token}"
         is_termux = _is_termux()
-        lan_url = url
-        if is_termux:
-            try:
-                import socket as _socket
-                with _socket.socket(_socket.AF_INET, _socket.SOCK_DGRAM) as _s:
-                    _s.connect(("8.8.8.8", 80))
-                    _lan_ip = _s.getsockname()[0]
-                lan_url = f"http://{_lan_ip}:{port}/?token={self._setup_token}"
-            except Exception:
-                pass
+        lan_ip = _detect_lan_ip()
+        lan_url = (
+            f"http://{lan_ip}:{port}/?token={self._setup_token}" if lan_ip else None
+        )
         print(f"\n{'━' * 42}")
         if is_termux:
-            print(f"  🌐  Открой в браузере на телефоне:")
-            print(f"      \033[1;36m{lan_url}\033[0m")
-            print(f"  💡  Или на ПК в локальной сети: {lan_url}")
+            print("  🌐  Открой в браузере на телефоне:")
+            print(f"      \033[1;36m{url}\033[0m")
         else:
             print(f"  🌐  Открой в браузере: \033[1;36m{url}\033[0m для регистрации")
+        if lan_url:
+            print("  📶  С другого устройства в той же Wi-Fi сети:")
+            print(f"      \033[1;36m{lan_url}\033[0m")
+        print("  💡  Копируй ссылку целиком, вместе с ?token=…")
         if not _hydrogram_available():
             print(
                 "  ⓘ  Hydrogram не установлен — шаг медиа-сессии будет пропущен,\n"

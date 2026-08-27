@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import typing
 
 try:
@@ -51,6 +52,13 @@ class WebCore(RoutesSystemMixin, RoutesAccountsMixin):
         if not WEB_AVAILABLE:
             logger.warning("WebCore: aiohttp not available, web UI disabled")
             return
+
+        if "com.termux" in str(os.environ.get("PREFIX", "")) and host in (
+            "127.0.0.1",
+            "::1",
+            "localhost",
+        ):
+            host = "0.0.0.0"
 
         self._token = await _auth.ensure_web_token(self._db)
 

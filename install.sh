@@ -730,6 +730,10 @@ if $IS_TERMUX; then
 clear
 echo -e "\033[1;35mKitsune Userbot\033[0m"
 export KITSUNE_LOW_POWER="$KITSUNE_LOW_POWER"
+export LANG="\${LANG:-C.UTF-8}"
+export LC_ALL="\${LC_ALL:-C.UTF-8}"
+export PYTHONIOENCODING="utf-8"
+export PYTHONUTF8=1
 cd "$INSTALL_DIR" && "$PYTHON_VENV" -m kitsune
 PROFILE
         ok "Автозапуск настроен (~/.bash_profile), KITSUNE_LOW_POWER=$KITSUNE_LOW_POWER"
@@ -739,6 +743,10 @@ elif $IS_USERLAND; then
 mkdir -p "\$HOME/tmp"
 export TMPDIR="\$HOME/tmp"
 export KITSUNE_LOW_POWER="$KITSUNE_LOW_POWER"
+export LANG="\${LANG:-C.UTF-8}"
+export LC_ALL="\${LC_ALL:-C.UTF-8}"
+export PYTHONIOENCODING="utf-8"
+export PYTHONUTF8=1
 cd "$INSTALL_DIR"
 if [[ -r /dev/tty ]]; then
     exec "$PYTHON_VENV" -m kitsune < /dev/tty
@@ -752,6 +760,10 @@ elif $IS_ALPINE; then
     cat > "$HOME/start_kitsune.sh" << ALPSCRIPT
 #!/bin/sh
 export KITSUNE_LOW_POWER="$KITSUNE_LOW_POWER"
+export LANG="\${LANG:-C.UTF-8}"
+export LC_ALL="\${LC_ALL:-C.UTF-8}"
+export PYTHONIOENCODING="utf-8"
+export PYTHONUTF8=1
 cd "$INSTALL_DIR"
 if [ -r /dev/tty ]; then
     exec "$PYTHON_VENV" -m kitsune < /dev/tty
@@ -773,6 +785,9 @@ Type=simple
 User=$USER
 WorkingDirectory=$INSTALL_DIR
 Environment=KITSUNE_LOW_POWER=$KITSUNE_LOW_POWER
+Environment=PYTHONIOENCODING=utf-8
+Environment=PYTHONUTF8=1
+Environment=LANG=C.UTF-8
 ExecStart=$PYTHON_VENV -m kitsune
 Restart=on-failure
 RestartSec=5

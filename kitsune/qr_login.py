@@ -111,11 +111,7 @@ def _terminal_size() -> tuple[int, int]:
 def _render_qr(url: str) -> str:
     from .qr import make_qr_text, qr_text_size
     cols, lines = _terminal_size()
-    variants = (
-        (True, 2),
-        (True, 1),
-        (True, 0),
-    )
+    variants = ((False, 4), (True, 4), (True, 3), (True, 2))
     for compact, quiet in variants:
         try:
             w, h = qr_text_size(url, quiet=quiet, compact=compact)
@@ -129,7 +125,7 @@ def _render_qr(url: str) -> str:
                 logger.warning("qr_login: make_qr_text failed: %s", exc)
                 break
     try:
-        return make_qr_text(url, compact=True, quiet=1)
+        return make_qr_text(url, compact=True, quiet=2)
     except Exception as exc:
         logger.warning("qr_login: make_qr_text fallback failed: %s", exc)
         return ""
