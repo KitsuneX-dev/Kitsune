@@ -184,29 +184,118 @@ class LogsModule(KitsuneModule):
     def _destination(self, origin) -> tuple[typing.Any, typing.Any]:
         if self._is_event(origin):
             message = origin.message
-            return (
-                getattr(message, "chat_id", None) or getattr(message, "peer_id", None),
-                getattr(message, "reply_to_msg_id", None),
-            )
-        return getattr(origin, "chat_id", None) or None, None
+            chat_id = getattr(message, "chat_id", None) or getattr(message, "peer_id", None)
+            if chat_id:
+                return chat_id, getattr(message, "reply_to_msg_id", None)
+            return self._fallback_chat(origin), None
+        chat_id = getattr(origin, "chat_id", None)
+        if chat_id:
+            return chat_id, None
+        unit_chat = self._unit_chat(origin)
+        if unit_chat:
+            return unit_chat, None
+        return self._fallback_chat(origin), None
+
+    def _unit_chat(self, origin) -> typing.Any:
+        unit_id = getattr(origin, "unit_id", None)
+        if not unit_id:
+            return None
+        manager = getattr(origin, "_manager", None) or self._inline()
+        units = getattr(manager, "_units", None) if manager is not None else None
+        if not isinstance(units, dict):
+            return None
+        unit = units.get(unit_id) or {}
+        chat = unit.get("chat") or unit.get("chat_id")
+        if chat:
+            return chat
+        caller = unit.get("caller") or unit.get("message")
+        return getattr(caller, "chat_id", None) or getattr(caller, "peer_id", None)
+
+    def _fallback_chat(self, origin) -> typing.Any:
+        user_id = getattr(origin, "from_user_id", None)
+        if user_id:
+            return user_id
+        return getattr(self.client, "tg_id", None) or "me"
 
     def _collect(self, level: int) -> str:
         parts: list[str] = []
-        for handler in logging.getLogger().handlers:
-            if not hasattr(handler, "dumps"):
-                continue
+        for handler in self._log_handlers():
             try:
                 lines = handler.dumps(level, client_id=None)
             except TypeError:
                 try:
                     lines = handler.dumps(level)
                 except Exception:
+                    logger.debug("logs: handler.dumps failed", exc_info=True)
                     continue
             except Exception:
+                logger.debug("logs: handler.dumps failed", exc_info=True)
                 continue
             if lines:
                 parts.append("\n".join(lines))
+        if not parts:
+            fallback = self._collect_from_file(level)
+            if fallback:
+                parts.append(fallback)
         return "\n\n".join(parts)
+
+    @staticmethod
+    def _log_handlers() -> list[typing.Any]:
+        seen: list[typing.Any] = []
+        candidates = list(logging.getLogger().handlers)
+        try:
+            candidates.extend(
+                h
+                for lg in logging.Logger.manager.loggerDict.values()
+                if isinstance(lg, logging.Logger)
+                for h in lg.handlers
+            )
+        except Exception:
+            pass
+        for handler in candidates:
+            if not hasattr(handler, "dumps"):
+                continue
+            if any(handler is existing for existing in seen):
+                continue
+            seen.append(handler)
+        return seen
+
+    @staticmethod
+    def _collect_from_file(level: int) -> str:
+        try:
+            from ..log import LOG_FILE
+        except Exception:
+            return ""
+        try:
+            if not LOG_FILE.exists():
+                return ""
+            raw = LOG_FILE.read_text(encoding="utf-8", errors="replace").splitlines()
+        except Exception:
+            logger.debug("logs: log file read failed", exc_info=True)
+            return ""
+        if level <= logging.NOTSET:
+            return "\n".join(raw[-7000:])
+        allowed = {
+            name
+            for name, value in logging._nameToLevel.items()
+            if value >= level
+        }
+        kept: list[str] = []
+        keep_current = False
+        for line in raw:
+            marker = next(
+                (
+                    f"[{name}]"
+                    for name in ("CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG", "NOTSET")
+                    if f"[{name}]" in line
+                ),
+                None,
+            )
+            if marker is not None:
+                keep_current = marker.strip("[]") in allowed
+            if keep_current:
+                kept.append(line)
+        return "\n".join(kept[-7000:])
 
     def _censor(self, text: str) -> str:
         phone = getattr(getattr(self.client, "tg_me", None), "phone", None)

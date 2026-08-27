@@ -175,6 +175,27 @@ class TelegramChannelHandler(logging.Handler):
                         f"<code>{utils.escape_html(combined)}</code>",
                         parse_mode="html",
                     )
+def _safe_message(record: logging.LogRecord) -> str:
+    try:
+        return record.getMessage()
+    except Exception:
+        try:
+            return f"{record.msg!r} % {record.args!r}"
+        except Exception:
+            return "<unrenderable log record>"
+
+
+def _safe_render(record: logging.LogRecord) -> str:
+    try:
+        import time as _time
+        ts = _time.strftime("%Y-%m-%d %H:%M:%S", _time.localtime(record.created))
+    except Exception:
+        ts = "0000-00-00 00:00:00"
+    level = getattr(record, "levelname", "?")
+    name = getattr(record, "name", "?")
+    return f"{ts} [{level}] {name}: {_safe_message(record)}"
+
+
 class KitsuneLogsHandler(logging.Handler):
     def __init__(self, targets: list[logging.Handler], capacity: int = 7000) -> None:
         super().__init__(logging.NOTSET)
@@ -267,17 +288,44 @@ class KitsuneLogsHandler(logging.Handler):
     def dump(self) -> list[logging.LogRecord]:
         return list(self.handledbuffer) + self.buffer
     def dumps(self, lvl: int = 0, client_id: int | None = None) -> list[str]:
-        return [
-            self.targets[0].format(r)
-            for r in (self.buffer + list(self.handledbuffer))
-            if r.levelno >= lvl
-            and (
-                client_id is None
-                or not getattr(r, "kitsune_caller", None)
-                or client_id == r.kitsune_caller
-            )
-        ]
+        formatter = self.targets[0] if self.targets else None
+        out: list[str] = []
+        for r in (list(self.handledbuffer) + list(self.buffer)):
+            try:
+                if r.levelno < lvl:
+                    continue
+                if (
+                    client_id is not None
+                    and getattr(r, "kitsune_caller", None)
+                    and client_id != r.kitsune_caller
+                ):
+                    continue
+            except Exception:
+                continue
+            line: str | None = None
+            if formatter is not None:
+                try:
+                    line = formatter.format(r)
+                except Exception:
+                    line = None
+            if line is None:
+                try:
+                    line = _safe_render(r)
+                except Exception:
+                    continue
+            out.append(line)
+        return out
+
     def emit(self, record: logging.LogRecord) -> None:
+        try:
+            self._emit(record)
+        except Exception:
+            try:
+                self.buffer.append(record)
+            except Exception:
+                pass
+
+    def _emit(self, record: logging.LogRecord) -> None:
         caller: int | None = None
         try:
             frame = sys._getframe(1)
@@ -290,26 +338,6 @@ class KitsuneLogsHandler(logging.Handler):
         except Exception:
             pass
         record.kitsune_caller = caller
-        if record.levelno >= self.tg_level:
-            if record.exc_info:
-                exc = KitsuneException.from_exc_info(
-                    *record.exc_info,
-                    stack=record.__dict__.get("stack"),
-                    comment=record.getMessage(),
-                )
-                if not self.ignore_common or all(
-                    kw not in exc.message
-                    for kw in ["InputPeerEmpty()", "entities.html"]
-                ):
-                    try:
-                        self._tg_queue.put_nowait((exc, caller))
-                    except asyncio.QueueFull:
-                        pass
-            else:
-                try:
-                    self._tg_queue.put_nowait((_tg_formatter.format(record), caller))
-                except asyncio.QueueFull:
-                    pass
         total = len(self.buffer) + len(self.handledbuffer)
         if total >= self.capacity:
             if self.handledbuffer:
@@ -322,12 +350,39 @@ class KitsuneLogsHandler(logging.Handler):
             try:
                 for rec in self.buffer:
                     for target in self.targets:
-                        if rec.levelno >= target.level:
-                            target.handle(rec)
+                        try:
+                            if rec.levelno >= target.level:
+                                target.handle(rec)
+                        except Exception:
+                            pass
                 self.handledbuffer.extend(self.buffer)
                 self.buffer = []
             finally:
                 self.release()
+        if record.levelno >= self.tg_level:
+            if record.exc_info:
+                try:
+                    exc = KitsuneException.from_exc_info(
+                        *record.exc_info,
+                        stack=record.__dict__.get("stack"),
+                        comment=_safe_message(record),
+                    )
+                except Exception:
+                    return
+                if not self.ignore_common or all(
+                    kw not in exc.message
+                    for kw in ["InputPeerEmpty()", "entities.html"]
+                ):
+                    try:
+                        self._tg_queue.put_nowait((exc, caller))
+                    except Exception:
+                        pass
+            else:
+                try:
+                    self._tg_queue.put_nowait((_tg_formatter.format(record), caller))
+                except Exception:
+                    pass
+
     def setLevel(self, level: int) -> None:
         self.lvl = level
         try:
@@ -371,7 +426,7 @@ class _NetworkNoiseFilter(logging.Filter):
         "Security error while unpacking",
     )
     def filter(self, record: logging.LogRecord) -> bool:
-        msg = record.getMessage()
+        msg = _safe_message(record)
         if record.levelno in (logging.WARNING, logging.ERROR):
             if any(frag in msg for frag in self._SUPPRESS_FRAGMENTS):
                 return False
@@ -389,7 +444,7 @@ class _HydrogramSessionNoiseFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         if record.levelno > logging.INFO:
             return True
-        msg = record.getMessage()
+        msg = _safe_message(record)
         if any(frag in msg for frag in self._SUPPRESS_FRAGMENTS):
             return False
         return True
@@ -411,11 +466,47 @@ class _ConsoleStartupFilter(logging.Filter):
     )
     def filter(self, record: logging.LogRecord) -> bool:
         if record.levelno == logging.INFO:
-            msg = record.getMessage()
+            msg = _safe_message(record)
             if any(s in msg for s in self._SUPPRESS):
                 return False
         return True
-_file_handler = RotatingFileHandler(
+class _SafeFormatter(logging.Formatter):
+
+    def format(self, record: logging.LogRecord) -> str:
+        try:
+            return super().format(record)
+        except Exception:
+            base = _safe_render(record)
+            if record.exc_info:
+                try:
+                    base += "\n" + "".join(traceback.format_exception(*record.exc_info)).rstrip()
+                except Exception:
+                    pass
+            return base
+
+
+_safe_main_formatter = _SafeFormatter(
+    fmt="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+
+
+class _SafeRotatingFileHandler(RotatingFileHandler):
+
+    def shouldRollover(self, record: logging.LogRecord) -> int:
+        try:
+            return super().shouldRollover(record)
+        except Exception:
+            return 0
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            super().emit(record)
+        except Exception:
+            pass
+
+
+_file_handler = _SafeRotatingFileHandler(
     filename=str(LOG_FILE),
     mode="a",
     maxBytes=10 * 1024 * 1024,
@@ -424,8 +515,8 @@ _file_handler = RotatingFileHandler(
     delay=False,
 )
 
-_file_handler.setFormatter(_main_formatter)
-_file_handler.setLevel(logging.INFO)
+_file_handler.setFormatter(_safe_main_formatter)
+_file_handler.setLevel(logging.NOTSET)
 
 
 class _PassThroughQueueHandler(QueueHandler):
@@ -857,10 +948,11 @@ def init() -> None:
     import sys
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setLevel(logging.INFO)
-    console_handler.setFormatter(_main_formatter)
+    console_handler.setFormatter(_safe_main_formatter)
     console_handler.addFilter(_ConsoleStartupFilter())
     root = logging.getLogger()
     root.handlers = []
+    logging.raiseExceptions = False
     start_log_listener()
     root.addHandler(KitsuneLogsHandler([console_handler, rotating_handler], capacity=7000))
     root.setLevel(logging.DEBUG)
