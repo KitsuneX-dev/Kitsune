@@ -12,6 +12,65 @@ _STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 logger = logging.getLogger(__name__)
 
+
+def _is_termux() -> bool:
+    return "com.termux" in str(os.environ.get("PREFIX", ""))
+
+
+def _has_gui_session() -> bool:
+    if os.name == "nt":
+        return True
+    if os.environ.get("KITSUNE_NO_BROWSER"):
+        return False
+    if _is_termux():
+        return False
+    import sys as _sys
+    if _sys.platform == "darwin":
+        return True
+    return bool(
+        os.environ.get("DISPLAY")
+        or os.environ.get("WAYLAND_DISPLAY")
+    )
+
+
+def _open_browser_detached(url: str) -> None:
+    if not _has_gui_session():
+        logger.debug(
+            "SetupServer: графическая сессия не обнаружена — браузер не открываю"
+        )
+        return
+    import threading
+
+    def _worker() -> None:
+        try:
+            webbrowser.open(url, new=2, autoraise=True)
+        except Exception:
+            logger.debug("SetupServer: webbrowser.open failed", exc_info=True)
+
+    try:
+        threading.Thread(
+            target=_worker, name="kitsune-setup-browser", daemon=True,
+        ).start()
+    except Exception:
+        logger.debug("SetupServer: не удалось запустить поток браузера", exc_info=True)
+
+
+def _hydrogram_available() -> bool:
+    import importlib.util
+    try:
+        return importlib.util.find_spec("hydrogram") is not None
+    except Exception:
+        return False
+
+
+def _port_candidates(port: int) -> list[int]:
+    base = int(port)
+    out: list[int] = []
+    for p in [base] + [base + i for i in range(1, 11)] + [0]:
+        if p not in out:
+            out.append(p)
+    return out
+
 _HTML = r"""<!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -423,6 +482,8 @@ input::placeholder { color: var(--mu); }
     </div>
 
     <button class="primary" id="btn4" onclick="startHydro()">Продолжить · создать Hydrogram-сессию <svg class="icon"><use href="#icon-arrow-right"/></svg></button>
+    <button class="primary" id="btn4_skip" style="display:none;margin-top:10px" onclick="skipHydro()">Пропустить Hydrogram и запустить Kitsune <svg class="icon"><use href="#icon-arrow-right"/></svg></button>
+    <div class="error" id="err4"></div>
   </div>
 
   <!-- ============================================================ -->
@@ -529,6 +590,7 @@ const _KTOKEN=(function(){
   };
 })();
 let HYDRO_ONLY = false;     // режим повторной регистрации только Hydrogram
+let HYDRO_AVAILABLE = true;  // установлен ли hydrogram на этой машине
 let SAVED_PHONE = '';        // номер с шага 1 (подставится в шаге 5)
 
 // ============================================================
@@ -589,6 +651,8 @@ async function restoreState(){
     const r = await fetch('/api/mode');
     const j = await r.json();
     HYDRO_ONLY = !!(j && j.hydrogram_only);
+    HYDRO_AVAILABLE = !(j && j.hydrogram_available === false);
+    applyHydroAvailability();
     if(await restoreState()){
       if(HYDRO_ONLY){
         document.getElementById('setup_title').textContent = 'Kitsune · повторная регистрация';
@@ -797,7 +861,49 @@ async function check2fa1(){
 // Transition (step 4) → начинаем Hydrogram
 // ============================================================
 
+function applyHydroAvailability(){
+  const btn = document.getElementById('btn4');
+  const skip = document.getElementById('btn4_skip');
+  if(HYDRO_AVAILABLE){
+    if(btn) btn.style.display = '';
+    if(skip) skip.style.display = 'none';
+    return;
+  }
+  if(btn) btn.style.display = 'none';
+  if(skip) skip.style.display = '';
+  const note = document.getElementById('t1_info');
+  if(note){
+    note.textContent = (note.textContent ? note.textContent + ' · ' : '')
+      + 'Hydrogram не установлен — шаг медиа-сессии пропускается';
+  }
+}
+
+async function finishSetup(errStep){
+  const res = await post('/api/finish', {});
+  if(res && res.ok){
+    if(typeof errStep === 'number') showErr(errStep,'');
+    document.getElementById('done_info').textContent =
+      res.message || 'Kitsune запускается…';
+    show(8);
+    return true;
+  }
+  if(typeof errStep === 'number'){
+    showErr(errStep, (res && res.error) || 'Не удалось завершить настройку');
+  }
+  return false;
+}
+
+async function skipHydro(){
+  setBtn('btn4_skip','Завершаем…',true);
+  const ok = await finishSetup(4);
+  if(!ok) setBtn('btn4_skip','Пропустить Hydrogram и запустить Kitsune →',false);
+}
+
 function startHydro(){
+  if(!HYDRO_AVAILABLE){
+    skipHydro();
+    return;
+  }
   // Префилл телефона
   if(SAVED_PHONE){
     document.getElementById('phone2').value = SAVED_PHONE;
@@ -901,6 +1007,8 @@ class SetupServer:
         self._code_error: str | None = None
         self._code_task: Any = None
         self._code_backend: str | None = None
+        self._port: int = 0
+        self._hydrogram_skipped: bool = False
         self._data_dir_override: Path | None = (
             Path(data_dir_override) if data_dir_override else None
         )
@@ -955,13 +1063,42 @@ class SetupServer:
         app.router.add_post("/api/sendcode", self._api_sendcode)
         app.router.add_post("/api/signin", self._api_signin)
         app.router.add_post("/api/2fa", self._api_2fa)
+        app.router.add_post("/api/finish", self._api_finish)
         app.router.add_get("/api/mode", self._api_mode)
         app.router.add_get("/api/state", self._api_state)
         app.router.add_get("/static/{filename}", self._static)
         self._runner = web.AppRunner(app)
         await self._runner.setup()
-        site = web.TCPSite(self._runner, host, port)
-        await site.start()
+        last_exc: Exception | None = None
+        bound = False
+        for candidate in _port_candidates(port):
+            site = web.TCPSite(self._runner, host, candidate)
+            try:
+                await site.start()
+            except OSError as exc:
+                last_exc = exc
+                logger.warning(
+                    "SetupServer: порт %s занят или недоступен (%s) — пробую следующий",
+                    candidate, exc,
+                )
+                continue
+            port = candidate
+            bound = True
+            break
+        if not bound:
+            with contextlib.suppress(Exception):
+                await self._runner.cleanup()
+            self._runner = None
+            raise RuntimeError(
+                "Не удалось занять ни один порт для веб-мастера настройки"
+                + (f": {last_exc}" if last_exc else "")
+            )
+        if port == 0:
+            try:
+                port = int(self._runner.addresses[0][1])
+            except Exception:
+                logger.debug("SetupServer: не удалось определить фактический порт")
+        self._port = int(port)
 
 
         try:
@@ -977,8 +1114,7 @@ class SetupServer:
                 host,
             )
         url = f"http://127.0.0.1:{port}/?token={self._setup_token}"
-        import os as _os
-        is_termux = bool(_os.environ.get("PREFIX", "").find("com.termux") != -1)
+        is_termux = _is_termux()
         lan_url = url
         if is_termux:
             try:
@@ -996,12 +1132,13 @@ class SetupServer:
             print(f"  💡  Или на ПК в локальной сети: {lan_url}")
         else:
             print(f"  🌐  Открой в браузере: \033[1;36m{url}\033[0m для регистрации")
+        if not _hydrogram_available():
+            print(
+                "  ⓘ  Hydrogram не установлен — шаг медиа-сессии будет пропущен,\n"
+                "      в мастере появится кнопка «Пропустить Hydrogram и запустить Kitsune»."
+            )
         print(f"{'━' * 42}\n")
-        if not is_termux:
-            try:
-                webbrowser.open(url)
-            except Exception:
-                pass
+        _open_browser_detached(url)
     async def wait_done(self) -> None:
         await self._done.wait()
 
@@ -1040,9 +1177,42 @@ class SetupServer:
         cfg = self._get_config() or {}
         return web.json_response({
             "hydrogram_only": bool(self._hydrogram_only),
+            "hydrogram_available": _hydrogram_available(),
             "api_id": cfg.get("api_id") if self._hydrogram_only else None,
             "api_hash": cfg.get("api_hash") if self._hydrogram_only else None,
             "phone": cfg.get("phone") if self._hydrogram_only else None,
+        })
+
+    async def _api_finish(self, _: web.Request) -> web.Response:
+        if self._hydrogram_only:
+            if not self._hydrogram_success:
+                return self._err(
+                    "Hydrogram-сессия ещё не создана — заверши регистрацию Hydrogram."
+                )
+            self._finish()
+            return web.json_response({
+                "ok": True,
+                "message": "Hydrogram-сессия готова, Kitsune продолжает запуск…",
+            })
+        if not self._telethon_success:
+            return self._err(
+                "Сначала заверши вход Telethon — основная сессия ещё не создана."
+            )
+        if not self._hydrogram_success:
+            self._hydrogram_skipped = True
+            logger.warning(
+                "setup: пользователь пропустил создание Hydrogram-сессии — "
+                "медиа-функции будут ограничены"
+            )
+        self._finish()
+        return web.json_response({
+            "ok": True,
+            "message": (
+                "Telethon-сессия готова. Hydrogram пропущен — "
+                "часть медиа-функций будет недоступна."
+                if self._hydrogram_skipped
+                else "Настройка завершена, Kitsune запускается…"
+            ),
         })
 
     async def _api_state(self, _: web.Request) -> web.Response:
@@ -1528,9 +1698,14 @@ class SetupServer:
         logger.info(
             "setup: Hydrogram-сессия успешно создана и сохранена на диск"
         )
-        if not self._hydrogram_only:
-            pass
-        self._done.set()
+        self._finish()
+    def _finish(self) -> None:
+        if not self._done.is_set():
+            self._done.set()
+    def hydrogram_skipped(self) -> bool:
+        return bool(self._hydrogram_skipped)
+    def telethon_success(self) -> bool:
+        return bool(self._telethon_success)
     @staticmethod
     def _err(msg: str) -> web.Response:
         return web.json_response({"ok": False, "error": msg})

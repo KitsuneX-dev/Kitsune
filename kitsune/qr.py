@@ -223,21 +223,49 @@ def _make_matrix(text: str, ec: str = "M") -> _QRMatrix:
     masked = _apply_mask(m, best_mask)
     _place_format(masked, ec, best_mask)
     return masked
-def make_qr_text(text: str, ec: str = "M") -> str:
-    m     = _make_matrix(text, ec)
-    rows  = m.rows()
-    lines = []
-    quiet = "  "
-    border = quiet + "  " * m.size + quiet
-    lines.append(border)
+def _grid_with_quiet(rows: list[list[int]], quiet: int) -> list[list[int]]:
+    quiet = max(0, int(quiet))
+    n     = len(rows)
+    width = n + quiet * 2
+    grid: list[list[int]] = [[0] * width for _ in range(quiet)]
     for row in rows:
-        line = quiet
-        for cell in row:
-            line += "██" if cell == 1 else "  "
-        line += quiet
-        lines.append(line)
-    lines.append(border)
+        grid.append([0] * quiet + [1 if cell == 1 else 0 for cell in row] + [0] * quiet)
+    grid.extend([0] * width for _ in range(quiet))
+    return grid
+def _half_block(top: int, bottom: int) -> str:
+    if top and bottom:
+        return "█"
+    if top:
+        return "▀"
+    if bottom:
+        return "▄"
+    return " "
+def make_qr_text_compact(text: str, ec: str = "M", quiet: int = 2) -> str:
+    m    = _make_matrix(text, ec)
+    grid = _grid_with_quiet(m.rows(), quiet)
+    if len(grid) % 2:
+        grid.append([0] * len(grid[0]))
+    lines: list[str] = []
+    for i in range(0, len(grid), 2):
+        top = grid[i]
+        bot = grid[i + 1]
+        lines.append("".join(_half_block(t, b) for t, b in zip(top, bot)))
     return "\n".join(lines)
+def make_qr_text_full(text: str, ec: str = "M", quiet: int = 2) -> str:
+    m    = _make_matrix(text, ec)
+    grid = _grid_with_quiet(m.rows(), quiet)
+    return "\n".join("".join("██" if cell else "  " for cell in row) for row in grid)
+def qr_text_size(text: str, ec: str = "M", quiet: int = 2, compact: bool = True) -> tuple[int, int]:
+    version = _qr_version_for(len(text.encode("utf-8")), ec)
+    size    = 21 + (version - 1) * 4
+    side    = size + max(0, int(quiet)) * 2
+    if compact:
+        return side, (side + 1) // 2
+    return side * 2, side
+def make_qr_text(text: str, ec: str = "M", compact: bool = True, quiet: int = 2) -> str:
+    if compact:
+        return make_qr_text_compact(text, ec, quiet)
+    return make_qr_text_full(text, ec, quiet)
 def make_qr_image(text: str, ec: str = "M", scale: int = 10) -> bytes:
     try:
         from PIL import Image, ImageDraw

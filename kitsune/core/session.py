@@ -91,6 +91,64 @@ async def hydrogram_web_reauth(
     return ok
 
 
+async def run_browser_setup(
+    cfg: dict[str, Any],
+    save_config_fn,
+    get_config_fn,
+) -> Any:
+    try:
+        from ..web.setup import SetupServer
+    except ImportError as exc:
+        logger.exception("main: не удалось импортировать веб-мастер настройки")
+        raise RuntimeError(
+            "Веб-мастер настройки недоступен: не установлен aiohttp "
+            f"({exc}). Установи зависимости (pip install aiohttp) "
+            "или выбери вход через QR-код (ответь Y на вопрос о QR)."
+        ) from exc
+
+    web_port = int(cfg.get("web_port", 8080) or 8080)
+    web_host = str(cfg.get("web_host", "127.0.0.1") or "127.0.0.1")
+    setup = SetupServer(save_config_fn=save_config_fn, get_config_fn=get_config_fn)
+
+    try:
+        await setup.start(host=web_host, port=web_port)
+    except Exception as exc:
+        logger.exception("main: веб-мастер настройки не смог запуститься")
+        with contextlib.suppress(Exception):
+            await setup.wait_done()
+        raise RuntimeError(
+            "Не удалось запустить веб-мастер настройки "
+            f"({web_host}:{web_port}): {exc}. "
+            "Освободи порт, задай другой в web_port или пройди вход "
+            "через QR-код (ответь Y на вопрос о QR)."
+        ) from exc
+
+    try:
+        await setup.wait_done()
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        print("\n\033[1;31mНастройка прервана пользователем.\033[0m")
+        raise
+    except Exception as exc:
+        logger.exception("main: ожидание завершения веб-мастера упало")
+        raise RuntimeError(
+            f"Веб-мастер настройки завершился с ошибкой: {exc}"
+        ) from exc
+
+    client = setup.get_client()
+    if client is None:
+        raise RuntimeError(
+            "Мастер настройки завершён, но Telegram-клиент не создан. "
+            "Открой ссылку мастера ещё раз и доведи вход до конца, "
+            "либо выбери вход через QR-код (ответь Y на вопрос о QR)."
+        )
+    if getattr(setup, "hydrogram_skipped", None) and setup.hydrogram_skipped():
+        logger.warning(
+            "main: Hydrogram-сессия не создана (пропущена в мастере) — "
+            "медиа-функции будут ограничены"
+        )
+    return client
+
+
 async def run_web_setup(
     cfg: dict[str, Any],
     save_config_fn,
@@ -105,13 +163,7 @@ async def run_web_setup(
         return await run_console_qr_login(
             cfg, save_config_fn, get_config_fn, session_path,
         )
-    from ..web.setup import SetupServer
-    web_port = int(cfg.get("web_port", 8080))
-    setup = SetupServer(save_config_fn=save_config_fn, get_config_fn=get_config_fn)
-    web_host = str(cfg.get("web_host", "127.0.0.1"))
-    await setup.start(host=web_host, port=web_port)
-    await setup.wait_done()
-    return setup.get_client()
+    return await run_browser_setup(cfg, save_config_fn, get_config_fn)
 
 
 async def restore_session(

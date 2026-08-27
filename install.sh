@@ -174,7 +174,7 @@ read_requires_python() {
     return 0
 }
 
-SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo ".")"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || echo ".")"
 for _pp in "$SCRIPT_DIR/pyproject.toml" "$HOME/Kitsune/pyproject.toml" "./pyproject.toml"; do
     if read_requires_python "$_pp"; then
         info "requires-python из $_pp: ${REQ_PY_MAJOR}.${REQ_PY_MINOR}+"

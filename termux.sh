@@ -128,7 +128,7 @@ pick_python() {
 }
 
 step "Проверка версии Python"
-SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo ".")"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || echo ".")"
 for _pp in "$SCRIPT_DIR/pyproject.toml" "$HOME/Kitsune/pyproject.toml" "./pyproject.toml"; do
     if read_requires_python "$_pp"; then
         info "requires-python: ${REQ_PY_MAJOR}.${REQ_PY_MINOR}+"
@@ -215,11 +215,21 @@ REQ_FILE="requirements-termux.txt"
 info "Устанавливаю из $REQ_FILE..."
 
 FAILED_PKGS=()
+ORJSON_OK=false
 while IFS= read -r pkg || [[ -n "$pkg" ]]; do
     [[ -z "$pkg" || "${pkg:0:1}" == "#" ]] && continue
     [[ "$pkg" == telethon* ]] && continue
     [[ "$pkg" == aiogram* ]] && continue
     [[ "$pkg" == pydantic* ]] && continue
+    if [[ "$pkg" == orjson* ]]; then
+        if pip_cmd install --prefer-binary --only-binary=:all: --no-cache-dir -q "$pkg" 2>/dev/null; then
+            ORJSON_OK=true
+            ok "orjson установлен (prebuilt wheel)"
+        else
+            info "orjson официально не поддерживает Android/Termux — Kitsune использует стандартный json"
+        fi
+        continue
+    fi
     if pip_install "$pkg"; then
         true
     else
@@ -228,6 +238,10 @@ while IFS= read -r pkg || [[ -n "$pkg" ]]; do
     fi
 done < "$REQ_FILE"
 
+if ! $ORJSON_OK; then
+    info "JSON-бэкенд: стандартный json (фолбэк kitsune/_json.py, работает без orjson)"
+fi
+
 if [[ ${#FAILED_PKGS[@]} -gt 0 ]]; then
     warn "Не установились пакеты: ${FAILED_PKGS[*]}"
 else
@@ -235,25 +249,74 @@ else
 fi
 
 step "aiogram + pydantic"
-if pip_install "pydantic>=2.7.0"; then
-    ok "pydantic установлен"
-elif pip_cmd install --prefer-binary --no-cache-dir -q "pydantic" 2>/dev/null; then
-    ok "pydantic установлен (последняя доступная версия)"
-elif pip_cmd install --prefer-binary --no-cache-dir -q "pydantic==1.10.21" 2>/dev/null; then
-    ok "pydantic 1.x установлен (совместимый fallback)"
-    warn "pydantic версии 1.x — нотификатор может работать ограниченно"
+
+PYDANTIC_OK=false
+NOTIFIER_DISABLED_REASON=""
+
+pydantic2_present() {
+    "$PYTHON" - <<'PYCHECK' 2>/dev/null
+import sys
+try:
+    import pydantic
+except Exception:
+    sys.exit(1)
+major = int(str(pydantic.VERSION).split(".")[0])
+sys.exit(0 if major >= 2 else 1)
+PYCHECK
+}
+
+ensure_rust_toolchain() {
+    if command -v cargo >/dev/null 2>&1; then
+        return 0
+    fi
+    info "Для сборки pydantic-core нужен Rust — устанавливаю через pkg (это долго)"
+    pkg install -y rust binutils build-essential 2>/dev/null || true
+    command -v cargo >/dev/null 2>&1
+}
+
+if pydantic2_present; then
+    PYDANTIC_OK=true
+    ok "pydantic 2.x уже установлен"
+elif pip_cmd install --prefer-binary --only-binary=:all: --no-cache-dir -q "pydantic>=2.7.0" 2>/dev/null && pydantic2_present; then
+    PYDANTIC_OK=true
+    ok "pydantic 2.x установлен (prebuilt wheel)"
 else
-    warn "pydantic не установился"
+    info "Готового wheel для pydantic-core под Android нет — пробую собрать из исходников"
+    if ensure_rust_toolchain; then
+        if CARGO_BUILD_JOBS=1 pip_cmd install --no-cache-dir -q "pydantic>=2.7.0" 2>/dev/null && pydantic2_present; then
+            PYDANTIC_OK=true
+            ok "pydantic 2.x установлен (pydantic-core собран через cargo)"
+        elif CARGO_BUILD_JOBS=1 pip_cmd install --no-build-isolation --no-cache-dir -q "pydantic>=2.7.0" 2>/dev/null && pydantic2_present; then
+            PYDANTIC_OK=true
+            ok "pydantic 2.x установлен (сборка без изоляции)"
+        else
+            NOTIFIER_DISABLED_REASON="сборка pydantic-core (Rust) в Termux не удалась"
+        fi
+    else
+        NOTIFIER_DISABLED_REASON="Rust-тулчейн (cargo) недоступен, а pydantic-core собирается только из исходников"
+    fi
 fi
 
-if pip_install "aiogram>=3.7.0"; then
-    ok "aiogram установлен"
-elif pip_cmd install --prefer-binary --no-cache-dir -q "aiogram" 2>/dev/null; then
-    ok "aiogram установлен (последняя доступная версия)"
-elif pip_cmd install --prefer-binary --no-cache-dir -q "aiogram==3.7.0" 2>/dev/null; then
-    ok "aiogram 3.7.0 установлен"
+if $PYDANTIC_OK; then
+    if pip_install "aiogram>=3.7.0"; then
+        ok "aiogram установлен"
+    elif pip_cmd install --prefer-binary --no-cache-dir -q "aiogram" 2>/dev/null; then
+        ok "aiogram установлен (последняя доступная версия)"
+    else
+        NOTIFIER_DISABLED_REASON="aiogram не установился"
+    fi
 else
-    warn "aiogram не установился — бот-нотификатор будет недоступен"
+    warn "aiogram требует pydantic>=2.7.0 — пропускаю установку aiogram"
+    warn "Понижение до pydantic 1.x запрещено: оно ломает aiogram 3.x"
+fi
+
+if [[ -n "$NOTIFIER_DISABLED_REASON" ]]; then
+    echo ""
+    warn "Бот-нотификатор ОТКЛЮЧЁН: $NOTIFIER_DISABLED_REASON"
+    info "Kitsune запустится и будет работать полностью, кроме inline-бота и уведомлений."
+    info "Чтобы включить нотификатор позже, выполни в Termux:"
+    info "    pkg install rust binutils build-essential"
+    info "    pip install 'pydantic>=2.7.0' 'aiogram>=3.7.0'"
 fi
 
 step "Hydrogram"
@@ -333,7 +396,12 @@ python3 -c "import aiohttp"       2>/dev/null && ok "aiohttp ✓"       || warn 
 python3 -c "import aiogram"       2>/dev/null && ok "aiogram ✓"       || warn "aiogram не найден — нотификатор недоступен"
 python3 -c "import cryptography"  2>/dev/null && ok "cryptography ✓"  || warn "cryptography не найдена (fallback активен)"
 python3 -c "import psutil"        2>/dev/null && ok "psutil ✓"        || warn "psutil не найден (мониторинг отключён)"
-python3 -c "import pydantic"      2>/dev/null && ok "pydantic ✓"      || warn "pydantic не найден"
+if pydantic2_present; then
+    ok "pydantic 2.x ✓"
+else
+    warn "pydantic 2.x не найден — нотификатор отключён (см. подсказку выше)"
+fi
+python3 -c "import orjson"        2>/dev/null && ok "orjson ✓"        || info "orjson не найден — используется стандартный json (это нормально для Termux)"
 python3 -c "import uvloop"        2>/dev/null && ok "uvloop ✓"        || warn "uvloop не найден (стандартный asyncio)"
 python3 -c "import cryptg"        2>/dev/null && ok "cryptg ✓"        || warn "cryptg не найден (фолбэк на tgcrypto)"
 

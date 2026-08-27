@@ -69,13 +69,44 @@ def _ask_api_credentials() -> tuple[int, str]:
     return int(api_id_raw.strip()), api_hash_raw.strip()
 
 
-def _print_qr(url: str) -> None:
-    from .qr import make_qr_text
+def _terminal_size() -> tuple[int, int]:
+    import shutil
     try:
-        qr_text = make_qr_text(url)
+        size = shutil.get_terminal_size(fallback=(80, 24))
+        return max(20, int(size.columns)), max(10, int(size.lines))
+    except Exception:
+        return 80, 24
+
+
+def _render_qr(url: str) -> str:
+    from .qr import make_qr_text, qr_text_size
+    cols, lines = _terminal_size()
+    variants = (
+        (True, 2),
+        (True, 1),
+        (True, 0),
+    )
+    for compact, quiet in variants:
+        try:
+            w, h = qr_text_size(url, quiet=quiet, compact=compact)
+        except Exception as exc:
+            logger.warning("qr_login: qr_text_size failed: %s", exc)
+            break
+        if w <= cols and h <= max(1, lines - 6):
+            try:
+                return make_qr_text(url, compact=compact, quiet=quiet)
+            except Exception as exc:
+                logger.warning("qr_login: make_qr_text failed: %s", exc)
+                break
+    try:
+        return make_qr_text(url, compact=True, quiet=1)
     except Exception as exc:
-        logger.warning("qr_login: make_qr_text failed: %s", exc)
-        qr_text = ""
+        logger.warning("qr_login: make_qr_text fallback failed: %s", exc)
+        return ""
+
+
+def _print_qr(url: str) -> None:
+    qr_text = _render_qr(url)
     print("\n" + qr_text)
     print(f"\n  {_W}🦊 Отсканируй QR-код в Telegram{_Z}")
     print(f"     Settings → Devices → Link Desktop Device\n")
