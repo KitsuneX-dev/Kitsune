@@ -134,7 +134,7 @@ class LogsModule(KitsuneModule):
         if chat_id is None:
             await self._respond(origin, self.strings("no_logs").format(level=named))
             return
-        await self.client.send_file(chat_id, buf, caption=caption, reply_to=reply_to)
+        await self.client.send_file(chat_id, buf, caption=caption, reply_to=reply_to, parse_mode="html")
         if not self._is_event(origin):
             with contextlib.suppress(Exception):
                 await origin.answer("✅")
