@@ -159,6 +159,38 @@ def install_patches() -> None:
                                 _e2,
                             )
                             return
+                    if "database is locked" in msg or "database is busy" in msg:
+                        import time as _time
+                        _delay = 0.05
+                        for _attempt in range(3):
+                            _time.sleep(_delay)
+                            _delay *= 2
+                            try:
+                                return _orig_pe(self, tlo)
+                            except _sqlite3.OperationalError as _e_lock:
+                                _lmsg = str(_e_lock).lower()
+                                if (
+                                    "database is locked" in _lmsg
+                                    or "database is busy" in _lmsg
+                                ):
+                                    continue
+                                _log.debug(
+                                    "kitsune: process_entities locked retry "
+                                    "failed — %s", _e_lock,
+                                )
+                                return
+                            except Exception as _e_lock2:
+                                _log.debug(
+                                    "kitsune: process_entities locked retry "
+                                    "failed — %s", _e_lock2,
+                                )
+                                return
+                        _log.info(
+                            "kitsune: session-db is locked during "
+                            "process_entities (%s) — пропускаю запись "
+                            "entities, чтобы не ломать disconnect", exc,
+                        )
+                        return
                     if "no such table" not in msg:
                         raise
                     _log.info(
