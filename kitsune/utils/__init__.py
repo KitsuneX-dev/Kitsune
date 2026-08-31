@@ -564,6 +564,7 @@ async def asset_channel(
 
 
 _KITSUNE_FOLDER_TITLE = "🦊 Kitsune"
+_KITSUNE_FOLDER_TITLE_LEGACY = ("Kitsune",)
 _KITSUNE_ASSET_TITLES = ("KitsuneBackup", "Kitsune-logs", "kitsune-assets", "Kitsune Assets")
 
 
@@ -575,6 +576,31 @@ def _dialog_filter_title(title: str) -> typing.Any:
         return title
 
 
+def _normalize_username(value: typing.Any) -> typing.Optional[str]:
+    if not isinstance(value, str):
+        return None
+    value = value.strip().lstrip("@").lower()
+    return value or None
+
+
+def _peer_key(peer: typing.Any) -> typing.Any:
+    for attr in ("channel_id", "user_id", "chat_id"):
+        value = getattr(peer, attr, None)
+        if value:
+            return (attr, value)
+    return None
+
+
+def _notifier_bot_username(db: typing.Any) -> typing.Optional[str]:
+    if db is None:
+        return None
+    try:
+        from ..modules.notifier import _DB_KEY as _NOTIFIER_DB_KEY
+        return _normalize_username(db.get(_NOTIFIER_DB_KEY, "bot_username", None))
+    except Exception:
+        return None
+
+
 async def ensure_kitsune_folder(client: typing.Any, db: typing.Any = None) -> None:
     try:
         from telethon.tl.functions.messages import (
@@ -583,9 +609,17 @@ async def ensure_kitsune_folder(client: typing.Any, db: typing.Any = None) -> No
         )
         from telethon.tl.types import DialogFilter
 
+        bot_username = _notifier_bot_username(db)
+
         peer_inputs = []
         async for dialog in client.iter_dialogs():
-            if dialog.title in _KITSUNE_ASSET_TITLES:
+            matched = dialog.title in _KITSUNE_ASSET_TITLES
+            if not matched and bot_username:
+                entity_username = _normalize_username(
+                    getattr(getattr(dialog, "entity", None), "username", None)
+                )
+                matched = entity_username is not None and entity_username == bot_username
+            if matched:
                 with contextlib.suppress(Exception):
                     peer_inputs.append(await client.get_input_entity(dialog.id))
         if not peer_inputs:
@@ -594,24 +628,68 @@ async def ensure_kitsune_folder(client: typing.Any, db: typing.Any = None) -> No
 
         existing_filters = await client(GetDialogFiltersRequest())
         existing: typing.Any = None
-        existing_id: int = 2
+        legacy_filters: typing.List[typing.Any] = []
+        next_free_id: int = 2
         for f in getattr(existing_filters, "filters", []):
             f_title = getattr(f, "title", None)
             f_title_text = getattr(f_title, "text", f_title)
+            f_id = getattr(f, "id", None)
+            if f_id is not None:
+                next_free_id = max(next_free_id, f_id + 1)
             if f_title_text == _KITSUNE_FOLDER_TITLE:
-                existing = f
-                existing_id = f.id
-                break
-            if hasattr(f, "id"):
-                existing_id = max(existing_id, f.id + 1)
+                if existing is None:
+                    existing = f
+            elif f_title_text in _KITSUNE_FOLDER_TITLE_LEGACY and f_id is not None:
+                legacy_filters.append(f)
+
+        if existing is None and legacy_filters:
+            existing = legacy_filters.pop(0)
+            logger.info(
+                "ensure_kitsune_folder: найдена папка со старым названием '%s' (id=%s) — переименовываю в '%s'",
+                getattr(getattr(existing, "title", None), "text", getattr(existing, "title", None)),
+                getattr(existing, "id", None),
+                _KITSUNE_FOLDER_TITLE,
+            )
+
+        existing_id = getattr(existing, "id", None) if existing is not None else None
+        if existing_id is None:
+            existing_id = next_free_id
+
+        our_keys = {_peer_key(p) for p in peer_inputs}
+        our_keys.discard(None)
+        for legacy in legacy_filters:
+            legacy_id = getattr(legacy, "id", None)
+            if legacy_id is None or legacy_id == existing_id:
+                continue
+            legacy_peers = list(getattr(legacy, "include_peers", []))
+            foreign = [p for p in legacy_peers if _peer_key(p) not in our_keys]
+            if foreign:
+                logger.warning(
+                    "ensure_kitsune_folder: найдена дублирующая папка '%s' (id=%s) с %d посторонними чатами — "
+                    "удалите её вручную, автоматически не трогаю",
+                    _KITSUNE_FOLDER_TITLE_LEGACY[0], legacy_id, len(foreign),
+                )
+                continue
+            try:
+                await client(UpdateDialogFilterRequest(id=legacy_id, filter=None))
+                logger.info(
+                    "ensure_kitsune_folder: удалена устаревшая дублирующая папка (id=%s)", legacy_id
+                )
+            except Exception as del_exc:
+                logger.warning(
+                    "ensure_kitsune_folder: не удалось удалить дублирующую папку (id=%s): %s",
+                    legacy_id, del_exc,
+                )
 
         include_peers = list(getattr(existing, "include_peers", [])) if existing is not None else []
         if existing is not None:
-            known = {getattr(p, "channel_id", None) for p in include_peers}
+            known = {_peer_key(p) for p in include_peers}
+            known.discard(None)
             for p in peer_inputs:
-                cid = getattr(p, "channel_id", None)
-                if cid and cid not in known:
+                key = _peer_key(p)
+                if key is not None and key not in known:
                     include_peers.append(p)
+                    known.add(key)
         else:
             include_peers = peer_inputs
 

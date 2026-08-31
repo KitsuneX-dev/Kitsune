@@ -26,18 +26,30 @@ async def _ensure_kitsune_folder(client, *peer_ids: int) -> None:
         InputPeerChannel,
         InputPeerChat,
     )
-    FOLDER_NAME = "Kitsune"
+    from ...utils import (
+        _KITSUNE_FOLDER_TITLE,
+        _KITSUNE_FOLDER_TITLE_LEGACY,
+        _dialog_filter_title,
+    )
+    FOLDER_NAME = _KITSUNE_FOLDER_TITLE
     filters = await client(GetDialogFiltersRequest())
     existing: DialogFilter | None = None
+    legacy: DialogFilter | None = None
     max_id = 2
     for f in filters.filters:
         fid = getattr(f, "id", 0)
         if fid > max_id:
             max_id = fid
         title = getattr(f, "title", None)
-        if title == FOLDER_NAME:
+        title_text = getattr(title, "text", title)
+        if title_text == FOLDER_NAME:
             existing = f
             break
+        if title_text in _KITSUNE_FOLDER_TITLE_LEGACY and legacy is None:
+            legacy = f
+    if existing is None and legacy is not None:
+        existing = legacy
+        existing.title = _dialog_filter_title(FOLDER_NAME)
     new_peers = []
     for pid in peer_ids:
         try:
@@ -65,7 +77,7 @@ async def _ensure_kitsune_folder(client, *peer_ids: int) -> None:
     else:
         new_filter = DialogFilter(
             id=max_id + 1,
-            title=FOLDER_NAME,
+            title=_dialog_filter_title(FOLDER_NAME),
             pinned_peers=[],
             include_peers=new_peers,
             exclude_peers=[],
