@@ -176,6 +176,12 @@ class AccountsManager:
         env["KITSUNE_DATA_DIR"] = str(adir)
         env["KITSUNE_CONFIG"] = str(adir / "config.toml")
         env.pop("KITSUNE_KEY", None)
+        project_root = str(Path(__file__).resolve().parent.parent)
+        existing_pp = env.get("PYTHONPATH", "")
+        parts = [p for p in existing_pp.split(os.pathsep) if p]
+        if project_root not in parts:
+            parts.insert(0, project_root)
+        env["PYTHONPATH"] = os.pathsep.join(parts)
         return env
 
     def session_exists(self, slug: str) -> bool:
